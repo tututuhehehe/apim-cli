@@ -1,0 +1,7 @@
+# Copy to ~/.config/apim/config.toml
+# Tokens go in ~/.config/apim/secrets.toml, never here.
+
+[[keys]]
+provider = "deepseek"
+alias = "default"
+# group = ""   # optional; empty / omitted renders as —
