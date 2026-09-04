@@ -11,7 +11,7 @@ use serde::{Deserialize, Serialize};
 use crate::recipe::Recipe;
 
 pub use store::save_keys;
-pub(crate) use store::save_keys_to;
+pub(crate) use store::{save_keys_to, tmp_path};
 
 mod store;
 

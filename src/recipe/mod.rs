@@ -194,11 +194,32 @@ pub fn request_ctx(recipe: &Recipe, token: &str) -> HashMap<String, String> {
     ctx
 }
 
+/// 单趟扫描替换 `{name}`：名字在 ctx 里就输出对应值（值本身不再二次扫描），
+/// 不认识的占位符原样保留。结果与 HashMap 迭代顺序无关——某个 var 的值
+/// 恰好含 `{别的占位符}` 时也不会被嵌套展开。
 pub fn subst(input: &str, ctx: &HashMap<String, String>) -> String {
-    let mut out = input.to_string();
-    for (k, v) in ctx {
-        out = out.replace(&format!("{{{k}}}"), v);
+    let mut out = String::with_capacity(input.len());
+    let mut rest = input;
+    while let Some(open) = rest.find('{') {
+        out.push_str(&rest[..open]);
+        let tail = &rest[open..]; // 以 '{' 开头
+        match tail.find('}') {
+            Some(close) => {
+                let name = &tail[1..close];
+                match ctx.get(name) {
+                    Some(value) => out.push_str(value),
+                    None => out.push_str(&tail[..=close]), // 保留字面量 {name}
+                }
+                rest = &tail[close + 1..];
+            }
+            // 后面再无 '}'，剩余部分全是字面量
+            None => {
+                out.push_str(tail);
+                return out;
+            }
+        }
     }
+    out.push_str(rest);
     out
 }
 
@@ -214,5 +235,54 @@ pub fn subst_json(value: &Value, ctx: &HashMap<String, String>) -> Value {
             Value::Object(next)
         }
         other => other.clone(),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn nested_ctx() -> HashMap<String, String> {
+        HashMap::from([
+            ("a".to_string(), "{b}".to_string()),
+            ("b".to_string(), "x".to_string()),
+        ])
+    }
+
+    #[test]
+    fn subst_single_pass_regardless_of_iteration_order() {
+        // {a} 的值 "{b}" 不被二次展开，结果与 HashMap 迭代顺序无关
+        let ctx = nested_ctx();
+        assert_eq!(subst("{a}", &ctx), "{b}");
+        assert_eq!(subst("{a}-{b}", &ctx), "{b}-x");
+        assert_eq!(subst_json(&Value::from("{a}"), &ctx), Value::from("{b}"));
+    }
+
+    #[test]
+    fn subst_keeps_unknown_placeholders() {
+        let ctx = nested_ctx();
+        assert_eq!(subst("{nope}", &ctx), "{nope}");
+        assert_eq!(subst("pre {nope} post", &ctx), "pre {nope} post");
+        // 没有闭合的 '{' 也原样保留
+        assert_eq!(subst("dangling {", &ctx), "dangling {");
+        assert_eq!(subst("no brace", &ctx), "no brace");
+    }
+
+    #[test]
+    fn subst_plain_placeholders_unchanged() {
+        let ctx = HashMap::from([
+            ("token".to_string(), "sk-test".to_string()),
+            (
+                "base_url".to_string(),
+                "https://api.example.com".to_string(),
+            ),
+            ("access_token".to_string(), "at-1".to_string()),
+        ]);
+        assert_eq!(
+            subst("{base_url}/models", &ctx),
+            "https://api.example.com/models"
+        );
+        assert_eq!(subst("Bearer {token}", &ctx), "Bearer sk-test");
+        assert_eq!(subst("{access_token}|{token}", &ctx), "at-1|sk-test");
     }
 }
