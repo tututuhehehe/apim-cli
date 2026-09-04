@@ -1,0 +1,36 @@
+# 内置厂商：同 id 用户 YAML 可覆盖。
+#
+# 字段来源：openrouter.ai 文档「Credits」GET /api/v1/credits（2026-09 核对），
+# 响应形如 {"data":{"total_credits":12.5,"total_usage":3.2}}。
+
+id: openrouter
+name: OpenRouter
+base_url: https://openrouter.ai/api/v1
+# 控制面板：TUI 选中厂商按 Enter 打开
+homepage: https://openrouter.ai/credits
+
+auth:
+  kind: bearer
+
+health:
+  method: GET
+  url: "{base_url}/models"
+
+balance:
+  request:
+    method: GET
+    url: "{base_url}/credits"
+    headers:
+      Accept: application/json
+  parse:
+    fields:
+      total_balance: data.total_credits
+      used: data.total_usage
+    currency: USD
+  render:
+    headline: "{total_balance}"
+    fields:
+      - label: 剩余
+        value: "{total_balance}"
+      - label: 已用
+        value: "{used}"

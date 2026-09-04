@@ -45,7 +45,7 @@ apim
 
 **编辑（`e`）**：密钥表单带出当前值，改别名就是重命名。厂商表单编辑时 ID 锁定；探活路径/脚本路径没改就保存，不会动原 YAML 里手写的配置（DeepSeek 的声明式额度、new-api 的访问令牌 `vars`、内联脚本都原样保留）。清空脚本路径保存即取消脚本额度。
 
-**删除（`d`）**：都弹确认框。厂商下面还有密钥时会拒绝，先删密钥。内置的 DeepSeek 厂商不可删除，但可以 `e` 编辑覆盖（会在用户目录生成同名 YAML）。
+**删除（`d`）**：都弹确认框。厂商下面还有密钥时会拒绝，先删密钥。内置厂商（DeepSeek / OpenAI / Moonshot AI / OpenRouter）不可删除，但可以 `e` 编辑覆盖（会在用户目录生成同名 YAML）。
 
 **查**：状态列是探活结果（`● 可用` / `● 失败` / `● 无额度`），右下角额度面板显示选中密钥的余额。刷新节奏：**打开时所有厂商各刷一次，之后每 5 分钟自动全量刷新**（探活 + 额度一起）；切换厂商只读缓存、不触发请求；`r` 随时手动刷新当前厂商，刚保存的密钥会立即探测。
 
@@ -138,7 +138,9 @@ chmod 600 ~/.config/apim/config.toml ~/.config/apim/secrets.toml
 
 ## 加一个新厂商
 
-首选在 TUI 左侧按 `a`，表单保存即生成 `~/.config/apim/recipes/<id>.yaml`。
+内置厂商开箱即用：**DeepSeek、OpenAI、Moonshot AI、OpenRouter** 已编译进二进制，不用写 recipe，在 TUI 左侧选中后按 `a` 直接加密钥即可（OpenAI 的余额接口仅部分账户有权限，无权限时额度面板报 HTTP 错误属预期）。同 id 放一份 YAML 到 `~/.config/apim/recipes/` 即可覆盖内置定义。
+
+自定义厂商首选在 TUI 左侧按 `a`，表单保存即生成 `~/.config/apim/recipes/<id>.yaml`。
 
 复杂厂商（自定义鉴权头、多级 JSON 解析）可以直接写 YAML 放进同一目录，可参考 `recipes/deepseek.yaml`：
 

@@ -1,0 +1,35 @@
+# 内置厂商：同 id 用户 YAML 可覆盖。
+#
+# 余额接口说明：GET /v1/dashboard/billing/subscription 是 OpenAI 的历史接口，
+# 仅部分账户仍可访问；多数现役项目密钥无权限（401/404），额度面板显示
+# HTTP 错误属预期，不影响探活（/models）与正常调用。
+# parse 只取响应里确定的 hard_limit_usd，其余字段不猜。
+
+id: openai
+name: OpenAI
+base_url: https://api.openai.com
+# 控制面板：TUI 选中厂商按 Enter 打开
+homepage: https://platform.openai.com
+
+auth:
+  kind: bearer
+
+health:
+  method: GET
+  url: "{base_url}/models"
+
+balance:
+  request:
+    method: GET
+    url: "{base_url}/v1/dashboard/billing/subscription"
+    headers:
+      Accept: application/json
+  parse:
+    fields:
+      total_balance: hard_limit_usd
+    currency: USD
+  render:
+    headline: "{total_balance}"
+    fields:
+      - label: 额度
+        value: "{total_balance}"

@@ -1,0 +1,35 @@
+# 内置厂商：同 id 用户 YAML 可覆盖。
+#
+# 字段来源：platform.moonshot.cn 开放平台文档「查询账户余额」
+# GET /v1/users/me/balance（2026-09 核对），响应形如
+# {"code":0,"data":{"available_balance":"110.00","cash_balance":"110.00","voucher_balance":"0"}}。
+# 响应无可用性布尔字段，故 parse 不配 available。
+
+id: moonshot
+name: Moonshot AI
+base_url: https://api.moonshot.cn
+# 控制面板：TUI 选中厂商按 Enter 打开
+homepage: https://platform.moonshot.cn
+
+auth:
+  kind: bearer
+
+health:
+  method: GET
+  url: "{base_url}/models"
+
+balance:
+  request:
+    method: GET
+    url: "{base_url}/v1/users/me/balance"
+    headers:
+      Accept: application/json
+  parse:
+    fields:
+      total_balance: data.available_balance
+    currency: CNY
+  render:
+    headline: "{total_balance}"
+    fields:
+      - label: 额度
+        value: "{total_balance}"

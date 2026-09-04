@@ -18,6 +18,9 @@ use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
 const BUILTIN_DEEPSEEK: &str = include_str!("../../recipes/deepseek.yaml");
+const BUILTIN_OPENAI: &str = include_str!("../../recipes/openai.yaml");
+const BUILTIN_MOONSHOT: &str = include_str!("../../recipes/moonshot.yaml");
+const BUILTIN_OPENROUTER: &str = include_str!("../../recipes/openrouter.yaml");
 
 #[derive(Debug, Clone, Deserialize, Serialize)]
 pub struct Recipe {
@@ -141,6 +144,9 @@ pub fn load_recipes() -> Result<HashMap<String, Recipe>> {
 pub fn load_recipes_with(user_dir: &Path) -> Result<HashMap<String, Recipe>> {
     let mut map = HashMap::new();
     insert_yaml(&mut map, BUILTIN_DEEPSEEK, "builtin:deepseek", None)?;
+    insert_yaml(&mut map, BUILTIN_OPENAI, "builtin:openai", None)?;
+    insert_yaml(&mut map, BUILTIN_MOONSHOT, "builtin:moonshot", None)?;
+    insert_yaml(&mut map, BUILTIN_OPENROUTER, "builtin:openrouter", None)?;
 
     // 开发目录等价于内置补充：origin 清回 None，保证「内置不可删除」的保护
     // 不被 manifest 覆盖带的路径击穿（只有用户目录的 recipe 才可删）。
@@ -287,5 +293,77 @@ mod tests {
         );
         assert_eq!(subst("Bearer {token}", &ctx), "Bearer sk-test");
         assert_eq!(subst("{access_token}|{token}", &ctx), "at-1|sk-test");
+    }
+
+    #[test]
+    fn builtin_recipes_load_with_expected_metadata() {
+        // 不存在的用户目录：只验 builtin（+ 开发目录）注册结果
+        let user_dir = Path::new("target/apim-builtin-tests-no-user-dir");
+        let map = load_recipes_with(user_dir).unwrap();
+        let expected = [
+            ("deepseek", "DeepSeek", "https://api.deepseek.com"),
+            ("openai", "OpenAI", "https://api.openai.com"),
+            ("moonshot", "Moonshot AI", "https://api.moonshot.cn"),
+            ("openrouter", "OpenRouter", "https://openrouter.ai/api/v1"),
+        ];
+        for (id, name, base_url) in expected {
+            let recipe = map
+                .get(id)
+                .unwrap_or_else(|| panic!("builtin {id} missing"));
+            assert_eq!(recipe.name, name, "{id} name");
+            assert_eq!(recipe.base_url, base_url, "{id} base_url");
+            assert!(
+                recipe.origin.is_none(),
+                "{id} 应为内置（origin None，不可删）"
+            );
+        }
+    }
+
+    /// 从内置 YAML 文本构造 recipe，用假 JSON 跑 balance 的 http parse。
+    fn builtin_balance_view(yaml: &str, json: &str) -> BalanceView {
+        let recipe: Recipe = serde_yaml::from_str(yaml).expect("builtin yaml parses");
+        let spec = recipe
+            .balance
+            .as_ref()
+            .and_then(|b| b.http())
+            .expect("http-form balance");
+        let root: Value = serde_json::from_str(json).unwrap();
+        parse_balance(spec, &root).unwrap()
+    }
+
+    #[test]
+    fn openai_balance_parses_subscription_shape() {
+        let view = builtin_balance_view(
+            include_str!("../../recipes/openai.yaml"),
+            r#"{"hard_limit_usd": 96}"#,
+        );
+        assert_eq!(view.headline, "96");
+        assert_eq!(view.items[0].currency.as_deref(), Some("USD"));
+        assert_eq!(view.items[0].fields[0], ("额度".into(), "96".into()));
+    }
+
+    #[test]
+    fn moonshot_balance_parses_user_balance_shape() {
+        let view = builtin_balance_view(
+            include_str!("../../recipes/moonshot.yaml"),
+            r#"{"code":0,"data":{"available_balance":"42.50","cash_balance":"42.50","voucher_balance":"0"}}"#,
+        );
+        // 响应没有可用性布尔字段，available 不配置
+        assert_eq!(view.available, None);
+        assert_eq!(view.headline, "42.50");
+        assert_eq!(view.items[0].currency.as_deref(), Some("CNY"));
+        assert_eq!(view.items[0].fields[0], ("额度".into(), "42.50".into()));
+    }
+
+    #[test]
+    fn openrouter_balance_parses_credits_shape() {
+        let view = builtin_balance_view(
+            include_str!("../../recipes/openrouter.yaml"),
+            r#"{"data":{"total_credits":12.5,"total_usage":3.2}}"#,
+        );
+        assert_eq!(view.headline, "12.5");
+        assert_eq!(view.items[0].currency.as_deref(), Some("USD"));
+        assert_eq!(view.items[0].fields[0], ("剩余".into(), "12.5".into()));
+        assert_eq!(view.items[0].fields[1], ("已用".into(), "3.2".into()));
     }
 }
