@@ -94,6 +94,9 @@ pub(crate) fn draw_keys(frame: &mut Frame, app: &App, area: Rect) {
     if n == 0 {
         let hint = if app.key_filter.is_some() {
             " 没有匹配的密钥，Esc 清除过滤 "
+        } else if app.provider_filter.is_some() {
+            // 厂商全被滤掉时没有选中厂商，别误导用户去按 a
+            " 没有匹配的厂商，Esc 清除过滤 "
         } else {
             " 该厂商还没有密钥，按 a 添加 "
         };
