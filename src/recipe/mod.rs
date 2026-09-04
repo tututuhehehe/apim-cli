@@ -24,6 +24,9 @@ pub struct Recipe {
     pub id: String,
     pub name: String,
     pub base_url: String,
+    /// 控制面板主页，TUI 选中厂商按 Enter 用默认浏览器打开。
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub homepage: Option<String>,
     #[serde(default)]
     pub supports_groups: bool,
     /// 自定义模板变量，可进 {placeholder} 替换。存敏感值时整个文件 600。

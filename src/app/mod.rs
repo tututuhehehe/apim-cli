@@ -233,6 +233,26 @@ impl App {
         }
     }
 
+    /// 选中厂商按 Enter：用默认浏览器打开它的控制面板主页。
+    pub fn open_homepage(&mut self) {
+        let Some(recipe) = self.current_recipe() else {
+            return;
+        };
+        let name = recipe.name.clone();
+        match recipe.homepage.as_deref().filter(|u| !u.is_empty()) {
+            Some(url) => match crate::browser::open(url) {
+                Ok(()) => self.toast = Some((format!("已打开 {name} 主页"), Instant::now())),
+                Err(err) => self.toast = Some((format!("打开失败: {err}"), Instant::now())),
+            },
+            None => {
+                self.toast = Some((
+                    format!("{name} 未配置主页 URL（e 编辑添加）"),
+                    Instant::now(),
+                ))
+            }
+        }
+    }
+
     // ---- probing ---------------------------------------------------------
 
     pub fn refresh_current_provider(&mut self) {

@@ -4,6 +4,8 @@
 id: deepseek
 name: DeepSeek
 base_url: https://api.deepseek.com
+# 控制面板：TUI 选中厂商按 Enter 打开
+homepage: https://platform.deepseek.com
 supports_groups: false
 
 auth:

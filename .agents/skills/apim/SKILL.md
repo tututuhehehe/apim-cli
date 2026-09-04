@@ -12,8 +12,8 @@ apim 是本仓库的终端 API Key 管理器（TUI + CLI）。心智模型：**T
 ```
 # 厂商 CRUD
 apim provider ls [--json]
-apim provider add <id> --name <名> --base-url <URL> [--health <路径>|none] [--script <脚本路径>|none]
-apim provider set <id> [--name <名>] [--base-url <URL>] [--health <路径>|none] [--script <脚本路径>|none]
+apim provider add <id> --name <名> --base-url <URL> [--homepage <主页URL>|none] [--health <路径>|none] [--script <脚本路径>|none]
+apim provider set <id> [--name <名>] [--base-url <URL>] [--homepage <主页URL>|none] [--health <路径>|none] [--script <脚本路径>|none]
 apim provider rm <id> [--force]          # 有密钥时拒绝；--force 连带删密钥；内置(deepseek)不可删
 
 # 密钥 CRUD（token 一律走 stdin，绝不进 argv / shell history）
@@ -30,7 +30,7 @@ apim use <厂商.别名>                     # 输出 export OPENAI_API_KEY=... 
 
 要点：
 
-- `--script none` = 解绑额度脚本；空串（`--script ""`）同义。`--health none` = 不探活。
+- `--script none` = 解绑额度脚本；空串（`--script ""`）同义。`--health none` = 不探活。`--homepage` 是厂商控制面板主页，TUI 选中厂商按 `Enter` 用默认浏览器打开。
 - `provider set` 只改传了的字段，是显式整体替换 `--script`，没有 TUI 的「未改保留」语义。
 - 坏配置（recipe 误删 / secrets 缺条目）不会锁死 CLI：命令会跳过坏条目并打警告，下一次成功写盘自动清除；TUI 则保持严格报错。
 - 测试/沙盒：设 `APIM_CONFIG_DIR=<临时目录>` 重定向整个配置目录，绝不碰真实 `~/.config/apim`。

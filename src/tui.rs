@@ -84,6 +84,7 @@ fn handle_key(app: &mut App, key: KeyEvent) {
         Modal::None => match key.code {
             KeyCode::Char('c') if key.modifiers.contains(KeyModifiers::CONTROL) => {}
             KeyCode::Char('q') | KeyCode::Esc => {}
+            KeyCode::Enter if app.focus == Focus::Providers => app.open_homepage(),
             KeyCode::Char('c') => app.copy_selected(),
             KeyCode::Char('r') => app.refresh_current_provider(),
             KeyCode::Char('a') => app.open_add(),
@@ -130,9 +131,10 @@ pub(crate) async fn run_snapshot_provider_form() -> Result<()> {
         form.fields[0] = Field::text("ID", "my-relay");
         form.fields[1] = Field::text("名称", "我的中转站");
         form.fields[2] = Field::text("Base URL", "https://relay.example.com");
-        form.fields[3] = Field::text("探活路径", "/v1/models");
-        form.fields[4] = Field::text("脚本路径", "~/.config/apim/scripts/my-relay.sh");
-        form.active = 4;
+        form.fields[3] = Field::text("主页 URL", "https://console.example.com");
+        form.fields[4] = Field::text("探活路径", "/v1/models");
+        form.fields[5] = Field::text("脚本路径", "~/.config/apim/scripts/my-relay.sh");
+        form.active = 5;
     }
     render_snapshot(&app).await
 }

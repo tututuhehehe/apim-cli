@@ -9,7 +9,7 @@ use crate::recipe::{self, Auth, AuthKind, BalanceMode, HttpCall, Recipe, ScriptS
 
 impl App {
     pub(crate) fn save_provider_form(&mut self, form: &Form, original: Option<&str>) {
-        use crate::form::{PF_BASE, PF_HEALTH, PF_ID, PF_NAME, PF_SCRIPT};
+        use crate::form::{PF_BASE, PF_HEALTH, PF_HOMEPAGE, PF_ID, PF_NAME, PF_SCRIPT};
 
         let id = match original {
             Some(id) => id.to_string(),
@@ -17,6 +17,7 @@ impl App {
         };
         let name = form.text(PF_NAME).trim().to_string();
         let mut base_url = form.text(PF_BASE).trim().to_string();
+        let homepage = form.text(PF_HOMEPAGE).trim().to_string();
         let health_path = normalize_path(form.text(PF_HEALTH).trim());
         let script_cmd = form.text(PF_SCRIPT).trim().to_string();
 
@@ -45,6 +46,13 @@ impl App {
             self.set_form_error("Base URL 要以 http(s):// 开头");
             return;
         }
+        let homepage_ok = homepage.is_empty()
+            || homepage.starts_with("http://")
+            || homepage.starts_with("https://");
+        if !homepage_ok {
+            self.set_form_error("主页 URL 要以 http(s):// 开头");
+            return;
+        }
         base_url = base_url.trim_end_matches('/').to_string();
         if !script_cmd.is_empty()
             && !std::path::Path::new(&crate::probe::expand_tilde(&script_cmd)).is_file()
@@ -63,6 +71,7 @@ impl App {
         };
         recipe.name = name;
         recipe.base_url = base_url;
+        recipe.homepage = (!homepage.is_empty()).then_some(homepage);
         recipe.normalize();
 
         // 探活：路径没变就保留原有 headers/body
@@ -140,6 +149,7 @@ fn default_recipe(id: &str, name: &str, base_url: &str) -> Recipe {
         id: id.into(),
         name: name.into(),
         base_url: base_url.into(),
+        homepage: None,
         supports_groups: false,
         vars: HashMap::new(),
         auth: Auth {

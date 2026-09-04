@@ -41,12 +41,11 @@ pub(crate) fn draw_header(frame: &mut Frame, app: &App, area: Rect) {
 
 pub(crate) fn draw_footer(frame: &mut Frame, app: &App, area: Rect) {
     let toast = app.toast_text();
-    let copy_hint = if app.focus == Focus::Providers {
-        "c 复制BaseURL"
+    let keys = if app.focus == Focus::Providers {
+        " j/k 移动  Tab 切换  ⏎ 打开主页  c 复制BaseURL  a 添加  e 编辑  d 删除  r 刷新  q 退出 "
     } else {
-        "c 复制密钥"
+        " j/k 移动  Tab 切换  c 复制密钥  a 添加  e 编辑  d 删除  r 刷新  q 退出 "
     };
-    let keys = format!(" j/k 移动  Tab 切换  {copy_hint}  a 添加  e 编辑  d 删除  r 刷新  q 退出 ");
     let line = if let Some(toast) = toast {
         Line::from(vec![
             Span::styled(

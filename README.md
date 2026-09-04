@@ -23,9 +23,10 @@ apim
 | 键 | 厂商栏（左） | 密钥表（右） |
 |---|---|---|
 | `a` | 添加厂商 | 添加密钥 |
-| `e` | 编辑厂商（名称 / Base URL / 探活 / 额度） | 编辑密钥（别名 / 分组 / token） |
+| `e` | 编辑厂商（名称 / Base URL / 主页 / 探活 / 额度） | 编辑密钥（别名 / 分组 / token） |
 | `d` | 删除厂商（须先删光它下面的密钥） | 删除密钥 |
 | `c` | 复制 Base URL | 复制密钥 |
+| `Enter` | 用默认浏览器打开厂商主页（控制面板） | — |
 | `j` / `k` / `Tab` | 移动 / 切换左右栏 | 同左 |
 | `r` | 刷新状态和额度 | 同左 |
 | `q` / `Esc` | 退出 | 退出 |
@@ -34,8 +35,9 @@ apim
 
 **添加密钥（右侧按 `a`）**：填别名、分组（可空）、密钥，厂商用 `←`/`→` 切换。密钥可以直接 `⌘V` 粘贴。`Enter` 保存，立即写盘并自动检测。
 
-**添加厂商（左侧按 `a`）**：填 ID（小写字母/数字/-，密钥配置里 `provider` 引用它）、显示名称、Base URL，以及两个可选项：
+**添加厂商（左侧按 `a`）**：填 ID（小写字母/数字/-，密钥配置里 `provider` 引用它）、显示名称、Base URL，以及三个可选项：
 
+- 主页 URL：该厂商的控制面板地址，选中厂商按 `Enter` 用默认浏览器打开；留空 = 未配置（按 Enter 会提示）
 - 探活路径：默认 `/models`，拼在 Base URL 后面；留空 = 不探活
 - 脚本路径：额度查询脚本（见下「自定义脚本额度」）；留空 = 不查额度
 
@@ -65,8 +67,8 @@ TUI 管人，CLI 管机器：`cargo install --path .` 之后所有操作都能�
 | 命令 | 作用 |
 |---|---|
 | `apim provider ls [--json]` | 列厂商（含额度绑定方式、密钥数） |
-| `apim provider add <id> --name <名> --base-url <URL> [--health <路径>\|none] [--script <脚本路径>\|none]` | 建厂商 |
-| `apim provider set <id> [--name <名>] [--base-url <URL>] [--health <路径>\|none] [--script <脚本路径>\|none]` | 改厂商（只动传了的字段） |
+| `apim provider add <id> --name <名> --base-url <URL> [--homepage <主页URL>\|none] [--health <路径>\|none] [--script <脚本路径>\|none]` | 建厂商 |
+| `apim provider set <id> [--name <名>] [--base-url <URL>] [--homepage <主页URL>\|none] [--health <路径>\|none] [--script <脚本路径>\|none]` | 改厂商（只动传了的字段） |
 | `apim provider rm <id> [--force]` | 删厂商（有密钥时拒绝，`--force` 连带删密钥；内置不可删） |
 | `apim key ls [<provider>] [--json]` | 列密钥（token 掩码显示） |
 | `apim key add <provider> <别名> [--group <分组>]` | 加密钥；已存在则更新 token |

@@ -34,6 +34,7 @@ fn ls(ctx: &Ctx, args: &Args) -> Result<()> {
                     "id": r.id,
                     "name": r.name,
                     "base_url": r.base_url,
+                    "homepage": r.homepage,
                     "health": r.health.as_ref().map(|h| h.url.clone()),
                     "balance": balance_json(&r.balance),
                     "origin": r.origin.as_ref().map(|p| p.display().to_string()),
@@ -56,7 +57,11 @@ fn ls(ctx: &Ctx, args: &Args) -> Result<()> {
         };
         let origin = if r.origin.is_none() { " [内置]" } else { "" };
         println!("{id:<14} {:<18} {}{origin}", r.name, r.base_url);
-        println!("{:<14} 额度 {balance} · 密钥 {n_keys}", "");
+        let homepage = r.homepage.as_deref().unwrap_or("—");
+        println!(
+            "{:<14} 额度 {balance} · 密钥 {n_keys} · 主页 {homepage}",
+            ""
+        );
     }
     Ok(())
 }
@@ -77,7 +82,7 @@ fn balance_json(balance: &Option<BalanceMode>) -> serde_json::Value {
 fn add(ctx: &Ctx, args: &Args) -> Result<()> {
     let Some(id) = args.pos(1).map(str::to_string) else {
         bail!(
-            "用法：apim provider add <id> --name <名> --base-url <URL> [--health 路径] [--script 脚本路径]"
+            "用法：apim provider add <id> --name <名> --base-url <URL> [--homepage <URL>|none] [--health 路径] [--script 脚本路径]"
         );
     };
     let Some(name) = args.flag("name").map(str::to_string) else {
@@ -109,6 +114,7 @@ fn add(ctx: &Ctx, args: &Args) -> Result<()> {
         id: id.clone(),
         name,
         base_url,
+        homepage: homepage_opt(args)?,
         supports_groups: false,
         vars: HashMap::new(),
         auth: Default::default(),
@@ -125,7 +131,7 @@ fn add(ctx: &Ctx, args: &Args) -> Result<()> {
 fn set(ctx: &Ctx, args: &Args) -> Result<()> {
     let Some(id) = args.pos(1) else {
         bail!(
-            "用法：apim provider set <id> [--name 名] [--base-url URL] [--health 路径|none] [--script 路径|none]"
+            "用法：apim provider set <id> [--name 名] [--base-url URL] [--homepage URL|none] [--health 路径|none] [--script 路径|none]"
         );
     };
     let mut recipes = ctx.load_recipes()?;
@@ -144,6 +150,9 @@ fn set(ctx: &Ctx, args: &Args) -> Result<()> {
             bail!("Base URL 要以 http(s):// 开头");
         }
         recipe.base_url = base_url.to_string();
+    }
+    if args.flag("homepage").is_some() {
+        recipe.homepage = homepage_opt(args)?;
     }
     if args.flag("health").is_some() {
         recipe.health = health_call(args)?;
@@ -188,6 +197,20 @@ fn rm(ctx: &Ctx, args: &Args) -> Result<()> {
     }
     println!("已删除厂商 {id}");
     Ok(())
+}
+
+/// --homepage 的值 → Option；none / 空串 / 缺省 = 未配置。
+fn homepage_opt(args: &Args) -> Result<Option<String>> {
+    let Some(url) = args.flag("homepage") else {
+        return Ok(None);
+    };
+    if url.is_empty() || url == "none" {
+        return Ok(None);
+    }
+    if !(url.starts_with("http://") || url.starts_with("https://")) {
+        bail!("主页 URL 要以 http(s):// 开头");
+    }
+    Ok(Some(url.to_string()))
 }
 
 /// --health 的值 → HttpCall；none / 空串 / 缺省 = 不探活。

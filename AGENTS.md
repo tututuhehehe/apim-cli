@@ -15,8 +15,9 @@
 ```
 src/
 ├── main.rs            入口 + 参数分发（无参数=TUI；--snapshot* 渲染快照；其余走 CLI）
-├── tui.rs             事件循环、按键路由、快照渲染
+├── tui.rs             事件循环、按键路由（厂商栏 Enter 开主页）、快照渲染
 ├── clipboard.rs       复制到剪贴板（arboard → pbcopy 兜底）
+├── browser.rs         用默认浏览器打开厂商主页（open/xdg-open，只放行 http(s)）
 ├── cli/               CLI 子命令（AI/脚本的机器接口，与 TUI 共用底层）
 │   ├── mod.rs         Args 解析（--flag 值/布尔）、Ctx（config+recipes 目录，可注入测试）、分发与帮助
 │   ├── provider.rs    provider ls/add/set/rm（--script 绑定/解绑额度脚本）

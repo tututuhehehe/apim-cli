@@ -225,10 +225,12 @@ pub fn key_edit(
 pub const PF_ID: usize = 0;
 pub const PF_NAME: usize = 1;
 pub const PF_BASE: usize = 2;
-pub const PF_HEALTH: usize = 3;
-pub const PF_SCRIPT: usize = 4;
+pub const PF_HOMEPAGE: usize = 3;
+pub const PF_HEALTH: usize = 4;
+pub const PF_SCRIPT: usize = 5;
 
-/// 厂商表单：ID / 名称 / Base URL / 探活路径 / 脚本路径。
+/// 厂商表单：ID / 名称 / Base URL / 主页 URL / 探活路径 / 脚本路径。
+/// 主页 URL 一般填该厂商的控制面板，TUI 选中厂商按 Enter 用默认浏览器打开。
 /// 额度查询只走脚本；声明式 http recipe 属于手写 YAML 的地盘（内置 DeepSeek、
 /// new-api 系），表单不再提供预设类型。
 pub fn provider_add() -> Form {
@@ -238,6 +240,7 @@ pub fn provider_add() -> Form {
             Field::text("ID", ""),
             Field::text("名称", ""),
             Field::text("Base URL", ""),
+            Field::text("主页 URL", ""),
             Field::text("探活路径", "/models"),
             Field::text("脚本路径", ""),
         ],
@@ -258,6 +261,7 @@ pub fn provider_edit(recipe: &crate::recipe::Recipe, health_path: &str) -> Form 
             Field::readonly("ID", recipe.id.clone()),
             Field::text("名称", recipe.name.clone()),
             Field::text("Base URL", recipe.base_url.clone()),
+            Field::text("主页 URL", recipe.homepage.clone().unwrap_or_default()),
             Field::text("探活路径", health_path),
             Field::text("脚本路径", script_cmd),
         ],

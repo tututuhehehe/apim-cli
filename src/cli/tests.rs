@@ -36,7 +36,7 @@ async fn provider_key_crud_roundtrip() -> Result<()> {
     let ctx = temp_ctx("crud");
     let script = fake_script(&ctx, "relay.sh", "#!/bin/sh\necho '剩余 9/10'\n");
 
-    // 厂商 add：绑脚本
+    // 厂商 add：绑脚本 + 主页
     provider::run(
         &ctx,
         &argv(&[
@@ -46,6 +46,8 @@ async fn provider_key_crud_roundtrip() -> Result<()> {
             "中转",
             "--base-url",
             "https://r.example.com/",
+            "--homepage",
+            "https://console.example.com",
             "--health",
             "/v1/models",
             "--script",
@@ -56,6 +58,7 @@ async fn provider_key_crud_roundtrip() -> Result<()> {
     let recipes = ctx.load_recipes()?;
     let r = recipes.get("relay").expect("recipe saved");
     assert_eq!(r.base_url, "https://r.example.com"); // 去尾斜杠
+    assert_eq!(r.homepage.as_deref(), Some("https://console.example.com"));
     assert_eq!(r.health.as_ref().unwrap().url, "{base_url}/v1/models");
     assert!(r.balance.as_ref().unwrap().script().is_some());
 
@@ -85,9 +88,15 @@ async fn provider_key_crud_roundtrip() -> Result<()> {
     keys::add(&ctx, &Args::parse(&args)?, "sk-third").unwrap();
     query::status(&ctx, &argv(&["relay"])).await?;
 
-    // provider set 解绑脚本、rm 删除厂商
-    provider::run(&ctx, &argv(&["set", "relay", "--script", "none"])).await?;
-    assert!(ctx.load_recipes()?["relay"].balance.is_none());
+    // provider set 改主页 / 解绑脚本、rm 删除厂商
+    provider::run(
+        &ctx,
+        &argv(&["set", "relay", "--homepage", "none", "--script", "none"]),
+    )
+    .await?;
+    let r = &ctx.load_recipes()?["relay"];
+    assert!(r.homepage.is_none());
+    assert!(r.balance.is_none());
     provider::run(&ctx, &argv(&["rm", "relay", "--force"])).await?;
     assert!(!ctx.load_recipes()?.contains_key("relay"));
     Ok(())

@@ -25,6 +25,7 @@ fn readonly_field_ignores_input() {
         id: "deepseek".into(),
         name: "DeepSeek".into(),
         base_url: "https://x".into(),
+        homepage: None,
         supports_groups: false,
         vars: Default::default(),
         auth: Default::default(),
@@ -41,12 +42,13 @@ fn readonly_field_ignores_input() {
 #[test]
 fn provider_edit_echoes_script_command() {
     let recipe: crate::recipe::Recipe = serde_yaml::from_str(
-        "id: glm\nname: GLM\nbase_url: 'https://x'\nauth: {kind: bearer}\nbalance:\n  kind: script\n  command: ~/s.sh",
+        "id: glm\nname: GLM\nbase_url: 'https://x'\nauth: {kind: bearer}\nhomepage: https://bigmodel.cn/console\nbalance:\n  kind: script\n  command: ~/s.sh",
     )
     .unwrap();
     let form = provider_edit(&recipe, "/models");
     assert_eq!(form.text(PF_SCRIPT), "~/s.sh");
     assert_eq!(form.text(PF_HEALTH), "/models");
+    assert_eq!(form.text(PF_HOMEPAGE), "https://bigmodel.cn/console");
 }
 
 #[test]

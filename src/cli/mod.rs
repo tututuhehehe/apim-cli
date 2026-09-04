@@ -117,8 +117,8 @@ pub(crate) fn print_help() {
          \n\
          厂商：\n\
          \x20 apim provider ls [--json]\n\
-         \x20 apim provider add <id> --name <名> --base-url <URL> [--health <路径>|none] [--script <脚本路径>|none]\n\
-         \x20 apim provider set <id> [--name <名>] [--base-url <URL>] [--health <路径>|none] [--script <脚本路径>|none]\n\
+         \x20 apim provider add <id> --name <名> --base-url <URL> [--homepage <URL>|none] [--health <路径>|none] [--script <脚本路径>|none]\n\
+         \x20 apim provider set <id> [--name <名>] [--base-url <URL>] [--homepage <URL>|none] [--health <路径>|none] [--script <脚本路径>|none]\n\
          \x20 apim provider rm <id> [--force]\n\
          密钥（token 一律走 stdin：echo 'KEY' | apim key add ...）：\n\
          \x20 apim key ls [<provider>] [--json]\n\
