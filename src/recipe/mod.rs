@@ -2,6 +2,7 @@
 
 pub use balance::{BalanceItem, BalanceView, money, parse_balance};
 pub use script::{BalanceMode, ScriptSpec};
+pub(crate) use store::save_user_recipe_to;
 pub use store::{delete_user_recipe, save_user_recipe, user_recipes_dir};
 
 mod balance;
@@ -130,12 +131,22 @@ pub struct RenderField {
 }
 
 pub fn load_recipes() -> Result<HashMap<String, Recipe>> {
+    load_recipes_with(&user_recipes_dir())
+}
+
+/// builtin → 开发目录 → 指定用户目录，逐级同 id 覆盖。CLI/测试用自定义根目录。
+pub fn load_recipes_with(user_dir: &Path) -> Result<HashMap<String, Recipe>> {
     let mut map = HashMap::new();
     insert_yaml(&mut map, BUILTIN_DEEPSEEK, "builtin:deepseek", None)?;
 
+    // 开发目录等价于内置补充：origin 清回 None，保证「内置不可删除」的保护
+    // 不被 manifest 覆盖带的路径击穿（只有用户目录的 recipe 才可删）。
     let manifest_dir = Path::new(env!("CARGO_MANIFEST_DIR")).join("recipes");
     load_dir(&manifest_dir, &mut map)?;
-    load_dir(&user_recipes_dir(), &mut map)?;
+    for recipe in map.values_mut() {
+        recipe.origin = None;
+    }
+    load_dir(user_dir, &mut map)?;
     Ok(map)
 }
 
