@@ -25,7 +25,7 @@ pub(crate) fn save_user_recipe_to(dir: &Path, recipe: &Recipe) -> Result<PathBuf
     let path = dir.join(format!("{}.yaml", recipe.id));
     let yaml = serde_yaml::to_string(recipe).context("serialize recipe")?;
     // recipe 可能带 vars 里的访问令牌，按私钥文件权限写。
-    let tmp = path.with_extension("tmp");
+    let tmp = crate::config::tmp_path(&path);
     fs::write(&tmp, yaml).with_context(|| format!("write {}", tmp.display()))?;
     #[cfg(unix)]
     {
@@ -40,6 +40,7 @@ pub(crate) fn save_user_recipe_to(dir: &Path, recipe: &Recipe) -> Result<PathBuf
 #[cfg(test)]
 mod tests {
     use std::collections::HashMap;
+    use std::fs;
     use std::path::PathBuf;
 
     use super::super::{
@@ -119,5 +120,16 @@ mod tests {
         );
         delete_user_recipe(&path).unwrap();
         assert!(!path.exists());
+        assert_no_tmp_leftover(&dir);
+    }
+
+    fn assert_no_tmp_leftover(dir: &PathBuf) {
+        let leftovers: Vec<String> = fs::read_dir(dir)
+            .unwrap()
+            .filter_map(|e| e.ok())
+            .map(|e| e.file_name().to_string_lossy().into_owned())
+            .filter(|name| name.ends_with(".tmp"))
+            .collect();
+        assert!(leftovers.is_empty(), "残留 tmp 文件: {leftovers:?}");
     }
 }

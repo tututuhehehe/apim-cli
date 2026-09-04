@@ -1,7 +1,7 @@
 //! 密钥清单写回磁盘：原子写入，权限 600。
 
 use std::fs;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 
 use anyhow::{Context, Result};
 
@@ -54,8 +54,15 @@ fn toml_string(s: &str) -> String {
     out
 }
 
+/// tmp 文件名带进程 id（`<原名>.<pid>.tmp`）：两个 apim 实例并发保存时
+/// 不互踩同一个 tmp，中断残留的 tmp 也不会互相干扰。
+pub(crate) fn tmp_path(path: &Path) -> PathBuf {
+    let name = path.file_name().and_then(|s| s.to_str()).unwrap_or("apim");
+    path.with_file_name(format!("{name}.{}.tmp", std::process::id()))
+}
+
 fn write_private(path: &Path, contents: &str) -> Result<()> {
-    let tmp = path.with_extension("tmp");
+    let tmp = tmp_path(path);
     fs::write(&tmp, contents).with_context(|| format!("write {}", tmp.display()))?;
     #[cfg(unix)]
     {
@@ -71,7 +78,7 @@ fn write_private(path: &Path, contents: &str) -> Result<()> {
 mod tests {
     use std::collections::HashMap;
     use std::fs;
-    use std::path::PathBuf;
+    use std::path::{Path, PathBuf};
 
     use super::super::{KeyEntry, load_keys_from};
     use super::*;
@@ -126,6 +133,17 @@ mod tests {
         let secrets = fs::read_to_string(dir.join("secrets.toml")).unwrap();
         assert!(secrets.contains("\"deepseek.home\""));
         assert!(secrets.contains("\"deepseek.work\""));
+        assert_no_tmp_leftover(&dir);
+    }
+
+    fn assert_no_tmp_leftover(dir: &Path) {
+        let leftovers: Vec<String> = fs::read_dir(dir)
+            .unwrap()
+            .filter_map(|e| e.ok())
+            .map(|e| e.file_name().to_string_lossy().into_owned())
+            .filter(|name| name.ends_with(".tmp"))
+            .collect();
+        assert!(leftovers.is_empty(), "残留 tmp 文件: {leftovers:?}");
     }
 
     #[test]
