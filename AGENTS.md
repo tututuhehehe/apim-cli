@@ -54,8 +54,11 @@ src/
     └── script.rs      脚本执行器（env 注入/超时 kill/stderr 截断 200/stdout 50 行上限）+ expand_tilde
 docs/
 └── quota-script-prompt.md  额度脚本代写提示词（整体复制给 AI Agent 用）
-recipes/
-└── deepseek.yaml      内置 recipe（include_str! 编译进二进制）
+recipes/              内置 recipe ×4（deepseek/openai/moonshot/openrouter，include_str! 编译进二进制）
+├── deepseek.yaml
+├── openai.yaml
+├── moonshot.yaml
+└── openrouter.yaml
 ```
 
 ## 运行时数据（都在仓库外）

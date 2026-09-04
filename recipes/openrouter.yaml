@@ -15,7 +15,8 @@ auth:
 
 health:
   method: GET
-  url: "{base_url}/models"
+  # /models 是公开端点（坏 key 也 200，探活会假阳性）；/key 才校验 Bearer（坏 key 401）
+  url: "{base_url}/key"
 
 balance:
   request:

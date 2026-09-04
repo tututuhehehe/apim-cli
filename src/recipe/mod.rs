@@ -297,21 +297,66 @@ mod tests {
 
     #[test]
     fn builtin_recipes_load_with_expected_metadata() {
-        // 不存在的用户目录：只验 builtin（+ 开发目录）注册结果
+        // 不存在的用户目录：只验 builtin（+ 开发目录）注册结果。
+        // 探活/额度路径一并锁死，防止 YAML 路径改动后测试悄悄失同步
+        // （OpenRouter 的 /models 是公开端点，探活必须用鉴权的 /key）。
         let user_dir = Path::new("target/apim-builtin-tests-no-user-dir");
         let map = load_recipes_with(user_dir).unwrap();
         let expected = [
-            ("deepseek", "DeepSeek", "https://api.deepseek.com"),
-            ("openai", "OpenAI", "https://api.openai.com"),
-            ("moonshot", "Moonshot AI", "https://api.moonshot.cn"),
-            ("openrouter", "OpenRouter", "https://openrouter.ai/api/v1"),
+            (
+                "deepseek",
+                "DeepSeek",
+                "https://api.deepseek.com",
+                "/models",
+                "/user/balance",
+            ),
+            (
+                "openai",
+                "OpenAI",
+                "https://api.openai.com",
+                "/v1/models",
+                "/v1/dashboard/billing/subscription",
+            ),
+            (
+                "moonshot",
+                "Moonshot AI",
+                "https://api.moonshot.cn",
+                "/v1/models",
+                "/v1/users/me/balance",
+            ),
+            (
+                "openrouter",
+                "OpenRouter",
+                "https://openrouter.ai/api/v1",
+                "/key",
+                "/credits",
+            ),
         ];
-        for (id, name, base_url) in expected {
+        for (id, name, base_url, health_suffix, balance_suffix) in expected {
             let recipe = map
                 .get(id)
                 .unwrap_or_else(|| panic!("builtin {id} missing"));
             assert_eq!(recipe.name, name, "{id} name");
             assert_eq!(recipe.base_url, base_url, "{id} base_url");
+            let health = recipe
+                .health
+                .as_ref()
+                .unwrap_or_else(|| panic!("{id} 缺 health"));
+            assert!(
+                health.url.ends_with(health_suffix),
+                "{id} health url 应以 {health_suffix} 结尾，实际 {}",
+                health.url
+            );
+            let balance = recipe
+                .balance
+                .as_ref()
+                .and_then(|b| b.http())
+                .unwrap_or_else(|| panic!("{id} 缺 http balance"));
+            assert!(
+                balance.request.url.ends_with(balance_suffix),
+                "{id} balance url 应以 {balance_suffix} 结尾，实际 {}",
+                balance.request.url
+            );
             assert!(
                 recipe.origin.is_none(),
                 "{id} 应为内置（origin None，不可删）"

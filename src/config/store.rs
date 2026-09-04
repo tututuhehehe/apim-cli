@@ -85,7 +85,8 @@ mod tests {
     use crate::recipe;
 
     fn deepseek_recipes() -> HashMap<String, recipe::Recipe> {
-        recipe::load_recipes().unwrap()
+        // 沙盒目录加载 builtin，绝不读真实 ~/.config/apim（用户 recipe 会污染测试）
+        recipe::load_recipes_with(Path::new("target/apim-store-tests-no-user-dir")).unwrap()
     }
 
     fn temp_dir(name: &str) -> PathBuf {

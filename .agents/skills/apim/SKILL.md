@@ -14,7 +14,7 @@ apim 是本仓库的终端 API Key 管理器（TUI + CLI）。心智模型：**T
 apim provider ls [--json]
 apim provider add <id> --name <名> --base-url <URL> [--homepage <主页URL>|none] [--health <路径>|none] [--script <脚本路径>|none]
 apim provider set <id> [--name <名>] [--base-url <URL>] [--homepage <主页URL>|none] [--health <路径>|none] [--script <脚本路径>|none]
-apim provider rm <id> [--force]          # 有密钥时拒绝；--force 连带删密钥；内置(deepseek)不可删
+apim provider rm <id> [--force]          # 有密钥时拒绝；--force 连带删密钥；内置(deepseek/openai/moonshot/openrouter)不可删
 
 # 密钥 CRUD（token 一律走 stdin，绝不进 argv / shell history）
 apim key ls [<provider>] [--json]        # token 掩码显示
