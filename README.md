@@ -34,14 +34,14 @@ apim
 
 **添加密钥（右侧按 `a`）**：填别名、分组（可空）、密钥，厂商用 `←`/`→` 切换。密钥可以直接 `⌘V` 粘贴。`Enter` 保存，立即写盘并自动检测。
 
-**添加厂商（左侧按 `a`）**：填 ID（小写字母/数字/-，密钥配置里 `provider` 引用它）、显示名称、Base URL，以及两个可选接口：
+**添加厂商（左侧按 `a`）**：填 ID（小写字母/数字/-，密钥配置里 `provider` 引用它）、显示名称、Base URL，以及两个可选项：
 
 - 探活路径：默认 `/models`，拼在 Base URL 后面；留空 = 不探活
-- 额度路径 + 额度取值：比如 NewAPI 系中转站填 `/v1/dashboard/billing/subscription` + `hard_limit_usd`
+- 脚本路径：额度查询脚本（见下「自定义脚本额度」）；留空 = 不查额度
 
-保存后生成 `~/.config/apim/recipes/<id>.yaml`，接着按 `a` 就能给它加密钥。
+保存后生成 `~/.config/apim/recipes/<id>.yaml`，接着按 `a` 就能给它加密钥。脚本不用自己写：把 `docs/quota-script-prompt.md` 整体复制给任意 AI Agent，附上厂商的官方查询方式，它会按 apim 预留的接口契约写好并给验证命令。
 
-**编辑（`e`）**：密钥表单带出当前值，改别名就是重命名。厂商表单编辑时 ID 锁定；如果探活/额度的路径没改，会保留原 YAML 里手写的 headers、解析规则（DeepSeek 的三行额度明细不会被表单冲掉）。
+**编辑（`e`）**：密钥表单带出当前值，改别名就是重命名。厂商表单编辑时 ID 锁定；探活路径/脚本路径没改就保存，不会动原 YAML 里手写的配置（DeepSeek 的声明式额度、new-api 的访问令牌 `vars`、内联脚本都原样保留）。清空脚本路径保存即取消脚本额度。
 
 **删除（`d`）**：都弹确认框。厂商下面还有密钥时会拒绝，先删密钥。内置的 DeepSeek 厂商不可删除，但可以 `e` 编辑覆盖（会在用户目录生成同名 YAML）。
 
@@ -101,6 +101,8 @@ TUI 表单生成的 YAML 和手写的完全等价；编辑时表单只覆盖它�
 
 ### new-api 系中转站（额度要访问令牌的）
 
+表单已不再提供这个预设（额度统一走脚本），但手写的声明式 YAML 依旧支持；也可以按 `docs/quota-script-prompt.md` 让 AI 写个脚本。手写的话：
+
 多数 new-api 面板的 `/v1/dashboard/billing/subscription` 要么返回假数字，要么不认 API Key。真实余额在 `/api/user/self`，但它只认**访问令牌**（个人设置里生成的那串，不是 sk- Key）。这种要在 `~/.config/apim/recipes/<id>.yaml` 手写：
 
 ```yaml
@@ -127,3 +129,26 @@ balance:
 ```
 
 探活仍用每条密钥自己的 sk- Key；额度用 `vars` 里的访问令牌（额度是账户级的，同账户多条 Key 显示一样）。文件含令牌，保持 600 权限，别分享。
+
+### 自定义脚本额度（接口长得怪的厂商）
+
+有些厂商的额度没法用「一个请求 + JSON 取值」描述——要发多个请求、算日期、查表映射。比如 GLM Coding Plan：两个接口、按 `unit/number` 挑窗口、按套餐等级映射 MCP 次数。这种走脚本逃生舱 `balance.kind=script`：apim 带着密钥跑一个脚本，把 stdout 逐行显示在额度面板，不再为它们扩配置语法。
+
+```yaml
+balance:
+  kind: script
+  command: ~/.config/apim/scripts/glm-quota.sh   # 外部可执行文件（尊重 shebang）
+  # run: |                                        # 或内联脚本，经 shell -c 执行
+  #   echo "剩余 45/100"
+  timeout_secs: 15                                # 缺省 15
+```
+
+契约：
+
+- apim 注入环境变量：`APIM_TOKEN`（密钥）、`APIM_BASE_URL`、`APIM_ALIAS`、`APIM_PROVIDER`，以及 `vars` 里的每项 `APIM_VAR_<大写名>`。密钥只走 env，不进命令行参数（`ps` 看不到）。
+- exit 0：stdout 每行一条进面板，首行高亮；exit 非 0 / 超时：stderr（截断）显示为红色错误。
+- 脚本可用本机任何工具（curl、jq、python……），等于在配置里写「这个厂商的额度怎么查」。GLM 的完整实例：`~/.config/apim/scripts/glm-quota.sh` + `~/.config/apim/recipes/glm.yaml`。
+
+TUI 里也可以配：厂商表单的「脚本路径」就是它；编辑时路径没改就原样保留手写的 `run:`/`shell:`/`timeout_secs`，清空即取消脚本额度。
+
+让 AI 代写：把 `docs/quota-script-prompt.md` 整体复制给任意 Agent，再附上厂商官方的查询方式（文档 / curl 示例），它会产出脚本 + recipe 并给验证命令——密钥只在验证时用环境变量传，不用贴给 AI。

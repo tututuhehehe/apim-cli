@@ -36,11 +36,14 @@ src/
 ├── recipe/            厂商协议
 │   ├── mod.rs         Recipe/Auth/HttpCall 模型、YAML 加载（builtin→manifest→user 逐级覆盖）、{token}/{base_url} 模板替换
 │   ├── balance.rs     额度 JSON → BalanceView（dotted path 取值、数组多卡片、货币格式化）
+│   ├── script.rs      BalanceMode（http 缺省 | script 逃生舱）+ ScriptSpec，自定义 serde
 │   └── store.rs       用户 recipe 读写（~/.config/apim/recipes/*.yaml）
 ├── config/            密钥清单
 │   ├── mod.rs         KeyEntry、读取 config.toml + secrets.toml
 │   └── store.rs       原子写入（tmp+rename，600 权限）
-└── probe.rs           并发探活（health + balance 两个请求，tokio::join!）
+└── probe.rs           并发探活（health + balance 并发；balance 分 http/脚本两路，脚本=env 注入+超时+stdout 逐行）
+docs/
+└── quota-script-prompt.md  额度脚本代写提示词（整体复制给 AI Agent 用）
 recipes/
 └── deepseek.yaml      内置 recipe（include_str! 编译进二进制）
 ```
@@ -55,7 +58,7 @@ recipes/
 ## 核心约定
 
 1. **密钥永不进仓库**。`.gitignore` 已排除 secrets.toml/.env；写文档、注释、提交信息时一律用 `sk-...` 占位。动手前 `grep -r "sk-"` 扫一遍。
-2. **加厂商不改 Rust**。TUI 表单生成的 YAML 和手写的完全等价；编辑表单只覆盖它认识的字段，手写的 headers/parse 规则在「路径未变」时原样保留（见 providers_store.rs 的 unchanged 判断）。
+2. **加厂商不改 Rust**。厂商表单只配：ID/名称/Base URL/探活路径/**脚本路径**（额度唯一入口，指向 ~/.config/apim/scripts/ 下可执行脚本）；编辑时路径没改就保留手写配置，清空即取消。额度底层两种形态（BalanceMode）：`kind: script`（env 注入 APIM_TOKEN 等，stdout 逐行直显）+ 声明式 http（缺省，request+parse+render，留给内置 recipe 和手写 YAML，如 new-api 系），不要再为怪接口扩 DSL，也不要往表单加预设类型。AI 代写脚本的标准提示词在 docs/quota-script-prompt.md。
 3. **Recipe 覆盖顺序**：builtin(include_str) → `<repo>/recipes/`（开发时）→ `~/.config/apim/recipes/`，后读的同 id 覆盖先读的。`origin: None` = 内置，不可删除只可编辑覆盖。
 4. **模块路径稳定**：子模块类型经 mod.rs re-export（如 `crate::app::Modal`），拆文件不破坏外部 import。
 5. **改完必跑**：`cargo fmt && cargo clippy -q --all-targets -- -W clippy::all`（零警告）+ `cargo test`。UI 改动跑 `cargo run -- --snapshot`（主界面）/ `--snapshot-form` / `--snapshot-provider-form` 出纯文本渲染核对。
