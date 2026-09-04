@@ -2,6 +2,7 @@
 #
 # 字段来源：openrouter.ai 文档「Credits」GET /api/v1/credits（2026-09 核对），
 # 响应形如 {"data":{"total_credits":12.5,"total_usage":3.2}}。
+# total_credits 是累计充值总额（剩余 = 总额 - 已用，DSL 无算术，故只如实展示两项）。
 
 id: openrouter
 name: OpenRouter
@@ -30,7 +31,7 @@ balance:
   render:
     headline: "{total_balance}"
     fields:
-      - label: 剩余
+      - label: 总额
         value: "{total_balance}"
       - label: 已用
         value: "{used}"

@@ -16,7 +16,7 @@ auth:
 
 health:
   method: GET
-  url: "{base_url}/models"
+  url: "{base_url}/v1/models"
 
 balance:
   request:
@@ -31,5 +31,6 @@ balance:
   render:
     headline: "{total_balance}"
     fields:
-      - label: 额度
+      # hard_limit_usd 是消费上限（并非剩余余额），故标签用「上限」
+      - label: 上限
         value: "{total_balance}"

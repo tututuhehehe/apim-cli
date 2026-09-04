@@ -319,6 +319,25 @@ mod tests {
         }
     }
 
+    #[test]
+    fn user_recipe_with_same_id_overrides_builtin() {
+        // 核心约定：用户目录同 id YAML 整体覆盖内置（origin 变为用户文件路径）
+        let user_dir = Path::new("target/apim-builtin-override-tests");
+        fs::create_dir_all(user_dir).unwrap();
+        let override_path = user_dir.join("openai.yaml");
+        fs::write(
+            &override_path,
+            "id: openai\nname: 我的 OpenAI 中转\nbase_url: 'https://my-relay.example.com'\nauth: {kind: bearer}\n",
+        )
+        .unwrap();
+        let map = load_recipes_with(user_dir).unwrap();
+        let recipe = map.get("openai").expect("openai 仍存在");
+        assert_eq!(recipe.name, "我的 OpenAI 中转");
+        assert_eq!(recipe.base_url, "https://my-relay.example.com");
+        assert_eq!(recipe.origin.as_deref(), Some(override_path.as_path()));
+        fs::remove_file(&override_path).unwrap();
+    }
+
     /// 从内置 YAML 文本构造 recipe，用假 JSON 跑 balance 的 http parse。
     fn builtin_balance_view(yaml: &str, json: &str) -> BalanceView {
         let recipe: Recipe = serde_yaml::from_str(yaml).expect("builtin yaml parses");
@@ -339,20 +358,20 @@ mod tests {
         );
         assert_eq!(view.headline, "96");
         assert_eq!(view.items[0].currency.as_deref(), Some("USD"));
-        assert_eq!(view.items[0].fields[0], ("额度".into(), "96".into()));
+        assert_eq!(view.items[0].fields[0], ("上限".into(), "96".into()));
     }
 
     #[test]
     fn moonshot_balance_parses_user_balance_shape() {
         let view = builtin_balance_view(
             include_str!("../../recipes/moonshot.yaml"),
-            r#"{"code":0,"data":{"available_balance":"42.50","cash_balance":"42.50","voucher_balance":"0"}}"#,
+            r#"{"code":0,"status":true,"data":{"available_balance":42.50,"cash_balance":42.50,"voucher_balance":0}}"#,
         );
-        // 响应没有可用性布尔字段，available 不配置
-        assert_eq!(view.available, None);
-        assert_eq!(view.headline, "42.50");
+        // 顶层 status 布尔作为 available
+        assert_eq!(view.available, Some(true));
+        assert_eq!(view.headline, "42.5");
         assert_eq!(view.items[0].currency.as_deref(), Some("CNY"));
-        assert_eq!(view.items[0].fields[0], ("额度".into(), "42.50".into()));
+        assert_eq!(view.items[0].fields[0], ("额度".into(), "42.5".into()));
     }
 
     #[test]
@@ -363,7 +382,8 @@ mod tests {
         );
         assert_eq!(view.headline, "12.5");
         assert_eq!(view.items[0].currency.as_deref(), Some("USD"));
-        assert_eq!(view.items[0].fields[0], ("剩余".into(), "12.5".into()));
+        // total_credits 是累计充值总额（非剩余），标签如实叫「总额」
+        assert_eq!(view.items[0].fields[0], ("总额".into(), "12.5".into()));
         assert_eq!(view.items[0].fields[1], ("已用".into(), "3.2".into()));
     }
 }
