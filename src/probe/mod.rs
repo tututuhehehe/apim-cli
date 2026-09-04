@@ -114,9 +114,9 @@ fn parse_models(body: &str) -> std::result::Result<Vec<String>, String> {
         serde_json::Value::Array(items) => items.iter().collect(),
         serde_json::Value::Object(map) => match map.get("data") {
             Some(serde_json::Value::Array(items)) => items.iter().collect(),
-            _ => return Err("response missing `data` array".into()),
+            _ => return Err("响应缺少 data 数组，无法解析模型列表".into()),
         },
-        _ => return Err("unexpected response shape".into()),
+        _ => return Err("响应结构异常，无法解析模型列表".into()),
     };
     let mut names: Vec<String> = Vec::with_capacity(entries.len());
     for entry in entries {

@@ -101,11 +101,12 @@ pub(crate) fn pane_block<'a>(
 }
 
 pub(crate) fn centered(width: u16, height: u16, area: Rect) -> Rect {
+    // 宽高都钳到区域内，矮终端下弹窗贴顶显示而非溢出裁切
     let v = Layout::default()
         .direction(Direction::Vertical)
         .constraints([
             Constraint::Fill(1),
-            Constraint::Length(height),
+            Constraint::Length(height.min(area.height)),
             Constraint::Fill(1),
         ])
         .split(area);

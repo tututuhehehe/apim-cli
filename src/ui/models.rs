@@ -83,13 +83,16 @@ pub(crate) fn draw_models(
         }
     }
 
-    frame.render_widget(
-        Paragraph::new(Line::from(Span::styled(
-            " j/k 移动  c 复制  Esc 关闭 ",
-            Style::new().fg(theme::MUTED),
-        ))),
-        rows[1],
-    );
+    // 复制提示只在有列表可复制时显示（Loading/Error/空列表时 c 无操作）
+    if matches!(status, ModelsStatus::Done { items, .. } if !items.is_empty()) {
+        frame.render_widget(
+            Paragraph::new(Line::from(Span::styled(
+                " j/k 移动  c 复制  Esc 关闭 ",
+                Style::new().fg(theme::MUTED),
+            ))),
+            rows[1],
+        );
+    }
 }
 
 /// 滚动偏移：选中行跟随窗口移动，保证 selected 落在 [offset, offset+visible) 内。
