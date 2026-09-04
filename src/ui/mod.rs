@@ -5,6 +5,7 @@ mod confirm;
 mod form_modal;
 mod header;
 mod keys;
+mod models;
 mod providers;
 
 use ratatui::Frame;
@@ -49,6 +50,17 @@ pub fn draw(frame: &mut Frame, app: &App) {
         }
         Modal::ConfirmDeleteProvider { provider_id, .. } => {
             confirm::draw_confirm(frame, "删除厂商", std::slice::from_ref(provider_id), area);
+        }
+        Modal::Models {
+            provider_id,
+            status,
+        } => {
+            let name = app
+                .recipes
+                .get(provider_id)
+                .map(|r| r.name.as_str())
+                .unwrap_or(provider_id);
+            models::draw_models(frame, name, status, area);
         }
         Modal::None => {}
     }

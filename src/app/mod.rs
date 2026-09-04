@@ -1,6 +1,6 @@
 //! 应用状态：选中项、导航、探活调度。弹窗与存取在子模块。
 
-pub use modal::Modal;
+pub use modal::{Modal, ModelsStatus};
 
 mod keys_store;
 mod modal;
@@ -41,6 +41,9 @@ impl Default for KeyState {
 /// 自动全量刷新间隔：启动刷一次，之后到点后台全量重刷（含探活+额度）。
 pub const AUTO_REFRESH_INTERVAL: Duration = Duration::from_secs(5 * 60);
 
+/// 模型列表拉取结果：连同 provider_id 一起回传，弹窗按 id 匹配（不匹配丢弃）。
+pub type ModelsMsg = (String, std::result::Result<Vec<String>, String>);
+
 pub struct App {
     pub recipes: HashMap<String, Recipe>,
     pub keys: Vec<KeyEntry>,
@@ -54,16 +57,22 @@ pub struct App {
     pub modal: Modal,
     pub(crate) inflight: HashSet<String>,
     pub(crate) tx: UnboundedSender<ProbeResult>,
+    pub(crate) tx_models: UnboundedSender<ModelsMsg>,
     pub(crate) client: reqwest::Client,
     /// 下一次自动全量刷新的时间点。
     pub(crate) next_auto_refresh: Instant,
 }
 
 impl App {
-    pub fn start() -> Result<(App, UnboundedReceiver<ProbeResult>)> {
+    pub fn start() -> Result<(
+        App,
+        UnboundedReceiver<ProbeResult>,
+        UnboundedReceiver<ModelsMsg>,
+    )> {
         let recipes = crate::recipe::load_recipes()?;
         let keys = config::load_keys(&recipes)?;
         let (tx, rx) = mpsc::unbounded_channel();
+        let (tx_models, rx_models) = mpsc::unbounded_channel();
         let mut app = App {
             recipes,
             keys,
@@ -77,13 +86,14 @@ impl App {
             modal: Modal::None,
             inflight: HashSet::new(),
             tx,
+            tx_models,
             client: probe::client()?,
             next_auto_refresh: Instant::now() + AUTO_REFRESH_INTERVAL,
         };
         app.rebuild_provider_list();
         // 打开即全量刷一遍所有厂商；切换厂商只读缓存，到点自动重刷。
         app.refresh_all_keys();
-        Ok((app, rx))
+        Ok((app, rx, rx_models))
     }
 
     pub fn apply(&mut self, result: ProbeResult) {
@@ -329,14 +339,20 @@ impl App {
 }
 
 #[cfg(test)]
-mod tests {
+pub(crate) mod tests {
     use super::*;
     use crate::recipe::Auth;
     use tokio::time::timeout;
 
     /// 直接构造 App：假 recipe（health=None、balance=None，probe 立即返回、零网络），
     /// 不经过 App::start，不读任何配置目录，不触碰 ~/.config/apim。
-    fn test_app(providers: &[(&str, &[&str])]) -> (App, UnboundedReceiver<ProbeResult>) {
+    pub(crate) fn test_app(
+        providers: &[(&str, &[&str])],
+    ) -> (
+        App,
+        UnboundedReceiver<ProbeResult>,
+        UnboundedReceiver<ModelsMsg>,
+    ) {
         let mut recipes = HashMap::new();
         let mut keys = Vec::new();
         for (pid, aliases) in providers {
@@ -365,6 +381,7 @@ mod tests {
             }
         }
         let (tx, rx) = mpsc::unbounded_channel();
+        let (tx_models, rx_models) = mpsc::unbounded_channel();
         let mut app = App {
             recipes,
             keys,
@@ -378,11 +395,12 @@ mod tests {
             modal: Modal::None,
             inflight: HashSet::new(),
             tx,
+            tx_models,
             client: probe::client().expect("构建测试用 reqwest client"),
             next_auto_refresh: Instant::now() + AUTO_REFRESH_INTERVAL,
         };
         app.rebuild_provider_list();
-        (app, rx)
+        (app, rx, rx_models)
     }
 
     /// 已过期的触发点：取 1s 前；极端情况下（刚开机，时钟起点晚于 1s 前）退回 now，
@@ -401,7 +419,8 @@ mod tests {
 
     #[tokio::test]
     async fn tick_when_due_probes_every_key_and_reschedules() {
-        let (mut app, mut rx) = test_app(&[("alpha", &["a1", "a2"]), ("beta", &["b1"])]);
+        let (mut app, mut rx, _rx_models) =
+            test_app(&[("alpha", &["a1", "a2"]), ("beta", &["b1"])]);
         app.next_auto_refresh = overdue();
         app.tick();
         let mut got = HashSet::new();
@@ -431,7 +450,7 @@ mod tests {
 
     #[tokio::test]
     async fn switching_provider_reads_cache_without_probing() {
-        let (mut app, mut rx) = test_app(&[("alpha", &["a1"]), ("beta", &["b1"])]);
+        let (mut app, mut rx, _rx_models) = test_app(&[("alpha", &["a1"]), ("beta", &["b1"])]);
         app.focus = Focus::Providers;
         app.move_down();
         assert_eq!(app.current_provider_id(), Some("beta"));
@@ -445,7 +464,7 @@ mod tests {
 
     #[tokio::test]
     async fn refresh_all_keys_schedules_next_cycle_five_minutes_out() {
-        let (mut app, mut rx) = test_app(&[("alpha", &["a1"])]);
+        let (mut app, mut rx, _rx_models) = test_app(&[("alpha", &["a1"])]);
         app.refresh_all_keys();
         assert!(app.is_checking("alpha.a1"));
         let until = remaining_until_next(&app);
@@ -467,7 +486,7 @@ mod tests {
 
     #[tokio::test]
     async fn refresh_all_keys_dedupes_inflight_probes() {
-        let (mut app, mut rx) = test_app(&[("alpha", &["a1", "a2"])]);
+        let (mut app, mut rx, _rx_models) = test_app(&[("alpha", &["a1", "a2"])]);
         app.refresh_all_keys();
         // 结果尚未 apply（同步代码不 yield），inflight 仍在——第二次全量应被去重
         app.refresh_all_keys();

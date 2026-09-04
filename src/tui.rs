@@ -11,16 +11,23 @@ use ratatui::backend::TestBackend;
 use ratatui::buffer::Buffer;
 use unicode_width::UnicodeWidthStr;
 
-use crate::app::{App, Focus, Modal};
+use crate::app::{App, Focus, Modal, ModelsMsg};
 use crate::form::{Field, FormEvent};
 use crate::ui;
 
 pub(crate) async fn run_tui() -> Result<()> {
-    let (mut app, mut rx) = App::start()?;
+    let (mut app, mut rx, mut rx_models) = App::start()?;
     let mut terminal = ratatui::init();
     let _ = execute!(terminal.backend_mut(), EnableBracketedPaste);
     let mut events = EventStream::new();
-    let result = loop_tui(&mut terminal, &mut app, &mut rx, &mut events).await;
+    let result = loop_tui(
+        &mut terminal,
+        &mut app,
+        &mut rx,
+        &mut rx_models,
+        &mut events,
+    )
+    .await;
     ratatui::restore();
     result
 }
@@ -29,6 +36,7 @@ async fn loop_tui(
     terminal: &mut ratatui::DefaultTerminal,
     app: &mut App,
     rx: &mut tokio::sync::mpsc::UnboundedReceiver<crate::probe::ProbeResult>,
+    rx_models: &mut tokio::sync::mpsc::UnboundedReceiver<ModelsMsg>,
     events: &mut EventStream,
 ) -> Result<()> {
     loop {
@@ -61,6 +69,12 @@ async fn loop_tui(
                     app.apply(msg);
                 }
             }
+            msg = rx_models.recv() => {
+                if let Some((provider_id, result)) = msg {
+                    // 弹窗可能已被关掉/换厂商打开：apply_models 按 id 匹配，不匹配丢弃
+                    app.apply_models(provider_id, result);
+                }
+            }
             _ = tokio::time::sleep(std::time::Duration::from_millis(200)) => {
                 app.tick();
             }
@@ -81,10 +95,18 @@ fn handle_key(app: &mut App, key: KeyEvent) {
             KeyCode::Esc | KeyCode::Char('n') | KeyCode::Char('q') => app.cancel_modal(),
             _ => {}
         },
+        Modal::Models { .. } => match key.code {
+            KeyCode::Char('j') | KeyCode::Down => app.move_models_selection(1),
+            KeyCode::Char('k') | KeyCode::Up => app.move_models_selection(-1),
+            KeyCode::Char('c') => app.copy_selected_model(),
+            KeyCode::Esc | KeyCode::Enter | KeyCode::Char('q') => app.cancel_modal(),
+            _ => {}
+        },
         Modal::None => match key.code {
             KeyCode::Char('c') if key.modifiers.contains(KeyModifiers::CONTROL) => {}
             KeyCode::Char('q') | KeyCode::Esc => {}
             KeyCode::Enter if app.focus == Focus::Providers => app.open_homepage(),
+            KeyCode::Char('m') if app.focus == Focus::Providers => app.open_models(),
             KeyCode::Char('c') => app.copy_selected(),
             KeyCode::Char('r') => app.refresh_current_provider(),
             KeyCode::Char('a') => app.open_add(),
@@ -101,7 +123,7 @@ fn handle_key(app: &mut App, key: KeyEvent) {
 // ---- 快照（测试用） ----------------------------------------------------
 
 pub(crate) async fn run_snapshot() -> Result<()> {
-    let (mut app, _rx) = App::start()?;
+    let (mut app, _rx, _rx_models) = App::start()?;
     if let Ok(id) = std::env::var("APIM_SNAPSHOT_PROVIDER")
         && let Some(pos) = app.provider_ids.iter().position(|p| p == &id)
     {
@@ -112,7 +134,7 @@ pub(crate) async fn run_snapshot() -> Result<()> {
 }
 
 pub(crate) async fn run_snapshot_key_form() -> Result<()> {
-    let (mut app, _rx) = App::start()?;
+    let (mut app, _rx, _rx_models) = App::start()?;
     app.focus = Focus::Keys;
     app.open_add();
     if let Modal::Form { form, .. } = &mut app.modal {
@@ -124,7 +146,7 @@ pub(crate) async fn run_snapshot_key_form() -> Result<()> {
 }
 
 pub(crate) async fn run_snapshot_provider_form() -> Result<()> {
-    let (mut app, _rx) = App::start()?;
+    let (mut app, _rx, _rx_models) = App::start()?;
     app.focus = Focus::Providers;
     app.open_add();
     if let Modal::Form { form, .. } = &mut app.modal {
