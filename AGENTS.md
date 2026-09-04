@@ -14,9 +14,14 @@
 
 ```
 src/
-├── main.rs            入口 + 参数分发（--snapshot* 是给测试用的渲染快照）
+├── main.rs            入口 + 参数分发（无参数=TUI；--snapshot* 渲染快照；其余走 CLI）
 ├── tui.rs             事件循环、按键路由、快照渲染
 ├── clipboard.rs       复制到剪贴板（arboard → pbcopy 兜底）
+├── cli/               CLI 子命令（AI/脚本的机器接口，与 TUI 共用底层）
+│   ├── mod.rs         Args 解析（--flag 值/布尔）、Ctx（config+recipes 目录，可注入测试）、分发与帮助
+│   ├── provider.rs    provider ls/add/set/rm（--script 绑定/解绑额度脚本）
+│   ├── keys.rs        key ls/add/set/rm（token 只走 stdin，不进 argv）
+│   └── query.rs       status（真实探活+额度，--json）/ copy / use
 ├── form/              通用表单引擎（密钥表单、厂商表单共用）
 │   ├── mod.rs         Field（文本/选择/只读）、Form、按键分发、表单构造器
 │   └── edit.rs        LineEdit：单行编辑（值 + 光标）
@@ -69,6 +74,7 @@ recipes/
 ```bash
 cargo run                              # 进 TUI
 cargo run -- --snapshot                # 真实接口拉数据渲染成文本（不进 TUI）
-cargo test                             # 14 个单测（recipe 解析/存取、config 往返、表单引擎）
+cargo test                             # 单测（recipe/表单/CLI 沙盒等）
 cargo install --path .                 # 装进 PATH
+apim provider ls --json                # CLI 冒烟（AI 接入流程见 docs/quota-script-prompt.md）
 ```

@@ -169,7 +169,7 @@ echo "MCP    本月已用 ${MCP_USED} · ${LEVEL}"
 
 1. `~/.config/apim/scripts/<厂商id>-quota.sh` —— 查询脚本（zsh 或 bash，带 shebang，注释说明每个接口）
 2. `~/.config/apim/recipes/<厂商id>.yaml` —— recipe（按 1.1 的格式）
-3. 安装命令（mkdir / chmod +x / 权限 600）和验证命令
+3. 注册与验证命令（见第 4 节，用 apim CLI）
 
 要求：
 
@@ -178,20 +178,33 @@ echo "MCP    本月已用 ${MCP_USED} · ${LEVEL}"
 - 接口返回的字段含义不确定时，先向用户确认，别猜语义（尤其是「usage 是总额还是已用」这类）。
 - 如果厂商只提供网页没有 API，明确告诉用户做不到 / 需要什么（cookie 等），不要硬编。
 
-## 4. 安装与验证（产出物里要包含这段）
+## 4. 注册与验证（产出物里要包含这段）
+
+优先用 apim CLI（`cargo install --path .` 后可用；文件本身就是数据源，CLI 不可用时直接把两个文件放到位也等效）：
+
+```bash
+# 1. 写入两个文件后，注册厂商并绑定脚本：
+apim provider add <厂商id> --name <名称> --base-url <https://...> \
+  --health <探活路径> --script ~/.config/apim/scripts/<厂商id>-quota.sh
+
+# 2. 密钥由用户自己配（token 只走 stdin，AI 不要经手）：
+echo 'sk-你的密钥' | apim key add <厂商id> main
+
+# 3. 验证（AI 可直接跑，期望 balance.ok=true 且 lines 有额度行）：
+apim status <厂商id> --json
+```
+
+改绑 / 解绑：`apim provider set <厂商id> --script <新路径|none>`。
+
+无 CLI 兜底（纯文件）：
 
 ```bash
 mkdir -p ~/.config/apim/scripts ~/.config/apim/recipes
-# 写入两个文件后：
 chmod +x ~/.config/apim/scripts/<厂商id>-quota.sh
 chmod 600 ~/.config/apim/recipes/<厂商id>.yaml
-
 # 验证（key 走环境变量，不要写进文件）：
 APIM_TOKEN='sk-你的密钥' APIM_BASE_URL='https://...' ~/.config/apim/scripts/<厂商id>-quota.sh
-echo "exit=$?"   # 期望：exit=0 且输出额度行
-
-# 然后打开 TUI：厂商应已出现，右侧 a 加密钥即可看到额度面板
-apim   # 或 cargo run
+echo "exit=$?"   # 期望 exit=0 且输出额度行
 ```
 
 ## 5. 厂商信息（用户填这里）

@@ -58,6 +58,54 @@ apim
 
 必填项为空、ID 重复、Base URL 不以 `http(s)://` 开头等，底部红字提示，不会写盘。
 
+## CLI（AI / 脚本友好）
+
+TUI 管人，CLI 管机器：`cargo install --path .` 之后所有操作都能走命令行（`apim help` 看全量用法）。数据同一份，CLI 改完 TUI 立即可见，反之亦然。
+
+| 命令 | 作用 |
+|---|---|
+| `apim provider ls [--json]` | 列厂商（含额度绑定方式、密钥数） |
+| `apim provider add <id> --name <名> --base-url <URL> [--health <路径>\|none] [--script <脚本路径>\|none]` | 建厂商 |
+| `apim provider set <id> [--name <名>] [--base-url <URL>] [--health <路径>\|none] [--script <脚本路径>\|none]` | 改厂商（只动传了的字段） |
+| `apim provider rm <id> [--force]` | 删厂商（有密钥时拒绝，`--force` 连带删密钥；内置不可删） |
+| `apim key ls [<provider>] [--json]` | 列密钥（token 掩码显示） |
+| `apim key add <provider> <别名> [--group <分组>]` | 加密钥；已存在则更新 token |
+| `apim key set <厂商.别名> [--alias <新别名>] [--group <分组>\|none]` | 改别名 / 分组 |
+| `apim key rm <厂商.别名>` | 删密钥 |
+| `apim status [<provider>] [--json]` | 真实探活 + 额度（跑绑定的脚本） |
+| `apim copy <厂商.别名> [--base-url]` | 复制密钥 / Base URL 到剪贴板 |
+| `apim use <厂商.别名>` | 输出 `export OPENAI_API_KEY=... OPENAI_BASE_URL=...`（`eval $(apim use x)` 用） |
+
+**密钥安全**：token 一律走 stdin，不进命令行参数（防 `ps` 和 shell history）：
+
+```bash
+echo '你的key' | apim key add glm main
+```
+
+### 余额查询脚本绑定
+
+一个厂商的额度查询 = 绑定一个脚本（recipe 的 `balance.kind: script` + `command:` 指向可执行文件）。三个入口，效果等价：
+
+1. **TUI**：厂商表单的「脚本路径」字段；
+2. **CLI**：`apim provider add/set ... --script <路径>` 绑定，`--script none` 解绑（CLI set 是显式指令，直接整体替换，不做 TUI 那套「没改就保留」）；
+3. **直接写 YAML**：AI 代写路线，见 `docs/quota-script-prompt.md`。
+
+脚本建议放 `~/.config/apim/scripts/<厂商id>-quota.sh`（约定而非强制）。绑定后 `apim status <厂商>` 和 TUI 额度面板跑的是同一个脚本，结果一致；脚本的输入输出契约（env 注入、stdout 逐行、exit 非 0 报错）见 README 下文「自定义脚本额度」。
+
+### AI 接入一个新厂商的全流程
+
+```bash
+# 1. 把 docs/quota-script-prompt.md 整体复制给 AI，附上厂商官方的查询方式
+#    → AI 产出 ~/.config/apim/scripts/<id>-quota.sh（并可代跑安装命令）
+# 2. AI 注册厂商并绑定脚本：
+apim provider add glm --name "GLM Coding Plan" --base-url https://open.bigmodel.cn \
+  --health /api/monitor/usage/quota/limit --script ~/.config/apim/scripts/glm-quota.sh
+# 3. 用户自己配密钥（key 不过 AI 的手）：
+echo '你的key' | apim key add glm main
+# 4. AI 自我验证：
+apim status glm --json
+```
+
 ## 数据存哪
 
 都在 `~/.config/apim/`，TUI 的增删改直接写这两个文件（权限 600），也可以手动改：
