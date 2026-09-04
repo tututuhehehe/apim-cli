@@ -12,25 +12,39 @@ pub(crate) async fn status(ctx: &Ctx, argv: &[String]) -> Result<()> {
     let args = Args::parse(argv)?;
     let filter = args.pos(0);
     let recipes = ctx.load_recipes()?;
+    // 拼错的厂商名直接报错，别误导成「还没有密钥」
+    if let Some(p) = filter
+        && !recipes.contains_key(p)
+    {
+        bail!("厂商 {p} 不存在");
+    }
     let keys = ctx.load_keys(&recipes)?;
     let matched: Vec<&KeyEntry> = keys
         .iter()
         .filter(|k| filter.is_none_or(|p| k.provider == p))
         .collect();
     if matched.is_empty() {
-        println!("还没有密钥（apim key add <provider> <别名>，token 走 stdin）");
+        if filter.is_some() {
+            println!("该厂商还没有密钥（apim key add <provider> <别名>，token 走 stdin）");
+        } else {
+            println!("还没有密钥（apim key add <provider> <别名>，token 走 stdin）");
+        }
         return Ok(());
     }
 
     let client = probe::client()?;
-    let mut results: Vec<(String, ProbeResult)> = Vec::new();
+    // 并发探活：串行 await 会被坏 key 的超时（15s/个）拖成分钟级
+    let mut futs = Vec::new();
     for key in matched {
-        let Some(recipe) = recipes.get(&key.provider) else {
+        let Some(recipe) = recipes.get(&key.provider).cloned() else {
             continue; // load_keys 已保证 provider 存在，防御一下
         };
-        let result = probe::probe(&client, recipe, key).await;
-        results.push((key.id(), result));
+        let key = key.clone();
+        let id = key.id();
+        let client = client.clone();
+        futs.push(async move { (id, probe::probe(&client, &recipe, &key).await) });
     }
+    let results: Vec<(String, ProbeResult)> = futures::future::join_all(futs).await;
 
     if args.has("json") {
         let out: Vec<_> = results
@@ -147,11 +161,15 @@ pub(crate) fn use_env(ctx: &Ctx, argv: &[String]) -> Result<()> {
         bail!("用法：apim use <厂商.别名>");
     };
     let (key, recipe) = find(ctx, id)?;
+    // base_url 和 token 一样过单引号转义：eval $(apim use x) 时防注入
     println!(
         "export OPENAI_API_KEY='{}'",
         key.token.replace('\'', "'\\''")
     );
-    println!("export OPENAI_BASE_URL='{}'", recipe.base_url);
+    println!(
+        "export OPENAI_BASE_URL='{}'",
+        recipe.base_url.replace('\'', "'\\''")
+    );
     Ok(())
 }
 

@@ -83,6 +83,10 @@ fn add(ctx: &Ctx, args: &Args) -> Result<()> {
     let Some(name) = args.flag("name").map(str::to_string) else {
         bail!("--name 必填");
     };
+    if name.is_empty() {
+        // Args 会把「--name 后面紧跟另一个 flag」的值解析成空串，这里拦住
+        bail!("--name 必填（值为空）");
+    }
     let Some(base_url) = args.flag("base-url").map(str::to_string) else {
         bail!("--base-url 必填");
     };
@@ -130,6 +134,9 @@ fn set(ctx: &Ctx, args: &Args) -> Result<()> {
     };
 
     if let Some(name) = args.flag("name") {
+        if name.is_empty() {
+            bail!("--name 不能为空");
+        }
         recipe.name = name.to_string();
     }
     if let Some(base_url) = args.flag("base-url") {
@@ -183,12 +190,13 @@ fn rm(ctx: &Ctx, args: &Args) -> Result<()> {
     Ok(())
 }
 
-/// --health 的值 → HttpCall；none / 缺省 = 不探活。
+/// --health 的值 → HttpCall；none / 空串 / 缺省 = 不探活。
+/// 空串也按 none 处理，避免 `{base_url}/` 向根路径发鉴权请求。
 fn health_call(args: &Args) -> Result<Option<HttpCall>> {
     let Some(path) = args.flag("health") else {
         return Ok(None);
     };
-    if path == "none" {
+    if path.is_empty() || path == "none" {
         return Ok(None);
     }
     let path = if path.starts_with('/') {
@@ -199,12 +207,13 @@ fn health_call(args: &Args) -> Result<Option<HttpCall>> {
     Ok(Some(HttpCall::get(format!("{{base_url}}{path}"))))
 }
 
-/// --script 的值 → 额度绑定；none / 缺省 = 不绑（解绑）。
+/// --script 的值 → 额度绑定；none / 空串 / 缺省 = 不绑（解绑）。
+/// 空串与 none 同义，避免误报「脚本不存在」。
 fn script_spec(args: &Args) -> Result<Option<BalanceMode>> {
     let Some(path) = args.flag("script") else {
         return Ok(None);
     };
-    if path == "none" {
+    if path.is_empty() || path == "none" {
         return Ok(None);
     }
     let expanded = crate::probe::expand_tilde(path);
