@@ -6,10 +6,11 @@ use ratatui::widgets::{
     Block, BorderType, Cell, Clear, List, ListItem, ListState, Padding, Paragraph, Row, Table,
     TableState, Wrap,
 };
+use unicode_width::UnicodeWidthStr;
 
 use crate::app::{App, Focus, Modal};
 use crate::config::KeyEntry;
-use crate::form::{FormField, KeyForm, LineEdit};
+use crate::form::{Field, Form, LineEdit};
 use crate::probe::Health;
 use crate::recipe;
 
@@ -44,8 +45,19 @@ pub fn draw(frame: &mut Frame, app: &App) {
     draw_footer(frame, app, chunks[2]);
 
     match &app.modal {
-        Modal::Form(form) => draw_form(frame, form, area),
-        Modal::ConfirmDelete { key_id } => draw_confirm(frame, key_id, area),
+        Modal::Form { form, .. } => draw_form(frame, form, area),
+        Modal::ConfirmDeleteKey { key_id } => {
+            draw_confirm(frame, "删除密钥", std::slice::from_ref(key_id), 1, area);
+        }
+        Modal::ConfirmDeleteProvider { provider_id, .. } => {
+            draw_confirm(
+                frame,
+                "删除厂商",
+                std::slice::from_ref(provider_id),
+                1,
+                area,
+            );
+        }
         Modal::None => {}
     }
 }
@@ -399,7 +411,12 @@ fn draw_balance(frame: &mut Frame, app: &App, area: Rect) {
 
 fn draw_footer(frame: &mut Frame, app: &App, area: Rect) {
     let toast = app.toast_text();
-    let keys = " j/k 移动  Tab 切换  c 复制  a 添加  e 编辑  d 删除  r 刷新  q 退出 ";
+    let copy_hint = if app.focus == Focus::Providers {
+        "c 复制BaseURL"
+    } else {
+        "c 复制密钥"
+    };
+    let keys = format!(" j/k 移动  Tab 切换  {copy_hint}  a 添加  e 编辑  d 删除  r 刷新  q 退出 ");
     let line = if let Some(toast) = toast {
         Line::from(vec![
             Span::styled(
@@ -436,73 +453,94 @@ fn centered(width: u16, height: u16, area: Rect) -> Rect {
     h[1]
 }
 
-fn draw_form(frame: &mut Frame, form: &KeyForm, area: Rect) {
-    let rect = centered(64, 12, area);
+fn draw_form(frame: &mut Frame, form: &Form, area: Rect) {
+    let n = form.fields.len() as u16;
+    let rect = centered(66, n + 5, area);
     frame.render_widget(Clear, rect);
 
-    let block = pane_block(format!(" {} ", form.title()), true);
+    let block = pane_block(format!(" {} ", form.title), true);
     let inner = block.inner(rect);
     frame.render_widget(block, rect);
 
-    let label_width = 8usize;
     let rows = Layout::default()
         .direction(Direction::Vertical)
-        .constraints([
-            Constraint::Length(1), // 厂商
-            Constraint::Length(1), // 别名
-            Constraint::Length(1), // 分组
-            Constraint::Length(1), // 密钥
-            Constraint::Length(1), // 空行
-            Constraint::Length(2), // footer / error
-        ])
+        .constraints({
+            let mut c: Vec<Constraint> = (0..n).map(|_| Constraint::Length(1)).collect();
+            c.push(Constraint::Length(1));
+            c.push(Constraint::Length(2));
+            c
+        })
         .split(inner);
 
-    let provider_name = form.provider_id().unwrap_or("").to_string();
-    let provider_line = Line::from(vec![
-        Span::styled(
-            format!("{:<width$}", "厂商", width = label_width),
-            Style::new().fg(theme::MUTED),
-        ),
-        Span::styled(" ←/→ 切换  ", Style::new().fg(theme::MUTED)),
-        Span::styled(
-            provider_name,
-            Style::new().fg(theme::ACCENT).add_modifier(Modifier::BOLD),
-        ),
-    ]);
-    let provider_style = if form.field == FormField::Provider {
-        Style::new().bg(theme::HIGHLIGHT_BG)
-    } else {
-        Style::new()
-    };
-    frame.render_widget(Paragraph::new(provider_line).style(provider_style), rows[0]);
+    let label_cols = form
+        .fields
+        .iter()
+        .map(|f| UnicodeWidthStr::width(f.label()))
+        .max()
+        .unwrap_or(4)
+        + 2;
 
-    let alias_cursor = draw_field(
-        frame,
-        rows[1],
-        label_width,
-        "别名",
-        &form.alias,
-        form.field == FormField::Alias,
-    );
-    let group_cursor = draw_field(
-        frame,
-        rows[2],
-        label_width,
-        "分组",
-        &form.group,
-        form.field == FormField::Group,
-    );
-    let token_cursor = draw_field(
-        frame,
-        rows[3],
-        label_width,
-        "密钥",
-        &form.token,
-        form.field == FormField::Token,
-    );
+    let mut cursor: Option<(u16, u16)> = None;
+    for (i, field) in form.fields.iter().enumerate() {
+        let active = i == form.active;
+        let (line, caret) = match field {
+            Field::Text {
+                label,
+                edit,
+                enabled,
+            } => {
+                let field_width = rows[i].width.saturating_sub(label_cols as u16 + 2);
+                let line = Line::from(vec![
+                    pad_span(label, label_cols),
+                    Span::styled(
+                        render_edit(edit, field_width),
+                        if *enabled {
+                            Style::new().fg(theme::TEXT)
+                        } else {
+                            Style::new().fg(theme::MUTED)
+                        },
+                    ),
+                ]);
+                let caret = if active && *enabled {
+                    let (_, caret_from_left, _) = visible_tail(edit, field_width as usize);
+                    Some(caret_from_left as u16)
+                } else {
+                    None
+                };
+                (line, caret)
+            }
+            Field::Select {
+                label,
+                options,
+                selected,
+                hint,
+            } => {
+                let value = options.get(*selected).map(String::as_str).unwrap_or("—");
+                let affordance = if options.len() > 1 { "‹  ›" } else { "" };
+                let line = Line::from(vec![
+                    pad_span(label, label_cols),
+                    Span::styled(format!("{affordance} "), Style::new().fg(theme::MUTED)),
+                    Span::styled(
+                        value.to_string(),
+                        Style::new().fg(theme::ACCENT).add_modifier(Modifier::BOLD),
+                    ),
+                    Span::styled(format!("   {hint}"), Style::new().fg(theme::MUTED)),
+                ]);
+                (line, None)
+            }
+        };
+        let mut para = Paragraph::new(line);
+        if active {
+            para = para.style(Style::new().bg(theme::HIGHLIGHT_BG));
+        }
+        frame.render_widget(para, rows[i]);
+        if let Some(caret) = caret {
+            cursor = Some((rows[i].x + label_cols as u16 + 1 + caret, rows[i].y));
+        }
+    }
 
     let mut footer = vec![Span::styled(
-        " Tab 下一项   ←/→ 切厂商   Enter 保存   Esc 取消 ",
+        " Tab/↑↓ 下一项   ←/→ 切换/移动光标   Enter 保存   Esc 取消 ",
         Style::new().fg(theme::MUTED),
     )];
     if let Some(err) = &form.error {
@@ -513,49 +551,21 @@ fn draw_form(frame: &mut Frame, form: &KeyForm, area: Rect) {
     }
     frame.render_widget(
         Paragraph::new(Line::from(footer)).wrap(Wrap { trim: false }),
-        rows[5],
+        rows[n as usize + 1],
     );
 
-    let cursor = match form.field {
-        FormField::Provider => None,
-        FormField::Alias => alias_cursor,
-        FormField::Group => group_cursor,
-        FormField::Token => token_cursor,
-    };
     if let Some((x, y)) = cursor {
         frame.set_cursor_position((x, y));
     }
 }
 
-fn draw_field(
-    frame: &mut Frame,
-    row: Rect,
-    label_width: usize,
-    name: &str,
-    edit: &LineEdit,
-    active: bool,
-) -> Option<(u16, u16)> {
-    let field_width = row.width.saturating_sub(label_width as u16 + 2);
-    let line = Line::from(vec![
-        Span::styled(
-            format!("{name:<width$}", width = label_width),
-            Style::new().fg(theme::MUTED),
-        ),
-        Span::styled(render_edit(edit, field_width), Style::new().fg(theme::TEXT)),
-    ]);
-    let mut para = Paragraph::new(line);
-    if active {
-        para = para.style(Style::new().bg(theme::HIGHLIGHT_BG));
+fn pad_span(label: &str, cols: usize) -> Span<'static> {
+    let mut text = label.to_string();
+    let width = UnicodeWidthStr::width(label);
+    for _ in width..cols {
+        text.push(' ');
     }
-    frame.render_widget(para, row);
-    if !active {
-        return None;
-    }
-    let (_, caret_from_left, _) = visible_tail(edit, field_width as usize);
-    Some((
-        row.x + label_width as u16 + 1 + caret_from_left as u16,
-        row.y,
-    ))
+    Span::styled(text, Style::new().fg(theme::MUTED))
 }
 
 /// Value with an underscore cursor `_` drawn at the caret position.
@@ -594,24 +604,29 @@ fn visible_tail(edit: &LineEdit, width: usize) -> (String, usize, usize) {
     (text, cursor - start, start)
 }
 
-fn draw_confirm(frame: &mut Frame, key_id: &str, area: Rect) {
-    let rect = centered(56, 5, area);
+fn draw_confirm(frame: &mut Frame, title: &str, targets: &[String], _lines: usize, area: Rect) {
+    let rect = centered(56, 6, area);
     frame.render_widget(Clear, rect);
 
-    let block = pane_block(" 删除密钥 ", true);
+    let block = pane_block(format!(" {title} "), true);
     let inner = block.inner(rect);
     frame.render_widget(block, rect);
 
-    let lines = vec![
-        Line::from(Span::styled(
-            format!("确定删除 {key_id} ？"),
+    let mut lines: Vec<Line> = Vec::new();
+    for t in targets {
+        lines.push(Line::from(Span::styled(
+            format!("确定删除 {t} ？"),
             Style::new().fg(theme::TEXT).add_modifier(Modifier::BOLD),
-        )),
-        Line::from(""),
-        Line::from(Span::styled(
-            " Enter 确认删除    Esc 取消",
-            Style::new().fg(theme::MUTED),
-        )),
-    ];
+        )));
+    }
+    lines.push(Line::from(Span::styled(
+        "该操作会同时改写本地配置文件",
+        Style::new().fg(theme::MUTED),
+    )));
+    lines.push(Line::from(""));
+    lines.push(Line::from(Span::styled(
+        " Enter 确认删除    Esc 取消",
+        Style::new().fg(theme::MUTED),
+    )));
     frame.render_widget(Paragraph::new(lines), inner);
 }

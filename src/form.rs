@@ -1,35 +1,5 @@
 use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 
-use crate::config::KeyEntry;
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum FormField {
-    Provider,
-    Alias,
-    Group,
-    Token,
-}
-
-impl FormField {
-    fn next(self) -> Self {
-        match self {
-            Self::Provider => Self::Alias,
-            Self::Alias => Self::Group,
-            Self::Group => Self::Token,
-            Self::Token => Self::Provider,
-        }
-    }
-
-    fn prev(self) -> Self {
-        match self {
-            Self::Provider => Self::Token,
-            Self::Alias => Self::Provider,
-            Self::Group => Self::Alias,
-            Self::Token => Self::Group,
-        }
-    }
-}
-
 #[derive(Debug, Clone)]
 pub struct LineEdit {
     pub value: String,
@@ -41,13 +11,6 @@ impl LineEdit {
         let value = value.into();
         let cursor = value.chars().count();
         Self { value, cursor }
-    }
-
-    pub fn empty() -> Self {
-        Self {
-            value: String::new(),
-            cursor: 0,
-        }
     }
 
     fn chars(&self) -> Vec<char> {
@@ -113,21 +76,51 @@ impl LineEdit {
 }
 
 #[derive(Debug, Clone)]
-pub enum FormMode {
-    Add,
-    Edit { original_id: String },
+pub enum Field {
+    Text {
+        label: String,
+        edit: LineEdit,
+        enabled: bool,
+    },
+    Select {
+        label: String,
+        options: Vec<String>,
+        selected: usize,
+        hint: String,
+    },
 }
 
-#[derive(Debug, Clone)]
-pub struct KeyForm {
-    pub mode: FormMode,
-    pub provider_ids: Vec<String>,
-    pub provider_idx: usize,
-    pub alias: LineEdit,
-    pub group: LineEdit,
-    pub token: LineEdit,
-    pub field: FormField,
-    pub error: Option<String>,
+impl Field {
+    pub fn text(label: &str, value: impl Into<String>) -> Self {
+        Self::Text {
+            label: label.into(),
+            edit: LineEdit::new(value),
+            enabled: true,
+        }
+    }
+
+    pub fn readonly(label: &str, value: impl Into<String>) -> Self {
+        Self::Text {
+            label: label.into(),
+            edit: LineEdit::new(value),
+            enabled: false,
+        }
+    }
+
+    pub fn select(label: &str, options: Vec<String>, selected: usize, hint: &str) -> Self {
+        Self::Select {
+            label: label.into(),
+            options,
+            selected,
+            hint: hint.into(),
+        }
+    }
+
+    pub fn label(&self) -> &str {
+        match self {
+            Self::Text { label, .. } | Self::Select { label, .. } => label,
+        }
+    }
 }
 
 pub enum FormEvent {
@@ -136,53 +129,48 @@ pub enum FormEvent {
     Cancel,
 }
 
-impl KeyForm {
-    pub fn add(provider_ids: Vec<String>, provider_idx: usize) -> Self {
+#[derive(Debug, Clone)]
+pub struct Form {
+    pub title: String,
+    pub fields: Vec<Field>,
+    pub active: usize,
+    pub error: Option<String>,
+}
+
+impl Form {
+    pub fn new(title: impl Into<String>, fields: Vec<Field>, active: usize) -> Self {
+        let active = active.min(fields.len().saturating_sub(1));
         Self {
-            mode: FormMode::Add,
-            provider_ids,
-            provider_idx,
-            alias: LineEdit::empty(),
-            group: LineEdit::empty(),
-            token: LineEdit::empty(),
-            field: FormField::Alias,
+            title: title.into(),
+            fields,
+            active,
             error: None,
         }
     }
 
-    pub fn edit(provider_ids: Vec<String>, key: &KeyEntry) -> Self {
-        let provider_idx = provider_ids
-            .iter()
-            .position(|id| id == &key.provider)
-            .unwrap_or(0);
-        Self {
-            mode: FormMode::Edit {
-                original_id: key.id(),
-            },
-            provider_ids,
-            provider_idx,
-            alias: LineEdit::new(key.alias.clone()),
-            group: LineEdit::new(key.group.clone().unwrap_or_default()),
-            token: LineEdit::new(key.token.clone()),
-            field: FormField::Alias,
-            error: None,
+    pub fn text(&self, i: usize) -> &str {
+        match self.fields.get(i) {
+            Some(Field::Text { edit, .. }) => &edit.value,
+            _ => "",
         }
     }
 
-    pub fn title(&self) -> &'static str {
-        match self.mode {
-            FormMode::Add => "添加密钥",
-            FormMode::Edit { .. } => "编辑密钥",
+    pub fn select_value(&self, i: usize) -> &str {
+        match self.fields.get(i) {
+            Some(Field::Select {
+                options, selected, ..
+            }) => options.get(*selected).map(String::as_str).unwrap_or(""),
+            _ => "",
         }
-    }
-
-    pub fn provider_id(&self) -> Option<&str> {
-        self.provider_ids.get(self.provider_idx).map(String::as_str)
     }
 
     pub fn handle_paste(&mut self, text: &str) {
-        self.active_edit().insert(text);
-        self.error = None;
+        if let Some(Field::Text { edit, enabled, .. }) = self.fields.get_mut(self.active)
+            && *enabled
+        {
+            edit.insert(text);
+            self.error = None;
+        }
     }
 
     pub fn handle_key(&mut self, key: KeyEvent) -> FormEvent {
@@ -192,101 +180,166 @@ impl KeyForm {
         match key.code {
             KeyCode::Esc => FormEvent::Cancel,
             KeyCode::Enter => FormEvent::Save,
-            KeyCode::Tab => {
-                self.field = self.field.next();
+            KeyCode::Tab | KeyCode::Down => {
+                self.cycle(1);
                 FormEvent::None
             }
-            KeyCode::BackTab => {
-                self.field = self.field.prev();
+            KeyCode::BackTab | KeyCode::Up => {
+                self.cycle(-1);
                 FormEvent::None
             }
             KeyCode::Left => {
-                self.left();
+                self.on_left();
                 FormEvent::None
             }
             KeyCode::Right => {
-                self.right();
+                self.on_right();
                 FormEvent::None
             }
-            KeyCode::Home => {
-                if self.field != FormField::Provider {
-                    self.active_edit().home();
-                }
-                FormEvent::None
-            }
-            KeyCode::End => {
-                if self.field != FormField::Provider {
-                    self.active_edit().end();
-                }
-                FormEvent::None
-            }
-            KeyCode::Backspace => {
-                if self.field != FormField::Provider {
-                    self.active_edit().backspace();
-                    self.error = None;
-                }
-                FormEvent::None
-            }
-            KeyCode::Delete => {
-                if self.field != FormField::Provider {
-                    self.active_edit().delete();
-                    self.error = None;
-                }
-                FormEvent::None
-            }
-            KeyCode::Char(c) => {
-                if self.field != FormField::Provider {
-                    self.active_edit().insert(&c.to_string());
-                    self.error = None;
-                }
-                FormEvent::None
-            }
+            KeyCode::Home => self.with_edit(LineEdit::home),
+            KeyCode::End => self.with_edit(LineEdit::end),
+            KeyCode::Backspace => self.with_edit(LineEdit::backspace),
+            KeyCode::Delete => self.with_edit(LineEdit::delete),
+            KeyCode::Char(c) => self.with_edit(move |e| e.insert(&c.to_string())),
             _ => FormEvent::None,
         }
     }
 
-    fn left(&mut self) {
-        match self.field {
-            FormField::Provider => {
-                if !self.provider_ids.is_empty() {
-                    if self.provider_idx == 0 {
-                        self.provider_idx = self.provider_ids.len() - 1;
+    fn with_edit(&mut self, f: impl FnOnce(&mut LineEdit)) -> FormEvent {
+        if let Some(Field::Text { edit, enabled, .. }) = self.fields.get_mut(self.active)
+            && *enabled
+        {
+            f(edit);
+            self.error = None;
+        }
+        FormEvent::None
+    }
+
+    fn cycle(&mut self, dir: i32) {
+        let n = self.fields.len();
+        if n == 0 {
+            return;
+        }
+        let mut i = self.active as i32 + dir;
+        i = i.rem_euclid(n as i32);
+        self.active = i as usize;
+    }
+
+    fn on_left(&mut self) {
+        match self.fields.get_mut(self.active) {
+            Some(Field::Select {
+                options, selected, ..
+            }) => {
+                if options.len() > 1 {
+                    if *selected == 0 {
+                        *selected = options.len() - 1;
                     } else {
-                        self.provider_idx -= 1;
+                        *selected -= 1;
                     }
                 }
             }
-            _ => self.active_edit().left(),
+            Some(Field::Text { edit, .. }) => edit.left(),
+            None => {}
         }
     }
 
-    fn right(&mut self) {
-        match self.field {
-            FormField::Provider => {
-                if !self.provider_ids.is_empty() {
-                    self.provider_idx = (self.provider_idx + 1) % self.provider_ids.len();
+    fn on_right(&mut self) {
+        match self.fields.get_mut(self.active) {
+            Some(Field::Select {
+                options, selected, ..
+            }) => {
+                if options.len() > 1 {
+                    *selected = (*selected + 1) % options.len();
                 }
             }
-            _ => self.active_edit().right(),
+            Some(Field::Text { edit, .. }) => edit.right(),
+            None => {}
         }
     }
+}
 
-    fn active_edit(&mut self) -> &mut LineEdit {
-        match self.field {
-            FormField::Provider | FormField::Alias => &mut self.alias,
-            FormField::Group => &mut self.group,
-            FormField::Token => &mut self.token,
-        }
-    }
+/// 密钥表单：厂商 / 别名 / 分组 / 密钥
+pub fn key_add(provider_options: Vec<String>, selected: usize) -> Form {
+    Form::new(
+        "添加密钥",
+        vec![
+            Field::select("厂商", provider_options, selected, "←/→ 切换"),
+            Field::text("别名", ""),
+            Field::text("分组", ""),
+            Field::text("密钥", ""),
+        ],
+        1,
+    )
+}
+
+pub fn key_edit(
+    provider_options: Vec<String>,
+    selected: usize,
+    alias: &str,
+    group: &str,
+    token: &str,
+) -> Form {
+    Form::new(
+        "编辑密钥",
+        vec![
+            Field::select("厂商", provider_options, selected, "←/→ 切换"),
+            Field::text("别名", alias),
+            Field::text("分组", group),
+            Field::text("密钥", token),
+        ],
+        1,
+    )
+}
+
+/// 厂商表单：ID / 名称 / Base URL / 探活路径 / 额度路径 / 额度取值路径
+pub fn provider_add() -> Form {
+    Form::new(
+        "添加厂商",
+        vec![
+            Field::text("ID", ""),
+            Field::text("名称", ""),
+            Field::text("Base URL", ""),
+            Field::text("探活路径", "/models"),
+            Field::text("额度路径", ""),
+            Field::text("额度取值", ""),
+        ],
+        0,
+    )
+}
+
+pub fn provider_edit(
+    id: &str,
+    name: &str,
+    base_url: &str,
+    health_path: &str,
+    balance_path: &str,
+    balance_json: &str,
+) -> Form {
+    Form::new(
+        format!("编辑厂商 · {id}"),
+        vec![
+            Field::readonly("ID", id),
+            Field::text("名称", name),
+            Field::text("Base URL", base_url),
+            Field::text("探活路径", health_path),
+            Field::text("额度路径", balance_path),
+            Field::text("额度取值", balance_json),
+        ],
+        1,
+    )
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
 
+    fn sample_form() -> Form {
+        key_add(vec!["deepseek".into(), "relay".into()], 0)
+    }
+
     #[test]
     fn insert_and_backspace_keep_cursor() {
-        let mut edit = LineEdit::empty();
+        let mut edit = LineEdit::new("");
         edit.insert("home");
         assert_eq!(edit.value, "home");
         assert_eq!(edit.cursor, 4);
@@ -294,5 +347,26 @@ mod tests {
         edit.backspace();
         assert_eq!(edit.value, "hoe");
         assert_eq!(edit.cursor, 2);
+    }
+
+    #[test]
+    fn tab_cycles_and_left_changes_select() {
+        let mut form = sample_form();
+        assert_eq!(form.active, 1);
+        form.handle_key(KeyEvent::from(KeyCode::Tab));
+        assert_eq!(form.active, 2);
+        form.handle_key(KeyEvent::from(KeyCode::BackTab));
+        form.handle_key(KeyEvent::from(KeyCode::BackTab));
+        assert_eq!(form.active, 0);
+        form.handle_key(KeyEvent::from(KeyCode::Left));
+        assert_eq!(form.select_value(0), "relay");
+    }
+
+    #[test]
+    fn readonly_field_ignores_input() {
+        let mut form = provider_edit("deepseek", "DeepSeek", "https://x", "", "", "");
+        form.active = 0;
+        form.handle_key(KeyEvent::from(KeyCode::Char('z')));
+        assert_eq!(form.text(0), "deepseek");
     }
 }

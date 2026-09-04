@@ -22,10 +22,10 @@ use crate::form::FormEvent;
 
 #[tokio::main]
 async fn main() -> Result<()> {
-    let mut args = std::env::args();
-    let flag = args.find(|a| a.starts_with("--snapshot"));
+    let flag = std::env::args().find(|a| a.starts_with("--snapshot"));
     match flag.as_deref() {
-        Some("--snapshot-form") => run_snapshot_form().await,
+        Some("--snapshot-form") => run_snapshot_key_form().await,
+        Some("--snapshot-provider-form") => run_snapshot_provider_form().await,
         Some("--snapshot") => run_snapshot().await,
         _ => run_tui().await,
     }
@@ -59,8 +59,10 @@ async fn loop_tui(
                         }
                     }
                     Event::Key(key) if key.kind == KeyEventKind::Press => {
+                        let was_modal = !matches!(app.modal, Modal::None);
                         handle_key(app, key);
-                        if matches!(app.modal, Modal::None)
+                        if !was_modal
+                            && matches!(app.modal, Modal::None)
                             && matches!(key.code, KeyCode::Char('q') | KeyCode::Esc)
                         {
                             break;
@@ -85,15 +87,12 @@ async fn loop_tui(
 
 fn handle_key(app: &mut App, key: crossterm::event::KeyEvent) {
     match &mut app.modal {
-        Modal::Form(form) => match form.handle_key(key) {
-            FormEvent::Save => {
-                let form = form.clone();
-                app.save_form(&form);
-            }
+        Modal::Form { form, .. } => match form.handle_key(key) {
+            FormEvent::Save => app.save_form(),
             FormEvent::Cancel => app.cancel_modal(),
             FormEvent::None => {}
         },
-        Modal::ConfirmDelete { .. } => match key.code {
+        Modal::ConfirmDeleteKey { .. } | Modal::ConfirmDeleteProvider { .. } => match key.code {
             KeyCode::Enter | KeyCode::Char('y') | KeyCode::Char('d') => app.confirm_delete(),
             KeyCode::Esc | KeyCode::Char('n') | KeyCode::Char('q') => app.cancel_modal(),
             _ => {}
@@ -120,24 +119,35 @@ async fn run_snapshot() -> Result<()> {
     render_snapshot(&app).await
 }
 
-async fn run_snapshot_form() -> Result<()> {
-    let (mut a, _rx) = app::start()?;
-    a.open_add();
-    if let app::Modal::Form(form) = &a.modal {
-        let mut filled = form.clone();
-        filled.alias.value = "work".into();
-        filled.alias.cursor = 4;
-        filled.group.value = "个人".into();
-        filled.group.cursor = 2;
-        filled.token.value = "sk-pasted-example-token-12345".into();
-        filled.token.cursor = 29;
-        a.modal = app::Modal::Form(filled);
+async fn run_snapshot_key_form() -> Result<()> {
+    let (mut app, _rx) = app::start()?;
+    app.focus = app::Focus::Keys;
+    app.open_add();
+    if let Modal::Form { form, .. } = &mut app.modal {
+        form.fields[1] = form::Field::text("别名", "work");
+        form.fields[2] = form::Field::text("分组", "个人");
+        form.fields[3] = form::Field::text("密钥", "sk-pasted-example-token-12345");
     }
-    render_snapshot(&a).await
+    render_snapshot(&app).await
+}
+
+async fn run_snapshot_provider_form() -> Result<()> {
+    let (mut app, _rx) = app::start()?;
+    app.focus = app::Focus::Providers;
+    app.open_add();
+    if let Modal::Form { form, .. } = &mut app.modal {
+        form.fields[0] = form::Field::text("ID", "my-relay");
+        form.fields[1] = form::Field::text("名称", "我的中转站");
+        form.fields[2] = form::Field::text("Base URL", "https://relay.example.com/v1");
+        form.fields[4] = form::Field::text("额度路径", "/v1/dashboard/billing/subscription");
+        form.fields[5] = form::Field::text("额度取值", "hard_limit_usd");
+        form.active = 5;
+    }
+    render_snapshot(&app).await
 }
 
 async fn render_snapshot(app: &App) -> Result<()> {
-    let backend = TestBackend::new(112, 28);
+    let backend = TestBackend::new(112, 30);
     let mut terminal = Terminal::new(backend)?;
     terminal.draw(|frame| ui::draw(frame, app))?;
     print!("{}", buffer_to_string(terminal.backend().buffer()));

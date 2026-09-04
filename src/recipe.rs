@@ -1,6 +1,6 @@
 use std::collections::HashMap;
 use std::fs;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 
 use anyhow::{Context, Result};
 use serde::{Deserialize, Serialize};
@@ -16,8 +16,13 @@ pub struct Recipe {
     #[serde(default)]
     pub supports_groups: bool,
     pub auth: Auth,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub health: Option<HttpCall>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub balance: Option<BalanceSpec>,
+    /// 本地 YAML 路径；None = 内置（编译进二进制），不可删除。
+    #[serde(skip)]
+    pub origin: Option<PathBuf>,
 }
 
 impl Recipe {
@@ -53,7 +58,19 @@ pub struct HttpCall {
     pub url: String,
     #[serde(default)]
     pub headers: HashMap<String, String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub body: Option<Value>,
+}
+
+impl HttpCall {
+    pub fn get(url: impl Into<String>) -> Self {
+        Self {
+            method: default_get(),
+            url: url.into(),
+            headers: HashMap::new(),
+            body: None,
+        }
+    }
 }
 
 fn default_get() -> String {
@@ -108,12 +125,33 @@ pub struct BalanceItem {
 
 pub fn load_recipes() -> Result<HashMap<String, Recipe>> {
     let mut map = HashMap::new();
-    insert_yaml(&mut map, BUILTIN_DEEPSEEK, "builtin:deepseek")?;
+    insert_yaml(&mut map, BUILTIN_DEEPSEEK, "builtin:deepseek", None)?;
 
     let manifest_dir = Path::new(env!("CARGO_MANIFEST_DIR")).join("recipes");
     load_dir(&manifest_dir, &mut map)?;
-    load_dir(&crate::config::config_dir().join("recipes"), &mut map)?;
+    load_dir(&user_recipes_dir(), &mut map)?;
     Ok(map)
+}
+
+pub fn user_recipes_dir() -> PathBuf {
+    crate::config::config_dir().join("recipes")
+}
+
+/// 写入用户 recipe 目录，返回文件路径。
+pub fn save_user_recipe(recipe: &Recipe) -> Result<PathBuf> {
+    save_user_recipe_to(&user_recipes_dir(), recipe)
+}
+
+pub fn delete_user_recipe(path: &Path) -> Result<()> {
+    fs::remove_file(path).with_context(|| format!("delete {}", path.display()))
+}
+
+pub fn save_user_recipe_to(dir: &Path, recipe: &Recipe) -> Result<PathBuf> {
+    fs::create_dir_all(dir).with_context(|| format!("mkdir {}", dir.display()))?;
+    let path = dir.join(format!("{}.yaml", recipe.id));
+    let yaml = serde_yaml::to_string(recipe).context("serialize recipe")?;
+    fs::write(&path, yaml).with_context(|| format!("write {}", path.display()))?;
+    Ok(path)
 }
 
 fn load_dir(dir: &Path, map: &mut HashMap<String, Recipe>) -> Result<()> {
@@ -134,15 +172,21 @@ fn load_dir(dir: &Path, map: &mut HashMap<String, Recipe>) -> Result<()> {
     files.sort();
     for path in files {
         let raw = fs::read_to_string(&path).with_context(|| format!("read {}", path.display()))?;
-        insert_yaml(map, &raw, &path.display().to_string())?;
+        insert_yaml(map, &raw, &path.display().to_string(), Some(path.clone()))?;
     }
     Ok(())
 }
 
-fn insert_yaml(map: &mut HashMap<String, Recipe>, raw: &str, origin: &str) -> Result<()> {
+fn insert_yaml(
+    map: &mut HashMap<String, Recipe>,
+    raw: &str,
+    origin: &str,
+    path: Option<PathBuf>,
+) -> Result<()> {
     let mut recipe: Recipe =
         serde_yaml::from_str(raw).with_context(|| format!("parse {origin}"))?;
     recipe.normalize();
+    recipe.origin = path;
     map.insert(recipe.id.clone(), recipe);
     Ok(())
 }
@@ -297,6 +341,86 @@ pub fn money(currency: Option<&str>, amount: &str) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn temp_dir(name: &str) -> PathBuf {
+        let dir = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+            .join("target")
+            .join(format!("apim-recipe-{name}-{}", std::process::id()));
+        let _ = fs::remove_dir_all(&dir);
+        fs::create_dir_all(&dir).unwrap();
+        dir
+    }
+
+    fn sample_user_recipe() -> Recipe {
+        Recipe {
+            id: "my-relay".into(),
+            name: "我的中转站".into(),
+            base_url: "https://relay.example.com/v1".into(),
+            supports_groups: false,
+            auth: Auth {
+                kind: AuthKind::Bearer,
+                header: None,
+                prefix: None,
+                query_param: None,
+            },
+            health: Some(HttpCall::get("{base_url}/models")),
+            balance: Some(BalanceSpec {
+                request: HttpCall::get("{base_url}/v1/dashboard/billing/subscription"),
+                parse: ParseSpec {
+                    available: None,
+                    items: None,
+                    fields: HashMap::from([(
+                        "total_balance".to_string(),
+                        "hard_limit_usd".to_string(),
+                    )]),
+                },
+                render: RenderSpec {
+                    headline: "{total_balance}".into(),
+                    fields: vec![RenderField {
+                        label: "额度".into(),
+                        value: "{total_balance}".into(),
+                    }],
+                },
+            }),
+            origin: None,
+        }
+    }
+
+    #[test]
+    fn user_recipe_save_roundtrip() {
+        let dir = temp_dir("roundtrip");
+        let recipe = sample_user_recipe();
+        let path = save_user_recipe_to(&dir, &recipe).unwrap();
+        assert!(path.ends_with("my-relay.yaml"));
+
+        let mut map = HashMap::new();
+        load_dir(&dir, &mut map).unwrap();
+        let loaded = map.get("my-relay").expect("recipe loaded");
+        assert_eq!(loaded.name, "我的中转站");
+        assert_eq!(loaded.base_url, "https://relay.example.com/v1");
+        assert_eq!(loaded.origin.as_deref(), Some(path.as_path()));
+        let balance = loaded.balance.as_ref().unwrap();
+        assert_eq!(
+            balance
+                .parse
+                .fields
+                .get("total_balance")
+                .map(String::as_str),
+            Some("hard_limit_usd")
+        );
+        delete_user_recipe(&path).unwrap();
+        assert!(!path.exists());
+    }
+
+    #[test]
+    fn generic_balance_parses_flat_response() {
+        let recipe = sample_user_recipe();
+        let spec = recipe.balance.as_ref().unwrap();
+        let json: Value = serde_json::from_str(r#"{"hard_limit_usd": 12.5}"#).unwrap();
+        let view = parse_balance(spec, &json).unwrap();
+        assert_eq!(view.headline, "12.5");
+        assert_eq!(view.items.len(), 1);
+    }
 
     #[test]
     fn deepseek_recipe_parses_live_shape() {
