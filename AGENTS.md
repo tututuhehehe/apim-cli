@@ -21,10 +21,12 @@ src/
 │   ├── mod.rs         Args 解析（--flag 值/布尔）、Ctx（config+recipes 目录，可注入测试）、分发与帮助
 │   ├── provider.rs    provider ls/add/set/rm（--script 绑定/解绑额度脚本）
 │   ├── keys.rs        key ls/add/set/rm（token 只走 stdin，不进 argv）
-│   └── query.rs       status（真实探活+额度，--json）/ copy / use
+│   ├── query.rs       status（并发探活+额度，--json）/ copy / use
+│   └── tests.rs       CLI 沙盒测试（临时目录全流程）
 ├── form/              通用表单引擎（密钥表单、厂商表单共用）
 │   ├── mod.rs         Field（文本/选择/只读）、Form、按键分发、表单构造器
-│   └── edit.rs        LineEdit：单行编辑（值 + 光标）
+│   ├── edit.rs        LineEdit：单行编辑（值 + 光标）
+│   └── tests.rs       表单引擎测试
 ├── app/               应用状态机
 │   ├── mod.rs         App 结构、start、导航、探活调度
 │   ├── modal.rs       Modal 枚举 + 打开/保存分发/删除确认分发
@@ -44,9 +46,11 @@ src/
 │   ├── script.rs      BalanceMode（http 缺省 | script 逃生舱）+ ScriptSpec，自定义 serde
 │   └── store.rs       用户 recipe 读写（~/.config/apim/recipes/*.yaml）
 ├── config/            密钥清单
-│   ├── mod.rs         KeyEntry、读取 config.toml + secrets.toml
-│   └── store.rs       原子写入（tmp+rename，600 权限）
-└── probe.rs           并发探活（health + balance 并发；balance 分 http/脚本两路，脚本=env 注入+超时+stdout 逐行）
+│   ├── mod.rs         KeyEntry、读取 config.toml + secrets.toml（严格版给 TUI，宽松版 load_keys_lenient 给 CLI 自救）
+│   └── store.rs       原子写入（tmp+rename，tmp 名带 pid，600 权限）
+└── probe/             并发探活（health + balance 并发，tokio::join!）
+    ├── mod.rs         Health/ProbeResult、client、http 一路（鉴权/请求/JSON 解析）
+    └── script.rs      脚本执行器（env 注入/超时 kill/stderr 截断 200/stdout 50 行上限）+ expand_tilde
 docs/
 └── quota-script-prompt.md  额度脚本代写提示词（整体复制给 AI Agent 用）
 recipes/
