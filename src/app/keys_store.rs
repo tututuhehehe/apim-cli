@@ -54,13 +54,14 @@ impl App {
         self.modal = Modal::None;
         self.toast = Some((format!("已保存 {new_id}"), Instant::now()));
         self.rebuild_provider_list();
+        // 定位走过滤后的视图：有过滤时选中项要落在可见行上
         self.selected_provider = self
-            .provider_ids
+            .provider_ids_filtered()
             .iter()
             .position(|p| p == &provider)
             .unwrap_or(self.selected_provider);
         self.selected_key = self
-            .keys_in_provider()
+            .keys_in_provider_filtered()
             .iter()
             .position(|i| self.keys[*i].id() == new_id)
             .unwrap_or(0);
@@ -81,12 +82,9 @@ impl App {
         }
         self.states.remove(&key_id);
         self.modal = Modal::None;
+        // rebuild 内部会把选中项钳回（过滤后的）有效范围
         self.rebuild_provider_list();
-        let n = self.keys_in_provider().len();
-        if self.selected_key >= n && n > 0 {
-            self.selected_key = n - 1;
-        }
-        if n > 0 {
+        if !self.keys_in_provider_filtered().is_empty() {
             self.refresh_current_provider();
         }
     }

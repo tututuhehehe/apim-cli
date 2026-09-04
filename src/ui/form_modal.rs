@@ -135,7 +135,8 @@ fn pad_span(label: &str, cols: usize) -> Span<'static> {
 }
 
 /// Value with an underscore cursor `_` drawn at the caret position.
-fn render_edit(edit: &LineEdit, width: u16) -> String {
+/// 搜索弹窗（ui/search.rs）复用同一套光标渲染。
+pub(crate) fn render_edit(edit: &LineEdit, width: u16) -> String {
     let (text, cursor_from_left, _) = visible_tail(edit, width as usize);
     let chars: Vec<char> = text.chars().collect();
     let mut out = String::new();
@@ -149,6 +150,12 @@ fn render_edit(edit: &LineEdit, width: u16) -> String {
         out.push('_');
     }
     out
+}
+
+/// 光标在可见文本里的列偏移（供 set_cursor_position 用）。
+pub(crate) fn visible_caret(edit: &LineEdit, width: u16) -> u16 {
+    let (_, caret, _) = visible_tail(edit, width as usize);
+    caret as u16
 }
 
 /// When the value is wider than the field, show its tail so the caret stays

@@ -16,7 +16,14 @@ pub(crate) fn draw_keys(frame: &mut Frame, app: &App, area: Rect) {
     let focused = app.focus == Focus::Keys;
     let recipe = app.current_recipe();
     let name = recipe.map(|r| r.name.as_str()).unwrap_or("—");
-    let n = app.keys_in_provider().len();
+    let rows_idx = app.keys_in_provider_filtered();
+    let n = rows_idx.len();
+    let total = app.keys_in_provider().len();
+    let count = if n == total {
+        format!("{n} 个密钥")
+    } else {
+        format!("{n}/{total} 个密钥")
+    };
     let headline = app
         .selected_key_entry()
         .and_then(|key| {
@@ -34,14 +41,13 @@ pub(crate) fn draw_keys(frame: &mut Frame, app: &App, area: Rect) {
         })
         .unwrap_or_else(|| "—".into());
 
-    let block = pane_block(format!(" {name}  ·  {n} 个密钥  ·  {headline} "), focused);
+    let block = pane_block(format!(" {name}  ·  {count}  ·  {headline} "), focused);
     let empty_inner = block.inner(area);
 
     let header = Row::new(["#", "别名", "分组", "密钥", "状态"])
         .style(Style::new().fg(theme::MUTED).add_modifier(Modifier::BOLD));
 
-    let rows: Vec<Row> = app
-        .keys_in_provider()
+    let rows: Vec<Row> = rows_idx
         .into_iter()
         .enumerate()
         .map(|(i, idx)| {
@@ -86,7 +92,12 @@ pub(crate) fn draw_keys(frame: &mut Frame, app: &App, area: Rect) {
     frame.render_stateful_widget(table, area, &mut state);
 
     if n == 0 {
-        let hint = Paragraph::new(" 该厂商还没有密钥，按 a 添加 ")
+        let hint = if app.key_filter.is_some() {
+            " 没有匹配的密钥，Esc 清除过滤 "
+        } else {
+            " 该厂商还没有密钥，按 a 添加 "
+        };
+        let hint = Paragraph::new(hint)
             .style(Style::new().fg(theme::MUTED))
             .alignment(Alignment::Center);
         let inner = Rect {

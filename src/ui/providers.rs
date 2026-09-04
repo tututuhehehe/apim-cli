@@ -14,10 +14,16 @@ use crate::recipe;
 pub(crate) fn draw_providers(frame: &mut Frame, app: &App, area: Rect) {
     frame.render_widget(Clear, area);
     let focused = app.focus == Focus::Providers;
-    let block = pane_block(format!(" 厂商 · {} ", app.provider_ids.len()), focused);
+    let ids = app.provider_ids_filtered();
+    let total = app.provider_ids.len();
+    let count = if ids.len() == total {
+        format!("{total}")
+    } else {
+        format!("{}/{}", ids.len(), total)
+    };
+    let block = pane_block(format!(" 厂商 · {count} "), focused);
 
-    let items: Vec<ListItem> = app
-        .provider_ids
+    let items: Vec<ListItem> = ids
         .iter()
         .map(|id| {
             let recipe = app.recipes.get(id);

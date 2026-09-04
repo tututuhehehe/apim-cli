@@ -106,7 +106,7 @@ impl App {
         self.toast = Some((format!("已保存厂商 {id}"), Instant::now()));
         self.rebuild_provider_list();
         self.selected_provider = self
-            .provider_ids
+            .provider_ids_filtered()
             .iter()
             .position(|p| p == &id)
             .unwrap_or(self.selected_provider);

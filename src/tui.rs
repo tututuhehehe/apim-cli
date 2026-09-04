@@ -40,14 +40,20 @@ async fn loop_tui(
                     Event::Paste(text) => {
                         if let Some(form) = app.form() {
                             form.handle_paste(&text);
+                        } else {
+                            app.search_paste(&text);
                         }
                     }
                     Event::Key(key) if key.kind == KeyEventKind::Press => {
                         let was_modal = !matches!(app.modal, Modal::None);
+                        // 无弹窗 Esc 优先清过滤；清掉了就不能当「退出」处理
+                        let esc_clears_filter =
+                            !was_modal && key.code == KeyCode::Esc && app.has_filter();
                         handle_key(app, key);
                         if !was_modal
                             && matches!(app.modal, Modal::None)
                             && matches!(key.code, KeyCode::Char('q') | KeyCode::Esc)
+                            && !esc_clears_filter
                         {
                             break;
                         }
@@ -76,6 +82,32 @@ fn handle_key(app: &mut App, key: KeyEvent) {
             FormEvent::Cancel => app.cancel_modal(),
             FormEvent::None => {}
         },
+        Modal::Search { edit, .. } => {
+            if key.modifiers.contains(KeyModifiers::CONTROL) {
+                return;
+            }
+            match key.code {
+                KeyCode::Enter => app.apply_search(),
+                KeyCode::Esc => app.cancel_search(),
+                KeyCode::Backspace => {
+                    edit.backspace();
+                    app.apply_live_filter();
+                }
+                KeyCode::Delete => {
+                    edit.delete();
+                    app.apply_live_filter();
+                }
+                KeyCode::Left => edit.left(),
+                KeyCode::Right => edit.right(),
+                KeyCode::Home => edit.home(),
+                KeyCode::End => edit.end(),
+                KeyCode::Char(c) => {
+                    edit.insert(&c.to_string());
+                    app.apply_live_filter();
+                }
+                _ => {}
+            }
+        }
         Modal::ConfirmDeleteKey { .. } | Modal::ConfirmDeleteProvider { .. } => match key.code {
             KeyCode::Enter | KeyCode::Char('y') | KeyCode::Char('d') => app.confirm_delete(),
             KeyCode::Esc | KeyCode::Char('n') | KeyCode::Char('q') => app.cancel_modal(),
@@ -83,7 +115,11 @@ fn handle_key(app: &mut App, key: KeyEvent) {
         },
         Modal::None => match key.code {
             KeyCode::Char('c') if key.modifiers.contains(KeyModifiers::CONTROL) => {}
-            KeyCode::Char('q') | KeyCode::Esc => {}
+            KeyCode::Char('q') => {}
+            KeyCode::Esc => {
+                app.clear_filter();
+            }
+            KeyCode::Char('/') => app.open_search(),
             KeyCode::Enter if app.focus == Focus::Providers => app.open_homepage(),
             KeyCode::Char('c') => app.copy_selected(),
             KeyCode::Char('r') => app.refresh_current_provider(),

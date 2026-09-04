@@ -6,6 +6,7 @@ mod form_modal;
 mod header;
 mod keys;
 mod providers;
+mod search;
 
 use ratatui::Frame;
 use ratatui::layout::{Constraint, Direction, Layout, Rect};
@@ -50,6 +51,7 @@ pub fn draw(frame: &mut Frame, app: &App) {
         Modal::ConfirmDeleteProvider { provider_id, .. } => {
             confirm::draw_confirm(frame, "删除厂商", std::slice::from_ref(provider_id), area);
         }
+        Modal::Search { target, edit, .. } => search::draw_search(frame, *target, edit, area),
         Modal::None => {}
     }
 }
