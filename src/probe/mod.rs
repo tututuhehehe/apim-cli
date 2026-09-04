@@ -96,6 +96,15 @@ async fn hit_health(
     Ok((status, elapsed_ms(started)))
 }
 
+/// endpoint 会显示在额度面板：Query 鉴权配方的 URL 带 ?api_key=<token>，
+/// 展示前把 token 原文抹掉，明文密钥不上屏。
+fn display_endpoint(method: &str, url: &str, token: &str) -> String {
+    if token.is_empty() {
+        return format!("{} {}", method.to_uppercase(), url);
+    }
+    format!("{} {}", method.to_uppercase(), url.replace(token, "…"))
+}
+
 async fn hit_balance(
     client: &Client,
     recipe: &Recipe,
@@ -103,10 +112,10 @@ async fn hit_balance(
     token: &str,
 ) -> BalanceSnapshot {
     let ctx = recipe::request_ctx(recipe, token);
-    let endpoint = format!(
-        "{} {}",
-        spec.request.method.to_uppercase(),
-        recipe::subst(&spec.request.url, &ctx)
+    let endpoint = display_endpoint(
+        &spec.request.method,
+        &recipe::subst(&spec.request.url, &ctx),
+        token,
     );
     let started = Instant::now();
     match fetch_balance(client, recipe, spec, token).await {
@@ -209,4 +218,27 @@ fn truncate(s: &str, max: usize) -> String {
         out.push('…');
     }
     out.replace('\n', " ")
+}
+
+#[cfg(test)]
+mod tests {
+    use super::display_endpoint;
+
+    #[test]
+    fn display_endpoint_redacts_token_in_query_urls() {
+        // Query 鉴权配方：token 在 URL 里，展示前必须抹掉
+        assert_eq!(
+            display_endpoint(
+                "GET",
+                "https://x.io/api/usage?api_key=sk-secret-123&span=month",
+                "sk-secret-123"
+            ),
+            "GET https://x.io/api/usage?api_key=…&span=month"
+        );
+        // Bearer 配方 URL 不含 token，原样展示
+        assert_eq!(
+            display_endpoint("GET", "https://api.deepseek.com/user/balance", "sk-other"),
+            "GET https://api.deepseek.com/user/balance"
+        );
+    }
 }
