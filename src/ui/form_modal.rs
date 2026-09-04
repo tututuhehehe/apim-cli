@@ -5,7 +5,7 @@ use ratatui::layout::{Constraint, Direction, Layout, Rect};
 use ratatui::style::{Modifier, Style};
 use ratatui::text::{Line, Span};
 use ratatui::widgets::{Clear, Paragraph, Wrap};
-use unicode_width::UnicodeWidthStr;
+use unicode_width::{UnicodeWidthChar, UnicodeWidthStr};
 
 use super::{centered, pane_block, theme};
 use crate::form::{Field, Form, LineEdit};
@@ -96,8 +96,7 @@ fn field_line(
                 ),
             ]);
             let caret = if active && *enabled {
-                let (_, caret_from_left, _) = visible_tail(edit, field_width as usize);
-                Some(caret_from_left as u16)
+                Some(visible_caret(edit, field_width))
             } else {
                 None
             };
@@ -153,14 +152,16 @@ pub(crate) fn render_edit(edit: &LineEdit, width: u16) -> String {
 }
 
 /// 光标在可见文本里的列偏移（供 set_cursor_position 用）。
+/// CJK 等宽字符按显示宽度折算，光标列与终端实际列对齐。
 pub(crate) fn visible_caret(edit: &LineEdit, width: u16) -> u16 {
-    let (_, caret, _) = visible_tail(edit, width as usize);
-    caret as u16
+    let (text, caret, _) = visible_tail(edit, width as usize);
+    let before_caret: String = text.chars().take(caret).collect();
+    before_caret.width() as u16
 }
 
 /// When the value is wider than the field, show its tail so the caret stays
 /// visible. Returns (visible text, caret offset in visible text, first
-/// visible char index).
+/// visible char index). 窗口大小按显示宽度（CJK 记 2 列）计，光标列不漂移。
 fn visible_tail(edit: &LineEdit, width: usize) -> (String, usize, usize) {
     let chars: Vec<char> = edit.value.chars().collect();
     let total = chars.len();
@@ -168,13 +169,29 @@ fn visible_tail(edit: &LineEdit, width: usize) -> (String, usize, usize) {
     if width == 0 {
         return (String::new(), 0, cursor);
     }
-    if total <= width {
+    let char_w = |c: char| c.width().unwrap_or(0);
+    let total_w: usize = chars.iter().map(|&c| char_w(c)).sum();
+    if total_w <= width {
         return (edit.value.clone(), cursor, 0);
     }
-    let start = total.saturating_sub(width).min(cursor);
-    let end = (start + width).min(total);
-    let text: String = chars[start..end].iter().collect();
-    (text, cursor - start, start)
+    // 溢出：从尾部往前收一个放得下的窗口，起点不越过光标（保证光标可见）
+    let mut start = total;
+    let mut acc = 0;
+    while start > 0 && acc + char_w(chars[start - 1]) <= width {
+        acc += char_w(chars[start - 1]);
+        start -= 1;
+    }
+    if start > cursor {
+        // 尾部窗口装不下光标之前的内容：改为从光标处向右展示
+        start = cursor;
+    }
+    let mut end = start;
+    let mut acc = 0;
+    while end < total && acc + char_w(chars[end]) <= width {
+        acc += char_w(chars[end]);
+        end += 1;
+    }
+    (chars[start..end].iter().collect(), cursor - start, start)
 }
 
 #[cfg(test)]
@@ -198,5 +215,52 @@ mod tests {
         assert_eq!(text, "abc");
         assert_eq!(caret, 2);
         assert_eq!(start, 0);
+    }
+
+    // ---- 宽字符（CJK 记 2 列）：光标列按显示宽度，不按字符数 --------------
+
+    #[test]
+    fn visible_tail_wide_chars_fit_by_display_width() {
+        let edit = LineEdit::new("你好世界"); // 4 字符、显示宽 8
+        // 显示宽 8 > 限宽 5：窗口只装得下「世界」（宽 4），而不是末 5 个字符
+        let (text, caret, start) = visible_tail(&edit, 5);
+        assert_eq!(text, "世界");
+        assert_eq!(caret, 2, "caret 仍是可见文本内的字符下标");
+        assert_eq!(start, 2);
+        // 光标列 = 前缀显示宽 4，若按字符数会错报 2（终端光标漂移两格）
+        assert_eq!(visible_caret(&edit, 5), 4);
+        // 全部放得下时按显示宽计
+        assert_eq!(visible_caret(&edit, 8), 8);
+    }
+
+    #[test]
+    fn visible_tail_keeps_caret_visible_in_wide_text() {
+        // 光标停在「世」前（下标 2）：尾部窗口起点不越过光标
+        let mut edit = LineEdit::new("你好世界");
+        edit.left();
+        edit.left();
+        assert_eq!(edit.cursor, 2);
+        let (text, caret, start) = visible_tail(&edit, 5);
+        assert_eq!((text, caret, start), ("世界".to_string(), 0, 2));
+        assert_eq!(visible_caret(&edit, 5), 0);
+        // 光标更靠前（「好」前）时尾部窗口装不下，改为从光标处向右展示
+        let mut early = LineEdit::new("你好世界");
+        early.left();
+        early.left();
+        early.left();
+        let (text, caret, start) = visible_tail(&early, 5);
+        assert_eq!((text, caret, start), ("好世".to_string(), 0, 1));
+        assert_eq!(visible_caret(&early, 5), 0);
+    }
+
+    #[test]
+    fn visible_caret_counts_mixed_width_text() {
+        let mut edit = LineEdit::new("a你b");
+        edit.left(); // 光标落在 你 和 b 之间
+        assert_eq!(edit.cursor, 2);
+        // 显示宽 1+2+1=4 > 限宽 3：窗口「你b」，光标在「你」后 → 列 2
+        assert_eq!(visible_caret(&edit, 3), 2);
+        // render_edit 的下划线光标插在字符下标处，显示列与 visible_caret 一致
+        assert_eq!(render_edit(&edit, 3), "你_b");
     }
 }

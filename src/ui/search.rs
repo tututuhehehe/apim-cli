@@ -42,7 +42,7 @@ pub(crate) fn draw_search(frame: &mut Frame, target: SearchTarget, edit: &LineEd
 mod tests {
     use super::*;
     use ratatui::Terminal;
-    use ratatui::backend::TestBackend;
+    use ratatui::backend::{Backend, TestBackend};
 
     #[test]
     fn search_modal_renders_input_cursor_and_hint() {
@@ -63,5 +63,27 @@ mod tests {
         assert!(text.contains("搜索密钥"), "应有目标标题: {text}");
         assert!(text.contains("glm_"), "输入值应带光标渲染: {text}");
         assert!(text.contains("实时过滤"), "应有操作提示: {text}");
+    }
+
+    #[test]
+    fn search_cursor_lands_on_display_width_column_for_cjk() {
+        let mut terminal = Terminal::new(TestBackend::new(60, 12)).unwrap();
+        let edit = LineEdit::new("深seek"); // 5 字符、显示宽 2+4=6
+        terminal
+            .draw(|frame| draw_search(frame, SearchTarget::Key, &edit, frame.area()))
+            .unwrap();
+        let rect = centered(56, 4, frame_area(&terminal));
+        let inner = pane_block(" 搜索密钥 ", true).inner(rect);
+        let pos = terminal
+            .backend_mut()
+            .get_cursor_position()
+            .expect("TestBackend 应记录光标位置");
+        // 光标应落在「深seek」末尾（显示宽 6 列），而不是字符数 5 列
+        assert_eq!(pos.x, inner.x + 6, "CJK 光标列按显示宽度折算: {:?}", pos);
+        assert_eq!(pos.y, inner.y);
+    }
+
+    fn frame_area(terminal: &Terminal<TestBackend>) -> Rect {
+        terminal.backend().buffer().area
     }
 }
