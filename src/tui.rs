@@ -81,6 +81,13 @@ fn handle_key(app: &mut App, key: KeyEvent) {
             KeyCode::Esc | KeyCode::Char('n') | KeyCode::Char('q') => app.cancel_modal(),
             _ => {}
         },
+        Modal::Inspector { .. } => match key.code {
+            // r 只切遮掩/完整（方法内部限定密钥详情且有 token），c 复制完整 token
+            KeyCode::Char('r') => app.inspector_toggle_reveal(),
+            KeyCode::Char('c') => app.inspector_copy_token(),
+            KeyCode::Esc | KeyCode::Enter | KeyCode::Char('q') => app.cancel_modal(),
+            _ => {}
+        },
         Modal::None => match key.code {
             KeyCode::Char('c') if key.modifiers.contains(KeyModifiers::CONTROL) => {}
             KeyCode::Char('q') | KeyCode::Esc => {}
@@ -89,6 +96,7 @@ fn handle_key(app: &mut App, key: KeyEvent) {
             KeyCode::Char('r') => app.refresh_current_provider(),
             KeyCode::Char('a') => app.open_add(),
             KeyCode::Char('e') => app.open_edit(),
+            KeyCode::Char('i') => app.open_inspector(),
             KeyCode::Char('d') => app.open_delete(),
             KeyCode::Char('j') | KeyCode::Down => app.move_down(),
             KeyCode::Char('k') | KeyCode::Up => app.move_up(),

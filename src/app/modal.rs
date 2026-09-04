@@ -4,12 +4,20 @@ use std::path::PathBuf;
 use std::time::Instant;
 
 use super::{App, Focus};
+use crate::clipboard;
 use crate::form::{self, Form};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum FormKind {
     Key,
     Provider,
+}
+
+/// 检查器的目标：存 ID，数据在渲染时从 App 现查（自动刷新后内容同步更新）。
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum InspectorTarget {
+    Provider(String),
+    Key(String),
 }
 
 pub enum Modal {
@@ -25,6 +33,11 @@ pub enum Modal {
     ConfirmDeleteProvider {
         provider_id: String,
         path: PathBuf,
+    },
+    /// 只读详情检查器（i 键打开）。reveal_token 只对 Key 目标有意义。
+    Inspector {
+        target: InspectorTarget,
+        reveal_token: bool,
     },
 }
 
@@ -182,7 +195,71 @@ impl App {
         match &self.modal {
             Modal::ConfirmDeleteKey { .. } => self.confirm_delete_key(),
             Modal::ConfirmDeleteProvider { .. } => self.confirm_delete_provider(),
-            Modal::None | Modal::Form { .. } => {}
+            Modal::None | Modal::Form { .. } | Modal::Inspector { .. } => {}
+        }
+    }
+
+    /// 焦点处按 i：打开对应详情检查器（厂商栏→当前厂商；密钥栏→选中密钥）。
+    pub fn open_inspector(&mut self) {
+        match self.focus {
+            Focus::Providers => {
+                let Some(id) = self.current_provider_id().map(String::from) else {
+                    return;
+                };
+                self.modal = Modal::Inspector {
+                    target: InspectorTarget::Provider(id),
+                    reveal_token: false,
+                };
+            }
+            Focus::Keys => {
+                let Some(key) = self.selected_key_entry() else {
+                    self.toast = Some(("没有可查看的密钥".into(), Instant::now()));
+                    return;
+                };
+                self.modal = Modal::Inspector {
+                    target: InspectorTarget::Key(key.id()),
+                    reveal_token: false,
+                };
+            }
+        }
+    }
+
+    /// 检查器里按 r：仅密钥详情且有 token 时在 遮掩/完整 间切换。
+    pub fn inspector_toggle_reveal(&mut self) {
+        let Modal::Inspector { target, .. } = &self.modal else {
+            return;
+        };
+        let InspectorTarget::Key(id) = target else {
+            return;
+        };
+        let has_token = self
+            .keys
+            .iter()
+            .any(|k| &k.id() == id && !k.token.is_empty());
+        if !has_token {
+            return;
+        }
+        if let Modal::Inspector { reveal_token, .. } = &mut self.modal {
+            *reveal_token = !*reveal_token;
+        }
+    }
+
+    /// 检查器里按 c：复制完整 token（仅密钥详情）。toast 只带别名，不带密钥原文。
+    pub fn inspector_copy_token(&mut self) {
+        let Modal::Inspector { target, .. } = &self.modal else {
+            return;
+        };
+        let InspectorTarget::Key(id) = target else {
+            return;
+        };
+        let Some(key) = self.keys.iter().find(|k| &k.id() == id) else {
+            return;
+        };
+        let alias = key.alias.clone();
+        let token = key.token.clone();
+        match clipboard::copy(&token) {
+            Ok(()) => self.toast = Some((format!("已复制 {alias} 的完整密钥"), Instant::now())),
+            Err(err) => self.toast = Some((format!("复制失败: {err}"), Instant::now())),
         }
     }
 }
