@@ -21,7 +21,8 @@ pub(crate) fn draw_models(
     // 列表内容行数（不含提示行）；弹窗高 = 内容 + 提示行 1 + 上下边框 2
     let inner_rows = match status {
         ModelsStatus::Loading => 2,
-        ModelsStatus::Error { .. } => 6,
+        // 最坏情况：180 字符的中文错误体（每字 2 列）+ 前缀，内宽 52 列需约 8 行
+        ModelsStatus::Error { .. } => 8,
         ModelsStatus::Done { items, .. } => items.len().clamp(1, VISIBLE_ROWS) as u16,
     };
     let rect = centered(56, inner_rows + 3, area);
