@@ -9,9 +9,10 @@ use ratatui::widgets::Paragraph;
 use super::{App, Focus, theme};
 
 pub(crate) fn draw_header(frame: &mut Frame, app: &App, area: Rect) {
+    // 读数在任意一条探测结果到达时更新（全局视角），按「上次探活」表述。
     let refresh = match app.last_refresh {
-        Some(at) => format!("{}ms 前刷新", at.elapsed().as_millis()),
-        None => "尚未刷新".into(),
+        Some(at) => format!("上次探活 {}ms 前", at.elapsed().as_millis()),
+        None => "尚未探活".into(),
     };
     let recipe = app.current_recipe();
     let name = recipe.map(|r| r.name.as_str()).unwrap_or("—");

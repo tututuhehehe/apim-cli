@@ -88,6 +88,10 @@ impl App {
 
     pub fn apply(&mut self, result: ProbeResult) {
         self.inflight.remove(&result.key_id);
+        // 密钥已删但探测仍在途：丢弃迟到结果，不在 states 里复活死条目。
+        if !self.keys.iter().any(|k| k.id() == result.key_id) {
+            return;
+        }
         self.last_refresh = Some(Instant::now());
         let state = self.states.entry(result.key_id.clone()).or_default();
         state.health = result.health;
@@ -321,5 +325,168 @@ impl App {
 
     pub fn toast_text(&self) -> Option<&str> {
         self.toast.as_ref().map(|(s, _)| s.as_str())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::recipe::Auth;
+    use tokio::time::timeout;
+
+    /// 直接构造 App：假 recipe（health=None、balance=None，probe 立即返回、零网络），
+    /// 不经过 App::start，不读任何配置目录，不触碰 ~/.config/apim。
+    fn test_app(providers: &[(&str, &[&str])]) -> (App, UnboundedReceiver<ProbeResult>) {
+        let mut recipes = HashMap::new();
+        let mut keys = Vec::new();
+        for (pid, aliases) in providers {
+            recipes.insert(
+                (*pid).to_string(),
+                Recipe {
+                    id: (*pid).to_string(),
+                    name: format!("{pid} 假厂商"),
+                    base_url: "https://example.invalid".into(),
+                    homepage: None,
+                    supports_groups: false,
+                    vars: HashMap::new(),
+                    auth: Auth::default(),
+                    health: None,
+                    balance: None,
+                    origin: None,
+                },
+            );
+            for alias in *aliases {
+                keys.push(KeyEntry {
+                    provider: (*pid).to_string(),
+                    alias: (*alias).to_string(),
+                    group: None,
+                    token: "sk-test-placeholder".into(),
+                });
+            }
+        }
+        let (tx, rx) = mpsc::unbounded_channel();
+        let mut app = App {
+            recipes,
+            keys,
+            provider_ids: Vec::new(),
+            selected_provider: 0,
+            selected_key: 0,
+            focus: Focus::Keys,
+            states: HashMap::new(),
+            toast: None,
+            last_refresh: None,
+            modal: Modal::None,
+            inflight: HashSet::new(),
+            tx,
+            client: probe::client().expect("构建测试用 reqwest client"),
+            next_auto_refresh: Instant::now() + AUTO_REFRESH_INTERVAL,
+        };
+        app.rebuild_provider_list();
+        (app, rx)
+    }
+
+    /// 已过期的触发点：取 1s 前；极端情况下（刚开机，时钟起点晚于 1s 前）退回 now，
+    /// tick 判断 now >= next 仍成立。
+    fn overdue() -> Instant {
+        Instant::now()
+            .checked_sub(Duration::from_secs(1))
+            .unwrap_or_else(Instant::now)
+    }
+
+    fn remaining_until_next(app: &App) -> Duration {
+        app.next_auto_refresh
+            .checked_duration_since(Instant::now())
+            .expect("next_auto_refresh 应排在未来")
+    }
+
+    #[tokio::test]
+    async fn tick_when_due_probes_every_key_and_reschedules() {
+        let (mut app, mut rx) = test_app(&[("alpha", &["a1", "a2"]), ("beta", &["b1"])]);
+        app.next_auto_refresh = overdue();
+        app.tick();
+        let mut got = HashSet::new();
+        for _ in 0..3 {
+            let msg = timeout(Duration::from_secs(2), rx.recv())
+                .await
+                .expect("到点 tick 应触发全量探测")
+                .expect("channel 不应关闭");
+            got.insert(msg.key_id);
+        }
+        assert_eq!(
+            got,
+            HashSet::from([
+                "alpha.a1".to_string(),
+                "alpha.a2".to_string(),
+                "beta.b1".to_string(),
+            ])
+        );
+        // 触发全量后应重新排期到 ~5 分钟后，而不是立刻连环触发
+        let until = remaining_until_next(&app);
+        assert!(
+            until > Duration::from_secs(4 * 60),
+            "下一次自动刷新排得太近: {until:?}"
+        );
+        assert!(until <= AUTO_REFRESH_INTERVAL);
+    }
+
+    #[tokio::test]
+    async fn switching_provider_reads_cache_without_probing() {
+        let (mut app, mut rx) = test_app(&[("alpha", &["a1"]), ("beta", &["b1"])]);
+        app.focus = Focus::Providers;
+        app.move_down();
+        assert_eq!(app.current_provider_id(), Some("beta"));
+        app.move_up();
+        assert_eq!(app.current_provider_id(), Some("alpha"));
+        // 切换厂商只读缓存：短时间内不应收到任何探测消息，也不应有 inflight
+        let leaked = timeout(Duration::from_millis(150), rx.recv()).await;
+        assert!(leaked.is_err(), "切换厂商不应触发探测，却收到了消息");
+        assert!(app.inflight.is_empty());
+    }
+
+    #[tokio::test]
+    async fn refresh_all_keys_schedules_next_cycle_five_minutes_out() {
+        let (mut app, mut rx) = test_app(&[("alpha", &["a1"])]);
+        app.refresh_all_keys();
+        assert!(app.is_checking("alpha.a1"));
+        let until = remaining_until_next(&app);
+        assert!(until <= AUTO_REFRESH_INTERVAL);
+        assert!(
+            until > AUTO_REFRESH_INTERVAL - Duration::from_secs(5),
+            "排期偏差过大: {until:?}"
+        );
+        // 收结果并 apply：inflight 清空、last_refresh 落地
+        let msg = timeout(Duration::from_secs(2), rx.recv())
+            .await
+            .expect("应有一条探测结果")
+            .expect("channel 不应关闭");
+        app.apply(msg);
+        assert!(!app.is_checking("alpha.a1"));
+        assert!(app.inflight.is_empty());
+        assert!(app.last_refresh.is_some());
+    }
+
+    #[tokio::test]
+    async fn refresh_all_keys_dedupes_inflight_probes() {
+        let (mut app, mut rx) = test_app(&[("alpha", &["a1", "a2"])]);
+        app.refresh_all_keys();
+        // 结果尚未 apply（同步代码不 yield），inflight 仍在——第二次全量应被去重
+        app.refresh_all_keys();
+        let mut received = Vec::new();
+        loop {
+            match timeout(Duration::from_millis(300), rx.recv()).await {
+                Ok(Some(msg)) => received.push(msg),
+                Ok(None) => panic!("channel 提前关闭"),
+                Err(_) => break,
+            }
+        }
+        assert_eq!(
+            received.len(),
+            2,
+            "每个 key 恰好一条结果，重复全量应被 inflight 去重"
+        );
+        for msg in received {
+            app.apply(msg);
+        }
+        assert!(app.inflight.is_empty());
     }
 }

@@ -57,7 +57,11 @@ fn ls(ctx: &Ctx, args: &Args) -> Result<()> {
         };
         let origin = if r.origin.is_none() { " [内置]" } else { "" };
         println!("{id:<14} {:<18} {}{origin}", r.name, r.base_url);
-        let homepage = r.homepage.as_deref().unwrap_or("—");
+        let homepage = r
+            .homepage
+            .as_deref()
+            .filter(|h| !h.is_empty())
+            .unwrap_or("—");
         println!(
             "{:<14} 额度 {balance} · 密钥 {n_keys} · 主页 {homepage}",
             ""
