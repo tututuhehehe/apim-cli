@@ -38,6 +38,9 @@ impl Default for KeyState {
     }
 }
 
+/// 自动全量刷新间隔：启动刷一次，之后到点后台全量重刷（含探活+额度）。
+pub const AUTO_REFRESH_INTERVAL: Duration = Duration::from_secs(5 * 60);
+
 pub struct App {
     pub recipes: HashMap<String, Recipe>,
     pub keys: Vec<KeyEntry>,
@@ -52,6 +55,8 @@ pub struct App {
     pub(crate) inflight: HashSet<String>,
     pub(crate) tx: UnboundedSender<ProbeResult>,
     pub(crate) client: reqwest::Client,
+    /// 下一次自动全量刷新的时间点。
+    pub(crate) next_auto_refresh: Instant,
 }
 
 impl App {
@@ -73,11 +78,11 @@ impl App {
             inflight: HashSet::new(),
             tx,
             client: probe::client()?,
+            next_auto_refresh: Instant::now() + AUTO_REFRESH_INTERVAL,
         };
         app.rebuild_provider_list();
-        if !app.keys_in_provider().is_empty() {
-            app.refresh_current_provider();
-        }
+        // 打开即全量刷一遍所有厂商；切换厂商只读缓存，到点自动重刷。
+        app.refresh_all_keys();
         Ok((app, rx))
     }
 
@@ -94,6 +99,9 @@ impl App {
             && at.elapsed() > Duration::from_secs(3)
         {
             self.toast = None;
+        }
+        if Instant::now() >= self.next_auto_refresh {
+            self.refresh_all_keys();
         }
     }
 
@@ -166,7 +174,6 @@ impl App {
                 if self.selected_provider > 0 {
                     self.selected_provider -= 1;
                     self.selected_key = 0;
-                    self.refresh_current_provider();
                 }
             }
             Focus::Keys => {
@@ -183,7 +190,6 @@ impl App {
                 if self.selected_provider + 1 < self.provider_ids.len() {
                     self.selected_provider += 1;
                     self.selected_key = 0;
-                    self.refresh_current_provider();
                 }
             }
             Focus::Keys => {
@@ -255,6 +261,15 @@ impl App {
 
     // ---- probing ---------------------------------------------------------
 
+    /// 全量刷新：所有厂商的所有密钥（启动一次 + 每 AUTO_REFRESH_INTERVAL 一次）。
+    pub fn refresh_all_keys(&mut self) {
+        for idx in 0..self.keys.len() {
+            self.spawn_probe(idx);
+        }
+        self.next_auto_refresh = Instant::now() + AUTO_REFRESH_INTERVAL;
+    }
+
+    /// 手动刷新（`r`）：当前厂商。切换厂商不触发刷新，只读缓存。
     pub fn refresh_current_provider(&mut self) {
         let idxs = self.keys_in_provider();
         for idx in idxs {
