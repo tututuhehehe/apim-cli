@@ -141,7 +141,10 @@ async fn send(
     let method = Method::from_bytes(call.method.as_bytes()).unwrap_or(Method::GET);
     let url = recipe::subst(&call.url, &ctx);
     let mut rb = client.request(method, url);
-    rb = apply_auth(rb, &recipe.auth, token);
+    // 调用自带鉴权头时（如 new-api 用访问令牌查 /api/user/self），不再附加密钥默认鉴权。
+    if !has_explicit_auth(call, &recipe.auth) {
+        rb = apply_auth(rb, &recipe.auth, token);
+    }
     for (k, v) in &call.headers {
         rb = rb.header(k, recipe::subst(v, &ctx));
     }
@@ -149,6 +152,16 @@ async fn send(
         rb = rb.json(&recipe::subst_json(body, &ctx));
     }
     rb.send().await.context("request failed")
+}
+
+/// call.headers 是否已显式写死鉴权头（大小写不敏感）。
+fn has_explicit_auth(call: &HttpCall, auth: &Auth) -> bool {
+    if matches!(auth.kind, AuthKind::Query) {
+        let param = auth.query_param.as_deref().unwrap_or("api_key");
+        return call.url.contains(&format!("{param}="));
+    }
+    let header = auth.header.as_deref().unwrap_or("Authorization");
+    call.headers.keys().any(|k| k.eq_ignore_ascii_case(header))
 }
 
 fn apply_auth(rb: RequestBuilder, auth: &Auth, token: &str) -> RequestBuilder {

@@ -98,3 +98,32 @@ cp recipes/deepseek.yaml ~/.config/apim/recipes/my-relay.yaml
 ```
 
 TUI 表单生成的 YAML 和手写的完全等价；编辑时表单只覆盖它认识的字段，手写的 headers、解析规则会保留。
+
+### new-api 系中转站（额度要访问令牌的）
+
+多数 new-api 面板的 `/v1/dashboard/billing/subscription` 要么返回假数字，要么不认 API Key。真实余额在 `/api/user/self`，但它只认**访问令牌**（个人设置里生成的那串，不是 sk- Key）。这种要在 `~/.config/apim/recipes/<id>.yaml` 手写：
+
+```yaml
+vars:
+  access_token: 你的访问令牌
+health:
+  url: '{base_url}/v1/models'
+balance:
+  request:
+    url: '{base_url}/api/user/self'
+    headers:
+      Authorization: 'Bearer {access_token}'
+  parse:
+    divisor: 500000      # new-api: 500000 quota = $1
+    currency: USD
+    fields:
+      total_balance: data.quota
+      used: data.used_quota
+  render:
+    headline: '{total_balance}'
+    fields:
+      - {label: 剩余, value: '{total_balance}'}
+      - {label: 已用, value: '{used}'}
+```
+
+探活仍用每条密钥自己的 sk- Key；额度用 `vars` 里的访问令牌（额度是账户级的，同账户多条 Key 显示一样）。文件含令牌，保持 600 权限，别分享。

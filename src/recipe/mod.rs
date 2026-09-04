@@ -23,6 +23,9 @@ pub struct Recipe {
     pub base_url: String,
     #[serde(default)]
     pub supports_groups: bool,
+    /// 自定义模板变量，可进 {placeholder} 替换。存敏感值时整个文件 600。
+    #[serde(default, skip_serializing_if = "HashMap::is_empty")]
+    pub vars: HashMap<String, String>,
     pub auth: Auth,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub health: Option<HttpCall>,
@@ -102,6 +105,12 @@ pub struct ParseSpec {
     /// When `items` is absent, build one virtual item from these root paths.
     #[serde(default)]
     pub fields: HashMap<String, String>,
+    /// 数值字段统一除以该系数（如 new-api 的 500000 quota = $1）。
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub divisor: Option<f64>,
+    /// 字面货币码，注入每个 item（CNY→¥ / USD→$），覆盖响应里的值。
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub currency: Option<String>,
 }
 
 #[derive(Debug, Clone, Deserialize, Serialize)]
@@ -165,10 +174,10 @@ fn insert_yaml(
 }
 
 pub fn request_ctx(recipe: &Recipe, token: &str) -> HashMap<String, String> {
-    HashMap::from([
-        ("token".into(), token.to_string()),
-        ("base_url".into(), recipe.base_url.clone()),
-    ])
+    let mut ctx = recipe.vars.clone();
+    ctx.insert("token".into(), token.to_string());
+    ctx.insert("base_url".into(), recipe.base_url.clone());
+    ctx
 }
 
 pub fn subst(input: &str, ctx: &HashMap<String, String>) -> String {

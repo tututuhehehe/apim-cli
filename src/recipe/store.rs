@@ -24,7 +24,16 @@ pub(crate) fn save_user_recipe_to(dir: &Path, recipe: &Recipe) -> Result<PathBuf
     fs::create_dir_all(dir).with_context(|| format!("mkdir {}", dir.display()))?;
     let path = dir.join(format!("{}.yaml", recipe.id));
     let yaml = serde_yaml::to_string(recipe).context("serialize recipe")?;
-    fs::write(&path, yaml).with_context(|| format!("write {}", path.display()))?;
+    // recipe 可能带 vars 里的访问令牌，按私钥文件权限写。
+    let tmp = path.with_extension("tmp");
+    fs::write(&tmp, yaml).with_context(|| format!("write {}", tmp.display()))?;
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        fs::set_permissions(&tmp, fs::Permissions::from_mode(0o600))
+            .with_context(|| format!("chmod {}", tmp.display()))?;
+    }
+    fs::rename(&tmp, &path).with_context(|| format!("rename {}", path.display()))?;
     Ok(path)
 }
 
@@ -53,6 +62,7 @@ mod tests {
             name: "我的中转站".into(),
             base_url: "https://relay.example.com/v1".into(),
             supports_groups: false,
+            vars: HashMap::new(),
             auth: Auth {
                 kind: AuthKind::Bearer,
                 header: None,
@@ -69,6 +79,8 @@ mod tests {
                         "total_balance".to_string(),
                         "hard_limit_usd".to_string(),
                     )]),
+                    divisor: None,
+                    currency: None,
                 },
                 render: RenderSpec {
                     headline: "{total_balance}".into(),

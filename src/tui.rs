@@ -101,6 +101,11 @@ fn handle_key(app: &mut App, key: KeyEvent) {
 
 pub(crate) async fn run_snapshot() -> Result<()> {
     let (mut app, _rx) = App::start()?;
+    if let Ok(id) = std::env::var("APIM_SNAPSHOT_PROVIDER")
+        && let Some(pos) = app.provider_ids.iter().position(|p| p == &id)
+    {
+        app.selected_provider = pos;
+    }
     app.refresh_blocking().await;
     render_snapshot(&app).await
 }

@@ -95,6 +95,21 @@ pub fn parse_balance(spec: &BalanceSpec, root: &Value) -> Result<BalanceView> {
         items_ctx.push(HashMap::new());
     }
 
+    if let Some(divisor) = spec.parse.divisor.filter(|d| *d != 0.0) {
+        for ctx in &mut items_ctx {
+            for value in ctx.values_mut() {
+                if let Ok(n) = value.parse::<f64>() {
+                    *value = format_scaled(n / divisor);
+                }
+            }
+        }
+    }
+    if let Some(currency) = &spec.parse.currency {
+        for ctx in &mut items_ctx {
+            ctx.insert("currency".into(), currency.clone());
+        }
+    }
+
     let items: Vec<BalanceItem> = items_ctx
         .into_iter()
         .map(|ctx| {
@@ -138,6 +153,12 @@ pub fn money(currency: Option<&str>, amount: &str) -> String {
     }
 }
 
+/// 保留两位小数并去掉尾随零：17.52883 -> "17.53"，4.0 -> "4"。
+fn format_scaled(v: f64) -> String {
+    let s = format!("{v:.2}");
+    s.trim_end_matches('0').trim_end_matches('.').to_string()
+}
+
 #[cfg(test)]
 mod tests {
     use super::super::{BalanceSpec, ParseSpec, RenderField, RenderSpec, money, parse_balance};
@@ -153,6 +174,8 @@ mod tests {
                     "total_balance".to_string(),
                     "hard_limit_usd".to_string(),
                 )]),
+                divisor: None,
+                currency: None,
             },
             render: RenderSpec {
                 headline: "{total_balance}".into(),
@@ -204,5 +227,38 @@ mod tests {
         assert_eq!(money(Some("USD"), "1.5"), "$1.5");
         assert_eq!(money(None, "9"), "9");
         assert_eq!(money(None, ""), "—");
+    }
+
+    #[test]
+    fn divisor_and_currency_transform_newapi_quota() {
+        let spec = BalanceSpec {
+            request: crate::recipe::HttpCall::get("{base_url}/api/user/self"),
+            parse: ParseSpec {
+                available: None,
+                items: None,
+                fields: HashMap::from([
+                    ("total_balance".to_string(), "data.quota".to_string()),
+                    ("used".to_string(), "data.used_quota".to_string()),
+                ]),
+                divisor: Some(500000.0),
+                currency: Some("USD".into()),
+            },
+            render: RenderSpec {
+                headline: "{total_balance}".into(),
+                fields: vec![RenderField {
+                    label: "剩余".into(),
+                    value: "{total_balance}".into(),
+                }],
+            },
+        };
+        let json: Value =
+            serde_json::from_str(r#"{"data":{"quota": 8764415, "used_quota": 1235585}}"#).unwrap();
+        let view = parse_balance(&spec, &json).unwrap();
+        assert_eq!(view.headline, "17.53");
+        assert_eq!(
+            view.items[0].ctx.get("used").map(String::as_str),
+            Some("2.47")
+        );
+        assert_eq!(view.items[0].currency.as_deref(), Some("USD"));
     }
 }

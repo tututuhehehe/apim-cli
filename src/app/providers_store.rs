@@ -152,6 +152,7 @@ fn default_recipe(id: &str, name: &str, base_url: &str) -> Recipe {
         name: name.into(),
         base_url: base_url.into(),
         supports_groups: false,
+        vars: HashMap::new(),
         auth: Auth {
             kind: AuthKind::Bearer,
             header: None,
@@ -178,6 +179,8 @@ fn generic_balance(path: &str, json_path: &str) -> BalanceSpec {
             available: None,
             items: None,
             fields: HashMap::from([("total_balance".to_string(), json_path.to_string())]),
+            divisor: None,
+            currency: None,
         },
         render: RenderSpec {
             headline: "{total_balance}".into(),
