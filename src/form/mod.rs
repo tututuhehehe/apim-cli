@@ -1,79 +1,10 @@
+//! 通用表单引擎：字段导航、输入分发、弹窗数据。
+
+mod edit;
+
+pub use edit::LineEdit;
+
 use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
-
-#[derive(Debug, Clone)]
-pub struct LineEdit {
-    pub value: String,
-    pub cursor: usize,
-}
-
-impl LineEdit {
-    pub fn new(value: impl Into<String>) -> Self {
-        let value = value.into();
-        let cursor = value.chars().count();
-        Self { value, cursor }
-    }
-
-    fn chars(&self) -> Vec<char> {
-        self.value.chars().collect()
-    }
-
-    fn set_chars(&mut self, chars: Vec<char>, cursor: usize) {
-        self.cursor = cursor.min(chars.len());
-        self.value = chars.into_iter().collect();
-    }
-
-    pub fn insert(&mut self, text: &str) {
-        let extra: Vec<char> = text
-            .chars()
-            .filter(|c| !matches!(c, '\n' | '\r' | '\t'))
-            .collect();
-        if extra.is_empty() {
-            return;
-        }
-        let mut chars = self.chars();
-        let i = self.cursor.min(chars.len());
-        chars.splice(i..i, extra.iter().copied());
-        self.set_chars(chars, i + extra.len());
-    }
-
-    pub fn backspace(&mut self) {
-        if self.cursor == 0 {
-            return;
-        }
-        let mut chars = self.chars();
-        chars.remove(self.cursor - 1);
-        self.set_chars(chars, self.cursor - 1);
-    }
-
-    pub fn delete(&mut self) {
-        let mut chars = self.chars();
-        if self.cursor < chars.len() {
-            chars.remove(self.cursor);
-            self.set_chars(chars, self.cursor);
-        }
-    }
-
-    pub fn left(&mut self) {
-        if self.cursor > 0 {
-            self.cursor -= 1;
-        }
-    }
-
-    pub fn right(&mut self) {
-        let n = self.value.chars().count();
-        if self.cursor < n {
-            self.cursor += 1;
-        }
-    }
-
-    pub fn home(&mut self) {
-        self.cursor = 0;
-    }
-
-    pub fn end(&mut self) {
-        self.cursor = self.value.chars().count();
-    }
-}
 
 #[derive(Debug, Clone)]
 pub enum Field {
@@ -220,8 +151,7 @@ impl Form {
         if n == 0 {
             return;
         }
-        let mut i = self.active as i32 + dir;
-        i = i.rem_euclid(n as i32);
+        let i = (self.active as i32 + dir).rem_euclid(n as i32);
         self.active = i as usize;
     }
 
@@ -338,18 +268,6 @@ mod tests {
     }
 
     #[test]
-    fn insert_and_backspace_keep_cursor() {
-        let mut edit = LineEdit::new("");
-        edit.insert("home");
-        assert_eq!(edit.value, "home");
-        assert_eq!(edit.cursor, 4);
-        edit.left();
-        edit.backspace();
-        assert_eq!(edit.value, "hoe");
-        assert_eq!(edit.cursor, 2);
-    }
-
-    #[test]
     fn tab_cycles_and_left_changes_select() {
         let mut form = sample_form();
         assert_eq!(form.active, 1);
@@ -368,5 +286,18 @@ mod tests {
         form.active = 0;
         form.handle_key(KeyEvent::from(KeyCode::Char('z')));
         assert_eq!(form.text(0), "deepseek");
+    }
+
+    #[test]
+    fn enter_saves_and_esc_cancels() {
+        let mut form = sample_form();
+        assert!(matches!(
+            form.handle_key(KeyEvent::from(KeyCode::Enter)),
+            FormEvent::Save
+        ));
+        assert!(matches!(
+            form.handle_key(KeyEvent::from(KeyCode::Esc)),
+            FormEvent::Cancel
+        ));
     }
 }
