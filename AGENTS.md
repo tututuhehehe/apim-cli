@@ -71,7 +71,7 @@ recipes/
 2. **加厂商不改 Rust**。厂商表单只配：ID/名称/Base URL/探活路径/**脚本路径**（额度唯一入口，指向 ~/.config/apim/scripts/ 下可执行脚本）；编辑时路径没改就保留手写配置，清空即取消。额度底层两种形态（BalanceMode）：`kind: script`（env 注入 APIM_TOKEN 等，stdout 逐行直显）+ 声明式 http（缺省，request+parse+render，留给内置 recipe 和手写 YAML，如 new-api 系），不要再为怪接口扩 DSL，也不要往表单加预设类型。AI 代写脚本的标准提示词在 docs/quota-script-prompt.md。
 3. **Recipe 覆盖顺序**：builtin(include_str) → `<repo>/recipes/`（开发时）→ `~/.config/apim/recipes/`，后读的同 id 覆盖先读的。`origin: None` = 内置，不可删除只可编辑覆盖。
 4. **模块路径稳定**：子模块类型经 mod.rs re-export（如 `crate::app::Modal`），拆文件不破坏外部 import。
-5. **改完必跑**：`cargo fmt && cargo clippy -q --all-targets -- -W clippy::all`（零警告）+ `cargo test`。UI 改动跑 `cargo run -- --snapshot`（主界面）/ `--snapshot-form` / `--snapshot-provider-form` 出纯文本渲染核对。
+5. **改完必跑**：`cargo fmt && cargo clippy -q --all-targets -- -W clippy::all`（零警告）+ `cargo test`。UI 改动跑 `cargo run -- --snapshot`（主界面）/ `--snapshot-form` / `--snapshot-provider-form` / `--snapshot-inspector` 出纯文本渲染核对。
 6. 提交信息中文，一行主题 + 要点列表；功能一次一提交。
 
 ## 验证命令速查
@@ -79,6 +79,7 @@ recipes/
 ```bash
 cargo run                              # 进 TUI
 cargo run -- --snapshot                # 真实接口拉数据渲染成文本（不进 TUI）
+cargo run -- --snapshot-inspector      # 详情弹窗快照：假状态不拉接口；=provider 出厂商详情
 cargo test                             # 单测（recipe/表单/CLI 沙盒等）
 cargo install --path .                 # 装进 PATH
 apim provider ls --json                # CLI 冒烟（AI 接入流程见 docs/quota-script-prompt.md）

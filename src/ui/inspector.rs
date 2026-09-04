@@ -187,7 +187,19 @@ fn health_label(state: &KeyState, checking: bool) -> String {
     match &state.health {
         Health::Unknown => "未配置探活".into(),
         Health::Checking => "… 检查中".into(),
-        Health::Live { ms } => format!("● 可用 {ms}ms"),
+        Health::Live { ms } => {
+            // 与主界面状态列同口径（keys.rs status_label）：额度接口明确说账号
+            // 不可用/无余额时，不能在这里仍显示「可用」
+            let available = state
+                .balance
+                .as_ref()
+                .and_then(|b| b.view.as_ref())
+                .and_then(|v| v.available);
+            match available {
+                Some(false) => format!("● 无额度（{ms}ms）"),
+                _ => format!("● 可用 {ms}ms"),
+            }
+        }
         Health::Down { ms, message } => format!("● 失败 {message}（{ms}ms）"),
     }
 }
@@ -528,6 +540,28 @@ mod tests {
         assert_eq!(row(&rows, "健康"), "● 可用 101ms");
         assert_eq!(row(&rows, "余额"), "4.22");
         assert_eq!(row(&rows, "上次探测"), "45 秒前");
+
+        // 与主界面状态列同口径：额度接口说账号不可用时显示「无额度」而非「可用」
+        let no_quota = KeyState {
+            health: Health::Live { ms: 33 },
+            balance: Some(BalanceSnapshot {
+                view: Some(BalanceView {
+                    available: Some(false),
+                    headline: "0".into(),
+                    items: Vec::new(),
+                    lines: Vec::new(),
+                }),
+                endpoint: "GET https://api.demo.com/user/balance".into(),
+                status: Some(200),
+                elapsed_ms: 9,
+                error: None,
+            }),
+            updated: None,
+        };
+        let rows = key_rows(&key, "Demo", &no_quota, false, None, false);
+        let health = row(&rows, "健康");
+        assert!(health.contains("无额度"), "{health}");
+        assert!(!health.contains("可用"), "{health}");
 
         let down = KeyState {
             health: Health::Down {
