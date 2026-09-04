@@ -263,3 +263,106 @@ impl App {
         }
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::config::KeyEntry;
+    use crate::recipe::Recipe;
+    use std::collections::{HashMap, HashSet};
+
+    fn one_key_app() -> App {
+        let mut recipes = HashMap::new();
+        recipes.insert(
+            "p".to_string(),
+            Recipe {
+                id: "p".into(),
+                name: "P".into(),
+                base_url: "https://p.example".into(),
+                homepage: None,
+                supports_groups: false,
+                vars: HashMap::new(),
+                auth: Default::default(),
+                health: None,
+                balance: None,
+                origin: None,
+            },
+        );
+        let (tx, _rx) = tokio::sync::mpsc::unbounded_channel();
+        let mut app = App {
+            recipes,
+            keys: vec![KeyEntry {
+                provider: "p".into(),
+                alias: "main".into(),
+                group: None,
+                token: "sk-full-token-value".into(),
+            }],
+            provider_ids: Vec::new(),
+            selected_provider: 0,
+            selected_key: 0,
+            focus: Focus::Keys,
+            states: HashMap::new(),
+            toast: None,
+            last_refresh: None,
+            modal: Modal::None,
+            inflight: HashSet::new(),
+            tx,
+            client: crate::probe::client().expect("client"),
+            next_auto_refresh: Instant::now() + std::time::Duration::from_secs(300),
+        };
+        app.rebuild_provider_list();
+        app
+    }
+
+    #[test]
+    fn inspector_reveal_resets_on_reopen_and_provider_target_ignores_r() {
+        let mut app = one_key_app();
+
+        // 打开 → 显隐 → 关闭 → 再打开：reveal 必须回落为默认遮掩
+        app.focus = Focus::Keys;
+        app.open_inspector();
+        app.inspector_toggle_reveal();
+        assert!(matches!(
+            &app.modal,
+            Modal::Inspector {
+                reveal_token: true,
+                ..
+            }
+        ));
+        app.cancel_modal();
+        app.open_inspector();
+        assert!(
+            matches!(
+                &app.modal,
+                Modal::Inspector {
+                    reveal_token: false,
+                    ..
+                }
+            ),
+            "重开检查器必须回到遮掩态"
+        );
+
+        // Provider 目标按 r 是无操作（不切换、不 panic）
+        app.cancel_modal();
+        app.focus = Focus::Providers;
+        app.open_inspector();
+        app.inspector_toggle_reveal();
+        assert!(matches!(
+            &app.modal,
+            Modal::Inspector {
+                reveal_token: false,
+                ..
+            }
+        ));
+    }
+
+    #[test]
+    fn inspector_copy_requires_key_target() {
+        let mut app = one_key_app();
+        // Provider 目标按 c：无操作（不复制、无 toast）
+        app.focus = Focus::Providers;
+        app.open_inspector();
+        app.inspector_copy_token();
+        assert!(app.toast.is_none(), "厂商详情按 c 不应触发复制");
+    }
+}

@@ -259,7 +259,7 @@ fn draw_key(frame: &mut Frame, app: &App, key_id: &str, reveal_token: bool, area
         .get(&key.provider)
         .map(|r| r.name.clone())
         .unwrap_or_else(|| key.provider.clone());
-    let state = app.states.get(key_id).cloned().unwrap_or_default();
+    let state = app.state_for(key);
     let rows = key_rows(
         key,
         &provider_name,
