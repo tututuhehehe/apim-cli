@@ -1,9 +1,11 @@
 //! 厂商 recipe：怎么鉴权、怎么探活、怎么查额度。
 
 pub use balance::{BalanceItem, BalanceView, money, parse_balance};
+pub use script::{BalanceMode, ScriptSpec};
 pub use store::{delete_user_recipe, save_user_recipe, user_recipes_dir};
 
 mod balance;
+mod script;
 mod store;
 
 use std::collections::HashMap;
@@ -29,8 +31,9 @@ pub struct Recipe {
     pub auth: Auth,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub health: Option<HttpCall>,
+    /// 额度查询：声明式 HTTP（缺省）或脚本逃生舱，见 BalanceMode。
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub balance: Option<BalanceSpec>,
+    pub balance: Option<BalanceMode>,
     /// 本地 YAML 路径；None = 内置（编译进二进制），不可删除。
     #[serde(skip)]
     pub origin: Option<PathBuf>,
@@ -44,7 +47,7 @@ impl Recipe {
     }
 }
 
-#[derive(Debug, Clone, Deserialize, Serialize)]
+#[derive(Debug, Clone, Default, Deserialize, Serialize)]
 pub struct Auth {
     #[serde(default)]
     pub kind: AuthKind,

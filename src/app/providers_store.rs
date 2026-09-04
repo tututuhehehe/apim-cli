@@ -5,21 +5,20 @@ use std::time::Instant;
 
 use super::{App, Focus, Modal};
 use crate::form::Form;
-use crate::recipe::{
-    self, Auth, AuthKind, BalanceSpec, HttpCall, ParseSpec, Recipe, RenderField, RenderSpec,
-};
+use crate::recipe::{self, Auth, AuthKind, BalanceMode, HttpCall, Recipe, ScriptSpec};
 
 impl App {
     pub(crate) fn save_provider_form(&mut self, form: &Form, original: Option<&str>) {
+        use crate::form::{PF_BASE, PF_HEALTH, PF_ID, PF_NAME, PF_SCRIPT};
+
         let id = match original {
             Some(id) => id.to_string(),
-            None => form.text(0).trim().to_string(),
+            None => form.text(PF_ID).trim().to_string(),
         };
-        let name = form.text(1).trim().to_string();
-        let mut base_url = form.text(2).trim().to_string();
-        let health_path = normalize_path(form.text(3).trim());
-        let balance_path = normalize_path(form.text(4).trim());
-        let balance_json = form.text(5).trim().to_string();
+        let name = form.text(PF_NAME).trim().to_string();
+        let mut base_url = form.text(PF_BASE).trim().to_string();
+        let health_path = normalize_path(form.text(PF_HEALTH).trim());
+        let script_cmd = form.text(PF_SCRIPT).trim().to_string();
 
         if original.is_none() {
             if id.is_empty() {
@@ -47,8 +46,10 @@ impl App {
             return;
         }
         base_url = base_url.trim_end_matches('/').to_string();
-        if !balance_path.is_empty() && balance_json.is_empty() {
-            self.set_form_error("配了额度路径就要填取值路径");
+        if !script_cmd.is_empty()
+            && !std::path::Path::new(&crate::probe::expand_tilde(&script_cmd)).is_file()
+        {
+            self.set_form_error(&format!("脚本不存在：{script_cmd}"));
             return;
         }
 
@@ -79,18 +80,26 @@ impl App {
             }
         };
 
-        // 额度：路径和取值都没动就保留原有 parse/render（DeepSeek 这类）
+        // 额度：脚本路径是唯一入口。留空时——表单回显过的 command 脚本被清空即删除；
+        // 表单从没管过的（声明式 http recipe、内联 run 脚本、vars）原样保留。
         let existing_balance = recipe.balance.clone();
-        recipe.balance = if balance_path.is_empty() {
-            None
-        } else {
-            let unchanged = existing_balance.as_ref().is_some_and(|b| {
-                url_suffix(&b.request.url) == balance_path && balance_json.is_empty()
+        recipe.balance = if script_cmd.is_empty() {
+            let keep = existing_balance.as_ref().is_some_and(|b| {
+                b.http().is_some() || b.script().is_some_and(|s| s.command.is_none())
             });
+            if keep { existing_balance } else { None }
+        } else {
+            let unchanged = existing_balance
+                .as_ref()
+                .and_then(|b| b.script())
+                .is_some_and(|s| s.command.as_deref() == Some(script_cmd.as_str()));
             if unchanged {
                 existing_balance
             } else {
-                Some(generic_balance(&balance_path, &balance_json))
+                Some(BalanceMode::Script(ScriptSpec {
+                    command: Some(script_cmd.clone()),
+                    ..ScriptSpec::default()
+                }))
             }
         };
 
@@ -162,32 +171,5 @@ fn default_recipe(id: &str, name: &str, base_url: &str) -> Recipe {
         health: None,
         balance: None,
         origin: None,
-    }
-}
-
-fn generic_balance(path: &str, json_path: &str) -> BalanceSpec {
-    let mut headers = HashMap::new();
-    headers.insert("Accept".to_string(), "application/json".to_string());
-    BalanceSpec {
-        request: HttpCall {
-            method: "GET".into(),
-            url: format!("{{base_url}}{path}"),
-            headers,
-            body: None,
-        },
-        parse: ParseSpec {
-            available: None,
-            items: None,
-            fields: HashMap::from([("total_balance".to_string(), json_path.to_string())]),
-            divisor: None,
-            currency: None,
-        },
-        render: RenderSpec {
-            headline: "{total_balance}".into(),
-            fields: vec![RenderField {
-                label: "额度".into(),
-                value: "{total_balance}".into(),
-            }],
-        },
     }
 }

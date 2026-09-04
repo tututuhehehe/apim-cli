@@ -43,7 +43,8 @@ mod tests {
     use std::path::PathBuf;
 
     use super::super::{
-        Auth, AuthKind, BalanceSpec, HttpCall, ParseSpec, Recipe, RenderField, RenderSpec, load_dir,
+        Auth, AuthKind, BalanceMode, BalanceSpec, HttpCall, ParseSpec, Recipe, RenderField,
+        RenderSpec, load_dir,
     };
     use super::*;
 
@@ -70,7 +71,7 @@ mod tests {
                 query_param: None,
             },
             health: Some(HttpCall::get("{base_url}/models")),
-            balance: Some(BalanceSpec {
+            balance: Some(BalanceMode::Http(Box::new(BalanceSpec {
                 request: HttpCall::get("{base_url}/v1/dashboard/billing/subscription"),
                 parse: ParseSpec {
                     available: None,
@@ -89,7 +90,7 @@ mod tests {
                         value: "{total_balance}".into(),
                     }],
                 },
-            }),
+            }))),
             origin: None,
         }
     }
@@ -107,7 +108,7 @@ mod tests {
         assert_eq!(loaded.name, "我的中转站");
         assert_eq!(loaded.base_url, "https://relay.example.com/v1");
         assert_eq!(loaded.origin.as_deref(), Some(path.as_path()));
-        let balance = loaded.balance.as_ref().unwrap();
+        let balance = loaded.balance.as_ref().unwrap().http().unwrap();
         assert_eq!(
             balance
                 .parse

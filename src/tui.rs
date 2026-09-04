@@ -129,10 +129,10 @@ pub(crate) async fn run_snapshot_provider_form() -> Result<()> {
     if let Modal::Form { form, .. } = &mut app.modal {
         form.fields[0] = Field::text("ID", "my-relay");
         form.fields[1] = Field::text("名称", "我的中转站");
-        form.fields[2] = Field::text("Base URL", "https://relay.example.com/v1");
-        form.fields[4] = Field::text("额度路径", "/v1/dashboard/billing/subscription");
-        form.fields[5] = Field::text("额度取值", "hard_limit_usd");
-        form.active = 5;
+        form.fields[2] = Field::text("Base URL", "https://relay.example.com");
+        form.fields[3] = Field::text("探活路径", "/v1/models");
+        form.fields[4] = Field::text("脚本路径", "~/.config/apim/scripts/my-relay.sh");
+        form.active = 4;
     }
     render_snapshot(&app).await
 }

@@ -221,7 +221,16 @@ pub fn key_edit(
     )
 }
 
-/// 厂商表单：ID / 名称 / Base URL / 探活路径 / 额度路径 / 额度取值路径
+/// 厂商表单字段下标。
+pub const PF_ID: usize = 0;
+pub const PF_NAME: usize = 1;
+pub const PF_BASE: usize = 2;
+pub const PF_HEALTH: usize = 3;
+pub const PF_SCRIPT: usize = 4;
+
+/// 厂商表单：ID / 名称 / Base URL / 探活路径 / 脚本路径。
+/// 额度查询只走脚本；声明式 http recipe 属于手写 YAML 的地盘（内置 DeepSeek、
+/// new-api 系），表单不再提供预设类型。
 pub fn provider_add() -> Form {
     Form::new(
         "添加厂商",
@@ -230,32 +239,29 @@ pub fn provider_add() -> Form {
             Field::text("名称", ""),
             Field::text("Base URL", ""),
             Field::text("探活路径", "/models"),
-            Field::text("额度路径", ""),
-            Field::text("额度取值", ""),
+            Field::text("脚本路径", ""),
         ],
-        0,
+        PF_ID,
     )
 }
 
-pub fn provider_edit(
-    id: &str,
-    name: &str,
-    base_url: &str,
-    health_path: &str,
-    balance_path: &str,
-    balance_json: &str,
-) -> Form {
+pub fn provider_edit(recipe: &crate::recipe::Recipe, health_path: &str) -> Form {
+    let script_cmd = recipe
+        .balance
+        .as_ref()
+        .and_then(|b| b.script())
+        .and_then(|s| s.command.clone())
+        .unwrap_or_default();
     Form::new(
-        format!("编辑厂商 · {id}"),
+        format!("编辑厂商 · {}", recipe.id),
         vec![
-            Field::readonly("ID", id),
-            Field::text("名称", name),
-            Field::text("Base URL", base_url),
+            Field::readonly("ID", recipe.id.clone()),
+            Field::text("名称", recipe.name.clone()),
+            Field::text("Base URL", recipe.base_url.clone()),
             Field::text("探活路径", health_path),
-            Field::text("额度路径", balance_path),
-            Field::text("额度取值", balance_json),
+            Field::text("脚本路径", script_cmd),
         ],
-        1,
+        PF_NAME,
     )
 }
 
@@ -282,10 +288,32 @@ mod tests {
 
     #[test]
     fn readonly_field_ignores_input() {
-        let mut form = provider_edit("deepseek", "DeepSeek", "https://x", "", "", "");
-        form.active = 0;
+        let recipe = crate::recipe::Recipe {
+            id: "deepseek".into(),
+            name: "DeepSeek".into(),
+            base_url: "https://x".into(),
+            supports_groups: false,
+            vars: Default::default(),
+            auth: Default::default(),
+            health: None,
+            balance: None,
+            origin: None,
+        };
+        let mut form = provider_edit(&recipe, "");
+        form.active = PF_ID;
         form.handle_key(KeyEvent::from(KeyCode::Char('z')));
-        assert_eq!(form.text(0), "deepseek");
+        assert_eq!(form.text(PF_ID), "deepseek");
+    }
+
+    #[test]
+    fn provider_edit_echoes_script_command() {
+        let recipe: crate::recipe::Recipe = serde_yaml::from_str(
+            "id: glm\nname: GLM\nbase_url: 'https://x'\nauth: {kind: bearer}\nbalance:\n  kind: script\n  command: ~/s.sh",
+        )
+        .unwrap();
+        let form = provider_edit(&recipe, "/models");
+        assert_eq!(form.text(PF_SCRIPT), "~/s.sh");
+        assert_eq!(form.text(PF_HEALTH), "/models");
     }
 
     #[test]

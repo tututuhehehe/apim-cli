@@ -73,21 +73,9 @@ impl App {
             .as_ref()
             .map(|h| strip(&h.url))
             .unwrap_or_default();
-        let balance = recipe.balance.as_ref();
-        let balance_path = balance.map(|b| strip(&b.request.url)).unwrap_or_default();
-        let balance_json = balance
-            .and_then(|b| b.parse.fields.get("total_balance").cloned())
-            .unwrap_or_default();
         self.modal = Modal::Form {
             kind: FormKind::Provider,
-            form: form::provider_edit(
-                &recipe.id,
-                &recipe.name,
-                &recipe.base_url,
-                &health_path,
-                &balance_path,
-                &balance_json,
-            ),
+            form: form::provider_edit(recipe, &health_path),
             original: Some(id),
         };
     }

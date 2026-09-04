@@ -55,6 +55,15 @@ pub(crate) fn draw_balance(frame: &mut Frame, app: &App, area: Rect) {
                     Style::new().fg(theme::MUTED),
                 )));
             }
+            // 脚本形态：原始输出逐行直显，首行当 headline 高亮。
+            for (i, line) in view.lines.iter().enumerate() {
+                let style = if i == 0 {
+                    Style::new().fg(theme::GOLD).add_modifier(Modifier::BOLD)
+                } else {
+                    Style::new().fg(theme::TEXT)
+                };
+                lines.push(Line::from(Span::styled(format!("  {line}  "), style)));
+            }
             for item in &view.items {
                 lines.extend(item_lines(item, view));
             }

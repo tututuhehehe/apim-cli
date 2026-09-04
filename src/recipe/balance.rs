@@ -12,6 +12,8 @@ pub struct BalanceView {
     pub available: Option<bool>,
     pub headline: String,
     pub items: Vec<BalanceItem>,
+    /// 脚本形态的原始输出行（逐行直显）；http 形态恒为空。
+    pub lines: Vec<String>,
 }
 
 #[derive(Debug, Clone)]
@@ -137,6 +139,7 @@ pub fn parse_balance(spec: &BalanceSpec, root: &Value) -> Result<BalanceView> {
         available,
         headline,
         items,
+        lines: Vec::new(),
     })
 }
 
@@ -200,7 +203,11 @@ mod tests {
     fn deepseek_recipe_parses_live_shape() {
         let recipe: crate::recipe::Recipe =
             serde_yaml::from_str(include_str!("../../recipes/deepseek.yaml")).unwrap();
-        let spec = recipe.balance.clone().expect("deepseek has balance");
+        let spec = recipe
+            .balance
+            .as_ref()
+            .and_then(|b| b.http())
+            .expect("deepseek has balance");
         let json: Value = serde_json::from_str(
             r#"{
                 "is_available": true,
@@ -213,7 +220,7 @@ mod tests {
             }"#,
         )
         .unwrap();
-        let view = parse_balance(&spec, &json).unwrap();
+        let view = parse_balance(spec, &json).unwrap();
         assert_eq!(view.available, Some(true));
         assert_eq!(view.headline, "4.22");
         assert_eq!(view.items.len(), 1);
