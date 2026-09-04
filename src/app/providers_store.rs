@@ -80,28 +80,8 @@ impl App {
             }
         };
 
-        // 额度：脚本路径是唯一入口。留空时——表单回显过的 command 脚本被清空即删除；
-        // 表单从没管过的（声明式 http recipe、内联 run 脚本、vars）原样保留。
-        let existing_balance = recipe.balance.clone();
-        recipe.balance = if script_cmd.is_empty() {
-            let keep = existing_balance.as_ref().is_some_and(|b| {
-                b.http().is_some() || b.script().is_some_and(|s| s.command.is_none())
-            });
-            if keep { existing_balance } else { None }
-        } else {
-            let unchanged = existing_balance
-                .as_ref()
-                .and_then(|b| b.script())
-                .is_some_and(|s| s.command.as_deref() == Some(script_cmd.as_str()));
-            if unchanged {
-                existing_balance
-            } else {
-                Some(BalanceMode::Script(ScriptSpec {
-                    command: Some(script_cmd.clone()),
-                    ..ScriptSpec::default()
-                }))
-            }
-        };
+        // 额度：脚本路径是唯一入口（决策见 merged_balance）。
+        recipe.balance = merged_balance(&recipe.balance, &script_cmd);
 
         let path = match recipe::save_user_recipe(&recipe) {
             Ok(path) => path,
@@ -171,5 +151,106 @@ fn default_recipe(id: &str, name: &str, base_url: &str) -> Recipe {
         health: None,
         balance: None,
         origin: None,
+    }
+}
+
+/// 保存厂商时的额度合并决策：脚本路径是表单对额度的唯一入口。
+/// - 路径没变 → 原样保留（手写 recipe 的 run/timeout 等字段不动）
+/// - 留空 + 表单没管过的（声明式 http、内联 run 脚本）→ 原样保留
+/// - 留空 + 表单回显过的 command 脚本 → 清空即解绑（None）
+/// - 新路径 → 绑定为新的 Script{command}
+fn merged_balance(existing: &Option<BalanceMode>, script_cmd: &str) -> Option<BalanceMode> {
+    if script_cmd.is_empty() {
+        let keep = existing
+            .as_ref()
+            .is_some_and(|b| b.http().is_some() || b.script().is_some_and(|s| s.command.is_none()));
+        if keep { existing.clone() } else { None }
+    } else {
+        let unchanged = existing
+            .as_ref()
+            .and_then(|b| b.script())
+            .is_some_and(|s| s.command.as_deref() == Some(script_cmd));
+        if unchanged {
+            existing.clone()
+        } else {
+            Some(BalanceMode::Script(ScriptSpec {
+                command: Some(script_cmd.to_string()),
+                ..ScriptSpec::default()
+            }))
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// 声明式 http 额度（表单不认识、只能手写 YAML 的那路）。
+    fn http_balance() -> BalanceMode {
+        serde_yaml::from_str(
+            "request: {method: GET, url: '{base_url}/user/balance'}\nrender: {headline: '{total}'}",
+        )
+        .unwrap()
+    }
+
+    /// 表单回显过的外部脚本额度；带非默认 timeout，验证「路径未变时原样保留」。
+    fn command_balance(path: &str) -> BalanceMode {
+        BalanceMode::Script(ScriptSpec {
+            command: Some(path.to_string()),
+            run: None,
+            shell: None,
+            timeout_secs: Some(30),
+        })
+    }
+
+    #[test]
+    fn same_script_path_keeps_existing_untouched() {
+        let existing = Some(command_balance("~/quota.sh"));
+        let merged = merged_balance(&existing, "~/quota.sh");
+        let spec = merged.as_ref().and_then(|b| b.script()).unwrap();
+        assert_eq!(spec.command.as_deref(), Some("~/quota.sh"));
+        assert_eq!(spec.timeout_secs, Some(30));
+    }
+
+    #[test]
+    fn empty_cmd_keeps_http_balance() {
+        let existing = Some(http_balance());
+        let merged = merged_balance(&existing, "");
+        assert!(merged.as_ref().and_then(|b| b.http()).is_some());
+    }
+
+    #[test]
+    fn empty_cmd_keeps_inline_run_script() {
+        let existing = Some(BalanceMode::Script(ScriptSpec {
+            command: None,
+            run: Some("echo 1".into()),
+            shell: None,
+            timeout_secs: None,
+        }));
+        let merged = merged_balance(&existing, "");
+        let spec = merged.as_ref().and_then(|b| b.script()).unwrap();
+        assert_eq!(spec.command, None);
+        assert_eq!(spec.run.as_deref(), Some("echo 1"));
+    }
+
+    #[test]
+    fn empty_cmd_unbinds_command_script() {
+        let existing = Some(command_balance("~/quota.sh"));
+        assert!(merged_balance(&existing, "").is_none());
+    }
+
+    #[test]
+    fn empty_cmd_with_no_balance_stays_none() {
+        assert!(merged_balance(&None, "").is_none());
+    }
+
+    #[test]
+    fn new_script_path_binds_fresh_command() {
+        let existing = Some(command_balance("~/old.sh"));
+        let merged = merged_balance(&existing, "~/new.sh");
+        let spec = merged.as_ref().and_then(|b| b.script()).unwrap();
+        assert_eq!(spec.command.as_deref(), Some("~/new.sh"));
+        // 新绑定是干净的默认 spec，不继承旧脚本的字段。
+        assert_eq!(spec.timeout_secs, None);
     }
 }
