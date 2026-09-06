@@ -49,7 +49,7 @@ src/
 │   ├── mod.rs         KeyEntry、读取 config.toml + secrets.toml（严格版给 TUI，宽松版 load_keys_lenient 给 CLI 自救）
 │   └── store.rs       原子写入（tmp+rename，tmp 名带 pid，600 权限）
 └── probe/             并发探活（health + balance 并发，tokio::join!）
-    ├── mod.rs         Health/ProbeResult、client、http 一路（鉴权/请求/JSON 解析）
+    ├── mod.rs         Health/ProbeResult、client、http 一路（探活 + 模型列表拉取的鉴权请求）
     └── script.rs      脚本执行器（env 注入/超时 kill/stderr 截断 200/stdout 50 行上限）+ expand_tilde
 docs/
 └── quota-script-prompt.md  额度脚本代写提示词（整体复制给 AI Agent 用）

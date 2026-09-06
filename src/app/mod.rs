@@ -87,7 +87,7 @@ impl App {
             provider_ids: Vec::new(),
             selected_provider: 0,
             selected_key: 0,
-            focus: Focus::Keys,
+            focus: Focus::Providers,
             states: HashMap::new(),
             toast: None,
             last_refresh: None,

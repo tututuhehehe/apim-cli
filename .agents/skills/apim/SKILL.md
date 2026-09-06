@@ -35,9 +35,9 @@ apim use <厂商.别名>                     # 输出 export OPENAI_API_KEY=... 
 - 坏配置（recipe 误删 / secrets 缺条目）不会锁死 CLI：命令会跳过坏条目并打警告，下一次成功写盘自动清除；TUI 则保持严格报错。
 - 测试/沙盒：设 `APIM_CONFIG_DIR=<临时目录>` 重定向整个配置目录，绝不碰真实 `~/.config/apim`。
 
-## 余额查询脚本（balance.kind=script）
+## 余额查询脚本（balance.kind=script，所有厂商统一走这条路）
 
-额度查不了的怪接口厂商（多请求、要算日期、要查表映射）走脚本逃生舱：apim 带着密钥跑脚本，stdout 逐行进额度面板。完整的代写提示词（给任意 AI 用）在 **`docs/quota-script-prompt.md`**，接新厂商时整体复制它并附官方查询方式即可。
+**额度查询一律是脚本，没有例外**——内置四家（DeepSeek/OpenAI/Moonshot/OpenRouter）也一样，各自的脚本已在本机 `~/.config/apim/scripts/<厂商id>-quota.sh`（换新机器时按提示词重新生成或拷贝脚本目录）。apim 带着密钥跑脚本，stdout 逐行进额度面板（首行高亮）。完整的代写提示词（给任意 AI 用）在 **`docs/quota-script-prompt.md`**，接新厂商时整体复制它并附官方查询方式即可。
 
 ### 脚本契约（必须严格遵守）
 
@@ -61,7 +61,11 @@ echo 'sk-...' | apim key add <id> main
 apim status <id> --json
 ```
 
-现有实例参考：GLM = `~/.config/apim/recipes/glm.yaml` + `~/.config/apim/scripts/glm-quota.sh`（zsh + curl + jq，含信封校验）。
+现有实例参考（六家脚本全部就位并实测过）：GLM（`glm-quota.sh`，两接口+日期计算）、DeepSeek/Moonshot/OpenRouter/OpenAI（单请求+ jq）、ikun（new-api 面板，访问令牌走 `APIM_VAR_ACCESS_TOKEN`）。
+
+## TUI 快捷键（驱动 TUI 时用）
+
+`j/k` 移动、`Tab` 切换左右栏、`a/e/d` 增删改、`c` 复制、`r` 刷新、`q` 退出；厂商栏：`⏎` 开控制面板主页、`i` 厂商档案；密钥栏：`m` 用**选中的这把 key** 拉它的模型列表（弹窗内 `j/k` 滚动、`c` 复制模型名、`/` 过滤）、`i` 密钥详情（`r` 显隐完整 token，`c` 复制）、`/` 过滤密钥（再按 Esc 清除）。
 
 ## 红线
 
