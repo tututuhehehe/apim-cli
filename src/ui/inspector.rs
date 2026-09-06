@@ -623,6 +623,8 @@ mod tests {
                 reveal_token,
             },
             inflight: HashSet::new(),
+            key_filter: None,
+            provider_filter: None,
             tx,
             tx_models,
             client: reqwest::Client::new(),

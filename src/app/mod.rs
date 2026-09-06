@@ -1,6 +1,6 @@
 //! 应用状态：选中项、导航、探活调度。弹窗与存取在子模块。
 
-pub use modal::{InspectorTarget, Modal, ModelsStatus};
+pub use modal::{InspectorTarget, Modal, ModelsStatus, SearchTarget};
 
 mod keys_store;
 mod modal;
@@ -58,6 +58,11 @@ pub struct App {
     pub toast: Option<(String, Instant)>,
     pub last_refresh: Option<Instant>,
     pub modal: Modal,
+    /// 密钥过滤关键字（alias/分组包含，大小写不敏感）；None = 未过滤。
+    /// 只影响视图与导航，keys 始终是全集。
+    pub key_filter: Option<String>,
+    /// 厂商过滤关键字（id/显示名包含，大小写不敏感）；只影响视图与导航。
+    pub provider_filter: Option<String>,
     pub(crate) inflight: HashSet<String>,
     pub(crate) tx: UnboundedSender<ProbeResult>,
     pub(crate) tx_models: UnboundedSender<ModelsMsg>,
@@ -87,6 +92,8 @@ impl App {
             toast: None,
             last_refresh: None,
             modal: Modal::None,
+            key_filter: None,
+            provider_filter: None,
             inflight: HashSet::new(),
             tx,
             tx_models,
@@ -127,10 +134,38 @@ impl App {
         self.inflight.contains(key_id)
     }
 
+    /// 当前焦点厂商（provider_filter 生效时 selected_provider 是过滤后视图的下标）。
     pub fn current_provider_id(&self) -> Option<&str> {
+        let filtered = self.provider_ids_filtered();
+        let id = filtered.get(self.selected_provider)?;
+        // 借用必须出自全集 provider_ids，不能出自临时的过滤 Vec
         self.provider_ids
-            .get(self.selected_provider)
+            .iter()
+            .find(|p| p == &id)
             .map(String::as_str)
+    }
+
+    /// 过滤后的厂商 id 列表（id 或显示名命中 provider_filter，大小写不敏感）。
+    /// 无过滤时等于 provider_ids 全集；provider_ids 本身不被动。
+    pub fn provider_ids_filtered(&self) -> Vec<String> {
+        match self.provider_filter.as_deref() {
+            None | Some("") => self.provider_ids.clone(),
+            Some(f) => {
+                let needle = f.to_lowercase();
+                self.provider_ids
+                    .iter()
+                    .filter(|id| {
+                        let name = self
+                            .recipes
+                            .get(*id)
+                            .map(|r| r.name.as_str())
+                            .unwrap_or(id.as_str());
+                        text_contains(&needle, id) || text_contains(&needle, name)
+                    })
+                    .cloned()
+                    .collect()
+            }
+        }
     }
 
     pub fn current_recipe(&self) -> Option<&Recipe> {
@@ -150,8 +185,29 @@ impl App {
             .collect()
     }
 
+    /// 当前厂商下命中 key_filter 的密钥下标（别名或分组包含，大小写不敏感）。
+    /// 无过滤时等于 keys_in_provider 全集。
+    pub fn keys_in_provider_filtered(&self) -> Vec<usize> {
+        let all = self.keys_in_provider();
+        match self.key_filter.as_deref() {
+            None | Some("") => all,
+            Some(f) => {
+                let needle = f.to_lowercase();
+                all.into_iter()
+                    .filter(|&i| {
+                        let k = &self.keys[i];
+                        text_contains(&needle, &k.alias)
+                            || k.group
+                                .as_deref()
+                                .is_some_and(|g| text_contains(&needle, g))
+                    })
+                    .collect()
+            }
+        }
+    }
+
     pub fn selected_key_entry(&self) -> Option<&KeyEntry> {
-        let keys = self.keys_in_provider();
+        let keys = self.keys_in_provider_filtered();
         keys.get(self.selected_key).copied().map(|i| &self.keys[i])
     }
 
@@ -175,15 +231,54 @@ impl App {
             ids[1..].sort();
         }
         self.provider_ids = ids;
-        if self.selected_provider >= self.provider_ids.len() {
-            self.selected_provider = self.provider_ids.len().saturating_sub(1);
+        self.clamp_selections();
+    }
+
+    /// 过滤/增删后把选中项钳回过滤后视图的有效范围（无过滤时即全集范围）。
+    pub(crate) fn clamp_selections(&mut self) {
+        let np = self.provider_ids_filtered().len();
+        if np == 0 {
+            self.selected_provider = 0;
+        } else if self.selected_provider >= np {
+            self.selected_provider = np - 1;
         }
-        let n = self.keys_in_provider().len();
-        if n == 0 {
+        let nk = self.keys_in_provider_filtered().len();
+        if nk == 0 {
             self.selected_key = 0;
-        } else if self.selected_key >= n {
-            self.selected_key = n - 1;
+        } else if self.selected_key >= nk {
+            self.selected_key = nk - 1;
         }
+    }
+
+    /// 是否有任何过滤生效（决定无弹窗 Esc 是清过滤还是退出）。
+    pub fn has_filter(&self) -> bool {
+        self.key_filter.is_some() || self.provider_filter.is_some()
+    }
+
+    /// 无弹窗 Esc：优先清当前焦点列表的过滤，焦点侧没有则清另一侧。
+    /// 返回是否清掉了过滤（清掉了就不退出 TUI）。
+    pub fn clear_filter(&mut self) -> bool {
+        let key_first = self.focus == Focus::Keys;
+        if key_first {
+            if self.key_filter.take().is_some() {
+                self.clamp_selections();
+                return true;
+            }
+            if self.provider_filter.take().is_some() {
+                self.clamp_selections();
+                return true;
+            }
+        } else {
+            if self.provider_filter.take().is_some() {
+                self.clamp_selections();
+                return true;
+            }
+            if self.key_filter.take().is_some() {
+                self.clamp_selections();
+                return true;
+            }
+        }
+        false
     }
 
     pub fn move_up(&mut self) {
@@ -205,13 +300,13 @@ impl App {
     pub fn move_down(&mut self) {
         match self.focus {
             Focus::Providers => {
-                if self.selected_provider + 1 < self.provider_ids.len() {
+                if self.selected_provider + 1 < self.provider_ids_filtered().len() {
                     self.selected_provider += 1;
                     self.selected_key = 0;
                 }
             }
             Focus::Keys => {
-                let n = self.keys_in_provider().len();
+                let n = self.keys_in_provider_filtered().len();
                 if n > 0 && self.selected_key + 1 < n {
                     self.selected_key += 1;
                 }
@@ -342,6 +437,11 @@ impl App {
     }
 }
 
+/// 大小写不敏感的包含判断（needle 应已 to_lowercase）。
+fn text_contains(needle_lower: &str, haystack: &str) -> bool {
+    haystack.to_lowercase().contains(needle_lower)
+}
+
 #[cfg(test)]
 pub(crate) mod tests {
     use super::*;
@@ -397,6 +497,8 @@ pub(crate) mod tests {
             toast: None,
             last_refresh: None,
             modal: Modal::None,
+            key_filter: None,
+            provider_filter: None,
             inflight: HashSet::new(),
             tx,
             tx_models,
@@ -511,5 +613,131 @@ pub(crate) mod tests {
             app.apply(msg);
         }
         assert!(app.inflight.is_empty());
+    }
+
+    // ---- `/` 实时过滤 ------------------------------------------------------
+
+    /// 给密钥补分组，供分组命中用例使用。
+    fn with_groups(app: &mut App) {
+        app.keys[0].group = Some("生产".into());
+        app.keys[1].group = Some("个人".into());
+    }
+
+    #[test]
+    fn key_filter_matches_alias_case_insensitive() {
+        let (mut app, _rx, _rx_models) = test_app(&[("alpha", &["Work", "personal"])]);
+        app.key_filter = Some("WORK".into());
+        let hits: Vec<&str> = app
+            .keys_in_provider_filtered()
+            .into_iter()
+            .map(|i| app.keys[i].alias.as_str())
+            .collect();
+        assert_eq!(hits, ["Work"]);
+        // 全集语义不受过滤影响
+        assert_eq!(app.keys_in_provider().len(), 2);
+    }
+
+    #[test]
+    fn key_filter_matches_group_name() {
+        let (mut app, _rx, _rx_models) = test_app(&[("alpha", &["a1", "a2"])]);
+        with_groups(&mut app);
+        app.key_filter = Some("个人".into());
+        let hits: Vec<&str> = app
+            .keys_in_provider_filtered()
+            .into_iter()
+            .map(|i| app.keys[i].alias.as_str())
+            .collect();
+        assert_eq!(hits, ["a2"]);
+    }
+
+    #[test]
+    fn key_filter_no_match_yields_empty_but_full_list_stays() {
+        let (mut app, _rx, _rx_models) = test_app(&[("alpha", &["a1", "a2"])]);
+        app.key_filter = Some("zzz".into());
+        assert!(app.keys_in_provider_filtered().is_empty());
+        assert_eq!(app.keys_in_provider().len(), 2);
+        // 空关键字视为未过滤
+        app.key_filter = Some(String::new());
+        assert_eq!(app.keys_in_provider_filtered().len(), 2);
+    }
+
+    #[test]
+    fn selected_clamps_when_filter_shrinks_list() {
+        let (mut app, _rx, _rx_models) = test_app(&[("alpha", &["a1", "a2", "a3"])]);
+        app.selected_key = 2;
+        app.clamp_selections();
+        assert_eq!(app.selected_key, 2);
+        // 过滤只剩 1 条后越界，应钳回 0
+        app.key_filter = Some("a1".into());
+        app.clamp_selections();
+        assert_eq!(app.selected_key, 0);
+        assert!(app.selected_key_entry().is_some());
+    }
+
+    #[test]
+    fn provider_filter_matches_id_or_display_name() {
+        let (mut app, _rx, _rx_models) = test_app(&[("alpha", &["a1"]), ("beta", &["b1"])]);
+        app.provider_filter = Some("ALP".into());
+        assert_eq!(app.provider_ids_filtered(), ["alpha"]);
+        assert_eq!(app.current_provider_id(), Some("alpha"));
+        // 显示名「alpha 假厂商」命中
+        app.provider_filter = Some("假厂".into());
+        assert_eq!(app.provider_ids_filtered().len(), 2);
+        // 导航吃过滤后的列表：只看 beta
+        app.provider_filter = Some("beta".into());
+        app.selected_provider = 0;
+        app.move_down();
+        assert_eq!(app.selected_provider, 0, "过滤后只有一项，不应移动");
+    }
+
+    #[test]
+    fn search_cancel_restores_original_filter() {
+        let (mut app, _rx, _rx_models) = test_app(&[("alpha", &["a1", "a2"])]);
+        app.key_filter = Some("a1".into());
+        app.open_search();
+        assert!(matches!(app.modal, Modal::Search { .. }));
+        if let Modal::Search { edit, .. } = &mut app.modal {
+            edit.insert("xyz");
+        }
+        app.apply_live_filter();
+        assert_eq!(app.key_filter.as_deref(), Some("a1xyz"));
+        app.cancel_search();
+        assert_eq!(app.key_filter.as_deref(), Some("a1"));
+        assert!(matches!(app.modal, Modal::None));
+    }
+
+    #[test]
+    fn search_apply_writes_trimmed_value_and_closes() {
+        let (mut app, _rx, _rx_models) = test_app(&[("alpha", &["a1"])]);
+        app.open_search();
+        if let Modal::Search { edit, .. } = &mut app.modal {
+            edit.insert("  a  ");
+        }
+        app.apply_search();
+        assert_eq!(app.key_filter.as_deref(), Some("a"));
+        assert!(matches!(app.modal, Modal::None));
+        // 空输入 = 清除过滤
+        app.open_search();
+        if let Modal::Search { edit, .. } = &mut app.modal {
+            edit.backspace();
+            edit.backspace();
+            edit.backspace();
+        }
+        app.apply_search();
+        assert_eq!(app.key_filter, None);
+    }
+
+    #[test]
+    fn clear_filter_prefers_focused_side_then_other() {
+        let (mut app, _rx, _rx_models) = test_app(&[("alpha", &["a1"])]);
+        app.key_filter = Some("a".into());
+        app.provider_filter = Some("b".into());
+        app.focus = Focus::Keys;
+        assert!(app.clear_filter());
+        assert_eq!(app.key_filter, None);
+        assert_eq!(app.provider_filter.as_deref(), Some("b"));
+        assert!(app.clear_filter(), "焦点侧没有过滤时应清另一侧");
+        assert!(!app.clear_filter());
+        assert!(!app.has_filter());
     }
 }

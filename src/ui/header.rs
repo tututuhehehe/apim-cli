@@ -47,16 +47,54 @@ pub(crate) fn draw_footer(frame: &mut Frame, app: &App, area: Rect) {
     } else {
         " j/k 移动  Tab 切换  c 复制密钥  i 详情  a 添加  e 编辑  d 删除  r 刷新  q 退出 "
     };
-    let line = if let Some(toast) = toast {
-        Line::from(vec![
-            Span::styled(
-                format!(" {toast}  "),
-                Style::new().fg(theme::GOLD).add_modifier(Modifier::BOLD),
-            ),
-            Span::styled(keys, Style::new().fg(theme::MUTED)),
-        ])
+    let mut spans = Vec::new();
+    if let Some(toast) = toast {
+        spans.push(Span::styled(
+            format!(" {toast}  "),
+            Style::new().fg(theme::GOLD).add_modifier(Modifier::BOLD),
+        ));
+    }
+    if let Some(hint) = filter_hint(app) {
+        spans.push(Span::styled(
+            format!(" {hint}  "),
+            Style::new().fg(theme::GOLD).add_modifier(Modifier::BOLD),
+        ));
+    }
+    spans.push(Span::styled(keys, Style::new().fg(theme::MUTED)));
+    frame.render_widget(Paragraph::new(Line::from(spans)), area);
+}
+
+/// 过滤生效时底栏的「筛选: xxx (命中/总数)  Esc 清除」提示。
+fn filter_hint(app: &App) -> Option<String> {
+    let key = app.key_filter.as_deref().map(|f| {
+        (
+            f,
+            app.keys_in_provider_filtered().len(),
+            app.keys_in_provider().len(),
+        )
+    });
+    let provider = app
+        .provider_filter
+        .as_deref()
+        .map(|f| (f, app.provider_ids_filtered().len(), app.provider_ids.len()));
+    let both = key.is_some() && provider.is_some();
+    let mut parts: Vec<String> = Vec::new();
+    if let Some((f, m, n)) = provider {
+        parts.push(filter_part("厂商", both, f, m, n));
+    }
+    if let Some((f, m, n)) = key {
+        parts.push(filter_part("密钥", both, f, m, n));
+    }
+    if parts.is_empty() {
+        return None;
+    }
+    Some(format!("{}  Esc 清除", parts.join("  ")))
+}
+
+fn filter_part(side: &str, both: bool, f: &str, m: usize, n: usize) -> String {
+    if both {
+        format!("筛选 {side}: {f} ({m}/{n})")
     } else {
-        Line::from(Span::styled(keys, Style::new().fg(theme::MUTED)))
-    };
-    frame.render_widget(Paragraph::new(line), area);
+        format!("筛选: {f} ({m}/{n})")
+    }
 }

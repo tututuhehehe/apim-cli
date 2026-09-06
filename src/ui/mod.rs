@@ -8,6 +8,7 @@ mod inspector;
 mod keys;
 mod models;
 mod providers;
+mod search;
 
 use ratatui::Frame;
 use ratatui::layout::{Constraint, Direction, Layout, Rect};
@@ -64,6 +65,7 @@ pub fn draw(frame: &mut Frame, app: &App) {
                 .unwrap_or(provider_id);
             models::draw_models(frame, name, status, area);
         }
+        Modal::Search { target, edit, .. } => search::draw_search(frame, *target, edit, area),
         Modal::None => {}
     }
 }
