@@ -9,7 +9,6 @@ use ratatui::widgets::{Cell, Clear, Paragraph, Row, Table, TableState};
 use super::{App, Focus, pane_block, theme};
 use crate::config::KeyEntry;
 use crate::probe::Health;
-use crate::recipe;
 
 pub(crate) fn draw_keys(frame: &mut Frame, app: &App, area: Rect) {
     frame.render_widget(Clear, area);
@@ -29,15 +28,8 @@ pub(crate) fn draw_keys(frame: &mut Frame, app: &App, area: Rect) {
         .and_then(|key| {
             app.state_for(key)
                 .balance
-                .and_then(|b| b.view)
-                .and_then(|v| {
-                    v.items.first().map(|item| {
-                        recipe::money(
-                            item.currency.as_deref(),
-                            item.ctx.get("total_balance").unwrap_or(&v.headline),
-                        )
-                    })
-                })
+                .and_then(|b| b.lines)
+                .and_then(|lines| lines.first().cloned())
         })
         .unwrap_or_else(|| "—".into());
 
@@ -127,16 +119,6 @@ fn status_label(app: &App, key: &KeyEntry) -> (Style, String) {
             };
             (Style::new().fg(theme::ERR), short)
         }
-        Health::Live { .. } => {
-            let available = state
-                .balance
-                .as_ref()
-                .and_then(|b| b.view.as_ref())
-                .and_then(|v| v.available);
-            match available {
-                Some(false) => (Style::new().fg(theme::GOLD), "● 无额度".into()),
-                _ => (Style::new().fg(theme::OK), "● 可用".into()),
-            }
-        }
+        Health::Live { .. } => (Style::new().fg(theme::OK), "● 可用".into()),
     }
 }

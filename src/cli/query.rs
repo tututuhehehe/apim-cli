@@ -6,7 +6,6 @@ use serde_json::json;
 use super::{Args, Ctx};
 use crate::config::KeyEntry;
 use crate::probe::{self, Health, ProbeResult};
-use crate::recipe::BalanceView;
 
 pub(crate) async fn status(ctx: &Ctx, argv: &[String]) -> Result<()> {
     let args = Args::parse(argv)?;
@@ -71,8 +70,8 @@ pub(crate) async fn status(ctx: &Ctx, argv: &[String]) -> Result<()> {
         if let Some(b) = &r.balance {
             if let Some(err) = &b.error {
                 println!("    额度失败：{err}");
-            } else if let Some(view) = &b.view {
-                for line in view_lines(view) {
+            } else if let Some(lines) = &b.lines {
+                for line in lines {
                     println!("    {line}");
                 }
                 println!("    {} · {}ms", b.endpoint, b.elapsed_ms);
@@ -96,43 +95,18 @@ fn balance_json(b: &Option<probe::BalanceSnapshot>) -> serde_json::Value {
     let Some(b) = b else {
         return serde_json::Value::Null;
     };
-    match (&b.error, &b.view) {
+    match (&b.error, &b.lines) {
         (Some(err), _) => serde_json::json!({
             "ok": false, "endpoint": b.endpoint,
             "elapsed_ms": b.elapsed_ms, "error": err,
         }),
-        (None, Some(view)) => serde_json::json!({
+        (None, Some(lines)) => serde_json::json!({
             "ok": true, "endpoint": b.endpoint,
             "elapsed_ms": b.elapsed_ms,
-            "lines": view_lines(view),
+            "lines": lines,
         }),
         (None, None) => serde_json::Value::Null,
     }
-}
-
-/// 统一成「若干行文本」：脚本形态即原始输出；http 形态由 BalanceView 合成。
-fn view_lines(view: &BalanceView) -> Vec<String> {
-    if !view.lines.is_empty() {
-        return view.lines.clone();
-    }
-    let mut out = Vec::new();
-    for item in &view.items {
-        let amount = item
-            .ctx
-            .get("total_balance")
-            .cloned()
-            .unwrap_or_else(|| view.headline.clone());
-        out.push(crate::recipe::money(item.currency.as_deref(), &amount));
-        let fields: Vec<String> = item
-            .fields
-            .iter()
-            .map(|(label, value)| format!("{label} {value}"))
-            .collect();
-        if !fields.is_empty() {
-            out.push(fields.join("    "));
-        }
-    }
-    out
 }
 
 pub(crate) fn copy(ctx: &Ctx, argv: &[String]) -> Result<()> {

@@ -9,7 +9,6 @@ use ratatui::widgets::{Clear, List, ListItem, ListState};
 use super::{App, Focus, pane_block, theme};
 use crate::config::KeyEntry;
 use crate::probe::Health;
-use crate::recipe;
 
 pub(crate) fn draw_providers(frame: &mut Frame, app: &App, area: Rect) {
     frame.render_widget(Clear, area);
@@ -66,17 +65,8 @@ fn provider_summary(app: &App, key: &KeyEntry) -> (String, String) {
     let money = state
         .balance
         .as_ref()
-        .and_then(|b| b.view.as_ref())
-        .and_then(|v| v.items.first())
-        .map(|item| {
-            let amount = item.ctx.get("total_balance").cloned().unwrap_or_else(|| {
-                item.fields
-                    .first()
-                    .map(|(_, v)| v.clone())
-                    .unwrap_or_default()
-            });
-            recipe::money(item.currency.as_deref(), &amount)
-        })
+        .and_then(|b| b.lines.as_ref())
+        .and_then(|lines| lines.first().cloned())
         .unwrap_or_else(|| "…".into());
     let status = match &state.health {
         Health::Live { ms, .. } => format!("{}ms", ms),

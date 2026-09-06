@@ -1,5 +1,5 @@
-//! 并发探活：health + 额度两个请求一起发。额度分两路——声明式 http（本文件）、
-//! 脚本逃生舱（script.rs）。
+//! 并发探活：health 请求 + 额度脚本一起跑。额度统一走脚本（script.rs）：
+//! env 注入 key，stdout 逐行直显。
 
 mod script;
 
@@ -12,9 +12,7 @@ use anyhow::{Context, Result};
 use reqwest::{Client, Method, RequestBuilder, StatusCode};
 
 use crate::config::KeyEntry;
-use crate::recipe::{
-    self, Auth, AuthKind, BalanceMode, BalanceSpec, BalanceView, HttpCall, Recipe,
-};
+use crate::recipe::{self, Auth, AuthKind, HttpCall, Recipe};
 
 #[derive(Debug, Clone)]
 pub enum Health {
@@ -26,7 +24,8 @@ pub enum Health {
 
 #[derive(Debug, Clone)]
 pub struct BalanceSnapshot {
-    pub view: Option<BalanceView>,
+    /// 脚本 stdout（非空，首行为 headline）；None = 脚本失败（error 有值）。
+    pub lines: Option<Vec<String>>,
     pub endpoint: String,
     pub status: Option<u16>,
     pub elapsed_ms: u64,
@@ -67,10 +66,7 @@ pub async fn probe(client: &Client, recipe: &Recipe, key: &KeyEntry) -> ProbeRes
 
     let balance_fut = async {
         match &recipe.balance {
-            Some(BalanceMode::Http(spec)) => {
-                Some(hit_balance(client, recipe, spec, &key.token).await)
-            }
-            Some(BalanceMode::Script(spec)) => Some(run_script_balance(recipe, spec, key).await),
+            Some(spec) => Some(run_script_balance(recipe, spec, key).await),
             None => None,
         }
     };
@@ -180,63 +176,6 @@ async fn hit_health(
     let status = response.status();
     let _ = response.bytes().await;
     Ok((status, elapsed_ms(started)))
-}
-
-/// endpoint 会显示在额度面板：Query 鉴权配方的 URL 带 ?api_key=<token>，
-/// 展示前把 token 原文抹掉，明文密钥不上屏。
-fn display_endpoint(method: &str, url: &str, token: &str) -> String {
-    if token.is_empty() {
-        return format!("{} {}", method.to_uppercase(), url);
-    }
-    format!("{} {}", method.to_uppercase(), url.replace(token, "…"))
-}
-
-async fn hit_balance(
-    client: &Client,
-    recipe: &Recipe,
-    spec: &BalanceSpec,
-    token: &str,
-) -> BalanceSnapshot {
-    let ctx = recipe::request_ctx(recipe, token);
-    let endpoint = display_endpoint(
-        &spec.request.method,
-        &recipe::subst(&spec.request.url, &ctx),
-        token,
-    );
-    let started = Instant::now();
-    match fetch_balance(client, recipe, spec, token).await {
-        Ok((status, view)) => BalanceSnapshot {
-            view: Some(view),
-            endpoint,
-            status: Some(status),
-            elapsed_ms: elapsed_ms(started),
-            error: None,
-        },
-        Err(err) => BalanceSnapshot {
-            view: None,
-            endpoint,
-            status: None,
-            elapsed_ms: elapsed_ms(started),
-            error: Some(compact_error(&err)),
-        },
-    }
-}
-
-async fn fetch_balance(
-    client: &Client,
-    recipe: &Recipe,
-    spec: &BalanceSpec,
-    token: &str,
-) -> Result<(u16, BalanceView)> {
-    let response = send(client, recipe, &spec.request, token).await?;
-    let status = response.status();
-    let body = response.text().await.context("read body")?;
-    if !status.is_success() {
-        anyhow::bail!("HTTP {} {}", status.as_u16(), truncate(&body, 180));
-    }
-    let json: serde_json::Value = serde_json::from_str(&body).context("parse JSON")?;
-    let view = recipe::parse_balance(spec, &json)?;
-    Ok((status.as_u16(), view))
 }
 
 async fn send(
@@ -385,23 +324,5 @@ mod tests {
     fn parse_models_object_without_data_errors() {
         let err = parse_models(r#"{"error":{"message":"nope"}}"#).expect_err("缺 data 应报错");
         assert!(err.contains("data"), "实际错误: {err}");
-    }
-
-    #[test]
-    fn display_endpoint_redacts_token_in_query_urls() {
-        // Query 鉴权配方：token 在 URL 里，展示前必须抹掉
-        assert_eq!(
-            display_endpoint(
-                "GET",
-                "https://x.io/api/usage?api_key=sk-secret-123&span=month",
-                "sk-secret-123"
-            ),
-            "GET https://x.io/api/usage?api_key=…&span=month"
-        );
-        // Bearer 配方 URL 不含 token，原样展示
-        assert_eq!(
-            display_endpoint("GET", "https://api.deepseek.com/user/balance", "sk-other"),
-            "GET https://api.deepseek.com/user/balance"
-        );
     }
 }

@@ -15,7 +15,7 @@ use super::{App, Modal, centered, pane_block, theme};
 use crate::app::{InspectorTarget, KeyState};
 use crate::config::{KeyEntry, mask_token};
 use crate::probe::{BalanceSnapshot, Health};
-use crate::recipe::{Auth, AuthKind, BalanceMode, Recipe};
+use crate::recipe::{Auth, AuthKind, Recipe, ScriptSpec};
 
 /// 弹窗宽度（列）。
 const WIDTH: u16 = 64;
@@ -162,17 +162,11 @@ fn auth_label(auth: &Auth) -> String {
     }
 }
 
-/// 额度行：HTTP 形态带解析字段数；脚本形态带命令与超时（缺省 15s，同 probe）。
-fn balance_label(balance: Option<&BalanceMode>) -> String {
+/// 额度行：脚本命令与超时（缺省 15s，同 probe）。
+fn balance_label(balance: Option<&ScriptSpec>) -> String {
     match balance {
         None => "未配置".into(),
-        Some(BalanceMode::Http(spec)) => format!(
-            "HTTP {} {} · {} 个解析字段",
-            spec.request.method,
-            spec.request.url,
-            spec.render.fields.len()
-        ),
-        Some(BalanceMode::Script(spec)) => format!(
+        Some(spec) => format!(
             "脚本 {} · 超时 {}s",
             spec.command.as_deref().unwrap_or("(内联)"),
             spec.timeout_secs.unwrap_or(15)
@@ -187,24 +181,12 @@ fn health_label(state: &KeyState, checking: bool) -> String {
     match &state.health {
         Health::Unknown => "未配置探活".into(),
         Health::Checking => "… 检查中".into(),
-        Health::Live { ms } => {
-            // 与主界面状态列同口径（keys.rs status_label）：额度接口明确说账号
-            // 不可用/无余额时，不能在这里仍显示「可用」
-            let available = state
-                .balance
-                .as_ref()
-                .and_then(|b| b.view.as_ref())
-                .and_then(|v| v.available);
-            match available {
-                Some(false) => format!("● 无额度（{ms}ms）"),
-                _ => format!("● 可用 {ms}ms"),
-            }
-        }
+        Health::Live { ms } => format!("● 可用 {ms}ms"),
         Health::Down { ms, message } => format!("● 失败 {message}（{ms}ms）"),
     }
 }
 
-/// 余额摘要：失败显示错误；有 view 显示 headline；否则「无额度数据」。
+/// 余额摘要：失败显示错误；有输出显示首行；否则「无额度数据」。
 fn balance_summary(balance: Option<&BalanceSnapshot>) -> String {
     let Some(snap) = balance else {
         return "无额度数据".into();
@@ -212,9 +194,9 @@ fn balance_summary(balance: Option<&BalanceSnapshot>) -> String {
     if let Some(err) = &snap.error {
         return err.clone();
     }
-    snap.view
+    snap.lines
         .as_ref()
-        .map(|v| v.headline.clone())
+        .and_then(|lines| lines.first().cloned())
         .filter(|h| !h.is_empty())
         .unwrap_or_else(|| "无额度数据".into())
 }
@@ -356,14 +338,12 @@ fn truncate_cols(s: &str, max_cols: usize) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::recipe::{
-        BalanceSpec, BalanceView, HttpCall, ParseSpec, RenderField, RenderSpec, ScriptSpec,
-    };
+    use crate::recipe::{HttpCall, ScriptSpec};
     use std::collections::{HashMap, HashSet};
     use std::path::PathBuf;
     use std::time::Instant;
 
-    fn recipe(balance: Option<BalanceMode>, vars: &[(&str, &str)], origin: Option<&str>) -> Recipe {
+    fn recipe(balance: Option<ScriptSpec>, vars: &[(&str, &str)], origin: Option<&str>) -> Recipe {
         Recipe {
             id: "demo".into(),
             name: "Demo".into(),
@@ -380,30 +360,6 @@ mod tests {
             balance,
             origin: origin.map(PathBuf::from),
         }
-    }
-
-    fn http_balance() -> BalanceMode {
-        BalanceMode::Http(Box::new(BalanceSpec {
-            request: HttpCall::get("{base_url}/user/balance"),
-            parse: ParseSpec::default(),
-            render: RenderSpec {
-                headline: "{total_balance}".into(),
-                fields: vec![
-                    RenderField {
-                        label: "总额".into(),
-                        value: "{total_balance}".into(),
-                    },
-                    RenderField {
-                        label: "充值".into(),
-                        value: "{topped_up_balance}".into(),
-                    },
-                    RenderField {
-                        label: "赠款".into(),
-                        value: "{granted_balance}".into(),
-                    },
-                ],
-            },
-        }))
     }
 
     fn key() -> KeyEntry {
@@ -432,10 +388,10 @@ mod tests {
     #[test]
     fn provider_rows_builtin_script_masks_var_values() {
         let recipe = recipe(
-            Some(BalanceMode::Script(ScriptSpec {
+            Some(ScriptSpec {
                 command: Some("~/.config/apim/scripts/demo.sh".into()),
                 ..Default::default()
-            })),
+            }),
             &[("access_token", "at-secret-value")],
             None,
         );
@@ -457,9 +413,12 @@ mod tests {
     }
 
     #[test]
-    fn provider_rows_http_balance_and_user_origin() {
+    fn provider_rows_user_origin_and_custom_auth() {
         let mut recipe = recipe(
-            Some(http_balance()),
+            Some(ScriptSpec {
+                command: Some("~/quota.sh".into()),
+                ..Default::default()
+            }),
             &[],
             Some("/home/u/.config/apim/recipes/demo.yaml"),
         );
@@ -469,12 +428,11 @@ mod tests {
             ..Default::default()
         };
         let rows = provider_rows(&recipe, 0, &[]);
-        let balance = row(&rows, "额度");
         assert!(
-            balance.contains("HTTP GET {base_url}/user/balance"),
-            "{balance}"
+            row(&rows, "额度").contains("~/quota.sh"),
+            "{}",
+            row(&rows, "额度")
         );
-        assert!(balance.contains("3 个解析字段"), "{balance}");
         assert_eq!(row(&rows, "来源"), "/home/u/.config/apim/recipes/demo.yaml");
         assert!(
             row(&rows, "鉴权").contains("X-Api-Key"),
@@ -517,14 +475,9 @@ mod tests {
         let live = KeyState {
             health: Health::Live { ms: 101 },
             balance: Some(BalanceSnapshot {
-                view: Some(BalanceView {
-                    available: Some(true),
-                    headline: "4.22".into(),
-                    items: Vec::new(),
-                    lines: Vec::new(),
-                }),
-                endpoint: "GET https://api.demo.com/user/balance".into(),
-                status: Some(200),
+                lines: Some(vec!["¥4.17  （充值 4.17 · 赠款 0.00, CNY）".into()]),
+                endpoint: "script demo".into(),
+                status: None,
                 elapsed_ms: 88,
                 error: None,
             }),
@@ -539,30 +492,8 @@ mod tests {
             false,
         );
         assert_eq!(row(&rows, "健康"), "● 可用 101ms");
-        assert_eq!(row(&rows, "余额"), "4.22");
+        assert_eq!(row(&rows, "余额"), "¥4.17  （充值 4.17 · 赠款 0.00, CNY）");
         assert_eq!(row(&rows, "上次探测"), "45 秒前");
-
-        // 与主界面状态列同口径：额度接口说账号不可用时显示「无额度」而非「可用」
-        let no_quota = KeyState {
-            health: Health::Live { ms: 33 },
-            balance: Some(BalanceSnapshot {
-                view: Some(BalanceView {
-                    available: Some(false),
-                    headline: "0".into(),
-                    items: Vec::new(),
-                    lines: Vec::new(),
-                }),
-                endpoint: "GET https://api.demo.com/user/balance".into(),
-                status: Some(200),
-                elapsed_ms: 9,
-                error: None,
-            }),
-            updated: None,
-        };
-        let rows = key_rows(&key, "Demo", &no_quota, false, None, false);
-        let health = row(&rows, "健康");
-        assert!(health.contains("无额度"), "{health}");
-        assert!(!health.contains("可用"), "{health}");
 
         let down = KeyState {
             health: Health::Down {
@@ -570,7 +501,7 @@ mod tests {
                 message: "connection refused".into(),
             },
             balance: Some(BalanceSnapshot {
-                view: None,
+                lines: None,
                 endpoint: "script demo".into(),
                 status: None,
                 elapsed_ms: 5,

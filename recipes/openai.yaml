@@ -19,18 +19,6 @@ health:
   url: "{base_url}/v1/models"
 
 balance:
-  request:
-    method: GET
-    url: "{base_url}/v1/dashboard/billing/subscription"
-    headers:
-      Accept: application/json
-  parse:
-    fields:
-      total_balance: hard_limit_usd
-    currency: USD
-  render:
-    headline: "{total_balance}"
-    fields:
-      # hard_limit_usd 是消费上限（并非剩余余额），故标签用「上限」
-      - label: 上限
-        value: "{total_balance}"
+  kind: script
+  command: ~/.config/apim/scripts/openai-quota.sh
+  timeout_secs: 15

@@ -43,10 +43,7 @@ mod tests {
     use std::fs;
     use std::path::PathBuf;
 
-    use super::super::{
-        Auth, AuthKind, BalanceMode, BalanceSpec, HttpCall, ParseSpec, Recipe, RenderField,
-        RenderSpec, load_dir,
-    };
+    use super::super::{Auth, AuthKind, HttpCall, Recipe, ScriptSpec, load_dir};
     use super::*;
 
     fn temp_dir(name: &str) -> PathBuf {
@@ -74,26 +71,12 @@ mod tests {
                 query_param: None,
             },
             health: Some(HttpCall::get("{base_url}/models")),
-            balance: Some(BalanceMode::Http(Box::new(BalanceSpec {
-                request: HttpCall::get("{base_url}/v1/dashboard/billing/subscription"),
-                parse: ParseSpec {
-                    available: None,
-                    items: None,
-                    fields: HashMap::from([(
-                        "total_balance".to_string(),
-                        "hard_limit_usd".to_string(),
-                    )]),
-                    divisor: None,
-                    currency: None,
-                },
-                render: RenderSpec {
-                    headline: "{total_balance}".into(),
-                    fields: vec![RenderField {
-                        label: "额度".into(),
-                        value: "{total_balance}".into(),
-                    }],
-                },
-            }))),
+            balance: Some(ScriptSpec {
+                command: Some("~/.config/apim/scripts/my-relay-quota.sh".into()),
+                run: None,
+                shell: None,
+                timeout_secs: Some(20),
+            }),
             origin: None,
         }
     }
@@ -111,15 +94,12 @@ mod tests {
         assert_eq!(loaded.name, "我的中转站");
         assert_eq!(loaded.base_url, "https://relay.example.com/v1");
         assert_eq!(loaded.origin.as_deref(), Some(path.as_path()));
-        let balance = loaded.balance.as_ref().unwrap().http().unwrap();
+        let balance = loaded.balance.as_ref().unwrap();
         assert_eq!(
-            balance
-                .parse
-                .fields
-                .get("total_balance")
-                .map(String::as_str),
-            Some("hard_limit_usd")
+            balance.command.as_deref(),
+            Some("~/.config/apim/scripts/my-relay-quota.sh")
         );
+        assert_eq!(balance.timeout_secs, Some(20));
         delete_user_recipe(&path).unwrap();
         assert!(!path.exists());
         assert_no_tmp_leftover(&dir);

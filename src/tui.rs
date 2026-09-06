@@ -16,7 +16,6 @@ use unicode_width::UnicodeWidthStr;
 use crate::app::{App, Focus, KeyState, Modal, ModelsMsg};
 use crate::form::{Field, FormEvent};
 use crate::probe::{BalanceSnapshot, Health};
-use crate::recipe::BalanceView;
 use crate::ui;
 
 pub(crate) async fn run_tui() -> Result<()> {
@@ -233,12 +232,7 @@ pub(crate) async fn run_snapshot_inspector() -> Result<()> {
             KeyState {
                 health: Health::Live { ms: 120 },
                 balance: Some(BalanceSnapshot {
-                    view: Some(BalanceView {
-                        available: Some(true),
-                        headline: "¥ 4.22".into(),
-                        items: Vec::new(),
-                        lines: Vec::new(),
-                    }),
+                    lines: Some(vec!["¥ 4.22".into()]),
                     endpoint: "GET https://api.example.invalid/user/balance".into(),
                     status: Some(200),
                     elapsed_ms: 88,

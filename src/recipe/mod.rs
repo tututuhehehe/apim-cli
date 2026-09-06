@@ -1,11 +1,9 @@
 //! 厂商 recipe：怎么鉴权、怎么探活、怎么查额度。
 
-pub use balance::{BalanceItem, BalanceView, money, parse_balance};
-pub use script::{BalanceMode, ScriptSpec};
+pub use script::ScriptSpec;
 pub(crate) use store::save_user_recipe_to;
 pub use store::{delete_user_recipe, save_user_recipe, user_recipes_dir};
 
-mod balance;
 mod script;
 mod store;
 
@@ -36,15 +34,15 @@ pub struct Recipe {
     pub models_url: Option<String>,
     #[serde(default)]
     pub supports_groups: bool,
-    /// 自定义模板变量，可进 {placeholder} 替换。存敏感值时整个文件 600。
+    /// 自定义模板变量，可进 {placeholder} 替换并注入脚本 env。存敏感值时整个文件 600。
     #[serde(default, skip_serializing_if = "HashMap::is_empty")]
     pub vars: HashMap<String, String>,
     pub auth: Auth,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub health: Option<HttpCall>,
-    /// 额度查询：声明式 HTTP（缺省）或脚本逃生舱，见 BalanceMode。
+    /// 额度查询：跑脚本（stdout 逐行直显），见 ScriptSpec。
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub balance: Option<BalanceMode>,
+    pub balance: Option<ScriptSpec>,
     /// 本地 YAML 路径；None = 内置（编译进二进制），不可删除。
     #[serde(skip)]
     pub origin: Option<PathBuf>,
@@ -100,44 +98,6 @@ impl HttpCall {
 
 fn default_get() -> String {
     "GET".into()
-}
-
-#[derive(Debug, Clone, Deserialize, Serialize)]
-pub struct BalanceSpec {
-    pub request: HttpCall,
-    #[serde(default)]
-    pub parse: ParseSpec,
-    pub render: RenderSpec,
-}
-
-#[derive(Debug, Clone, Default, Deserialize, Serialize)]
-pub struct ParseSpec {
-    /// Dotted path to a boolean "account usable" flag.
-    pub available: Option<String>,
-    /// Dotted path to an array of objects (e.g. per-currency balances).
-    pub items: Option<String>,
-    /// When `items` is absent, build one virtual item from these root paths.
-    #[serde(default)]
-    pub fields: HashMap<String, String>,
-    /// 数值字段统一除以该系数（如 new-api 的 500000 quota = $1）。
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub divisor: Option<f64>,
-    /// 字面货币码，注入每个 item（CNY→¥ / USD→$），覆盖响应里的值。
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub currency: Option<String>,
-}
-
-#[derive(Debug, Clone, Deserialize, Serialize)]
-pub struct RenderSpec {
-    pub headline: String,
-    #[serde(default)]
-    pub fields: Vec<RenderField>,
-}
-
-#[derive(Debug, Clone, Deserialize, Serialize)]
-pub struct RenderField {
-    pub label: String,
-    pub value: String,
 }
 
 pub fn load_recipes() -> Result<HashMap<String, Recipe>> {
@@ -302,7 +262,7 @@ mod tests {
     #[test]
     fn builtin_recipes_load_with_expected_metadata() {
         // 不存在的用户目录：只验 builtin（+ 开发目录）注册结果。
-        // 探活/额度路径一并锁死，防止 YAML 路径改动后测试悄悄失同步
+        // 探活路径与额度脚本一并锁死，防止 YAML 改动后测试悄悄失同步
         // （OpenRouter 的 /models 是公开端点，探活必须用鉴权的 /key）。
         let user_dir = Path::new("target/apim-builtin-tests-no-user-dir");
         let map = load_recipes_with(user_dir).unwrap();
@@ -312,31 +272,31 @@ mod tests {
                 "DeepSeek",
                 "https://api.deepseek.com",
                 "/models",
-                "/user/balance",
+                "deepseek-quota.sh",
             ),
             (
                 "openai",
                 "OpenAI",
                 "https://api.openai.com",
                 "/v1/models",
-                "/v1/dashboard/billing/subscription",
+                "openai-quota.sh",
             ),
             (
                 "moonshot",
                 "Moonshot AI",
                 "https://api.moonshot.cn",
                 "/v1/models",
-                "/v1/users/me/balance",
+                "moonshot-quota.sh",
             ),
             (
                 "openrouter",
                 "OpenRouter",
                 "https://openrouter.ai/api/v1",
                 "/key",
-                "/credits",
+                "openrouter-quota.sh",
             ),
         ];
-        for (id, name, base_url, health_suffix, balance_suffix) in expected {
+        for (id, name, base_url, health_suffix, script_name) in expected {
             let recipe = map
                 .get(id)
                 .unwrap_or_else(|| panic!("builtin {id} missing"));
@@ -351,15 +311,14 @@ mod tests {
                 "{id} health url 应以 {health_suffix} 结尾，实际 {}",
                 health.url
             );
-            let balance = recipe
+            let command = recipe
                 .balance
                 .as_ref()
-                .and_then(|b| b.http())
-                .unwrap_or_else(|| panic!("{id} 缺 http balance"));
+                .and_then(|b| b.command.as_deref())
+                .unwrap_or_else(|| panic!("{id} 额度应绑定脚本"));
             assert!(
-                balance.request.url.ends_with(balance_suffix),
-                "{id} balance url 应以 {balance_suffix} 结尾，实际 {}",
-                balance.request.url
+                command.ends_with(script_name),
+                "{id} 额度脚本应为 {script_name}，实际 {command}"
             );
             assert!(
                 recipe.origin.is_none(),
@@ -387,52 +346,25 @@ mod tests {
         fs::remove_file(&override_path).unwrap();
     }
 
-    /// 从内置 YAML 文本构造 recipe，用假 JSON 跑 balance 的 http parse。
-    fn builtin_balance_view(yaml: &str, json: &str) -> BalanceView {
-        let recipe: Recipe = serde_yaml::from_str(yaml).expect("builtin yaml parses");
-        let spec = recipe
-            .balance
-            .as_ref()
-            .and_then(|b| b.http())
-            .expect("http-form balance");
-        let root: Value = serde_json::from_str(json).unwrap();
-        parse_balance(spec, &root).unwrap()
-    }
-
     #[test]
-    fn openai_balance_parses_subscription_shape() {
-        let view = builtin_balance_view(
-            include_str!("../../recipes/openai.yaml"),
-            r#"{"hard_limit_usd": 96}"#,
-        );
-        assert_eq!(view.headline, "96");
-        assert_eq!(view.items[0].currency.as_deref(), Some("USD"));
-        assert_eq!(view.items[0].fields[0], ("上限".into(), "96".into()));
-    }
-
-    #[test]
-    fn moonshot_balance_parses_user_balance_shape() {
-        let view = builtin_balance_view(
-            include_str!("../../recipes/moonshot.yaml"),
-            r#"{"code":0,"status":true,"data":{"available_balance":42.50,"cash_balance":42.50,"voucher_balance":0}}"#,
-        );
-        // 顶层 status 布尔作为 available
-        assert_eq!(view.available, Some(true));
-        assert_eq!(view.headline, "42.5");
-        assert_eq!(view.items[0].currency.as_deref(), Some("CNY"));
-        assert_eq!(view.items[0].fields[0], ("额度".into(), "42.5".into()));
-    }
-
-    #[test]
-    fn openrouter_balance_parses_credits_shape() {
-        let view = builtin_balance_view(
-            include_str!("../../recipes/openrouter.yaml"),
-            r#"{"data":{"total_credits":12.5,"total_usage":3.2}}"#,
-        );
-        assert_eq!(view.headline, "12.5");
-        assert_eq!(view.items[0].currency.as_deref(), Some("USD"));
-        // total_credits 是累计充值总额（非剩余），标签如实叫「总额」
-        assert_eq!(view.items[0].fields[0], ("总额".into(), "12.5".into()));
-        assert_eq!(view.items[0].fields[1], ("已用".into(), "3.2".into()));
+    fn builtin_balance_is_script_bound() {
+        // 四家内置厂商的额度一律走脚本（command 指向用户 scripts 目录）
+        for (id, script) in [
+            ("deepseek", "deepseek-quota.sh"),
+            ("openai", "openai-quota.sh"),
+            ("moonshot", "moonshot-quota.sh"),
+            ("openrouter", "openrouter-quota.sh"),
+        ] {
+            let map = load_recipes_with(Path::new("target/apim-builtin-balance-tests")).unwrap();
+            let recipe = map
+                .get(id)
+                .unwrap_or_else(|| panic!("builtin {id} missing"));
+            let spec = recipe
+                .balance
+                .as_ref()
+                .and_then(|b| b.command.as_deref())
+                .unwrap_or_else(|| panic!("{id} 额度应绑定脚本"));
+            assert!(spec.ends_with(script), "{id} 脚本名不对: {spec}");
+        }
     }
 }

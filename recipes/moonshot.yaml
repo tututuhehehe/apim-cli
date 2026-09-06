@@ -19,18 +19,6 @@ health:
   url: "{base_url}/v1/models"
 
 balance:
-  request:
-    method: GET
-    url: "{base_url}/v1/users/me/balance"
-    headers:
-      Accept: application/json
-  parse:
-    available: status
-    fields:
-      total_balance: data.available_balance
-    currency: CNY
-  render:
-    headline: "{total_balance}"
-    fields:
-      - label: 额度
-        value: "{total_balance}"
+  kind: script
+  command: ~/.config/apim/scripts/moonshot-quota.sh
+  timeout_secs: 15

@@ -48,7 +48,7 @@ apim
 
 保存后生成 `~/.config/apim/recipes/<id>.yaml`，接着按 `a` 就能给它加密钥。脚本不用自己写：把 `docs/quota-script-prompt.md` 整体复制给任意 AI Agent，附上厂商的官方查询方式，它会按 apim 预留的接口契约写好并给验证命令。
 
-**编辑（`e`）**：密钥表单带出当前值，改别名就是重命名。厂商表单编辑时 ID 锁定；探活路径/脚本路径没改就保存，不会动原 YAML 里手写的配置（DeepSeek 的声明式额度、new-api 的访问令牌 `vars`、内联脚本都原样保留）。清空脚本路径保存即取消脚本额度。
+**编辑（`e`）**：密钥表单带出当前值，改别名就是重命名。厂商表单编辑时 ID 锁定；探活路径/脚本路径没改就保存，不会动原 YAML 里手写的配置（内联脚本、`vars` 访问令牌等都原样保留）。清空脚本路径保存即取消脚本额度。
 
 **删除（`d`）**：都弹确认框。厂商下面还有密钥时会拒绝，先删密钥。内置厂商（DeepSeek / OpenAI / Moonshot AI / OpenRouter）不可删除，但可以 `e` 编辑覆盖（会在用户目录生成同名 YAML）。
 
@@ -158,9 +158,18 @@ TUI 表单生成的 YAML 和手写的完全等价；编辑时表单只覆盖它�
 
 ### new-api 系中转站（额度要访问令牌的）
 
-表单已不再提供这个预设（额度统一走脚本），但手写的声明式 YAML 依旧支持；也可以按 `docs/quota-script-prompt.md` 让 AI 写个脚本。手写的话：
+多数 new-api 面板的 `/v1/dashboard/billing/subscription` 要么返回假数字，要么不认 API Key。真实余额在 `/api/user/self`，但它只认**访问令牌**（个人设置里生成的那串，不是 sk- Key）。写一个脚本（`~/.config/apim/scripts/<id>-quota.sh`）：
 
-多数 new-api 面板的 `/v1/dashboard/billing/subscription` 要么返回假数字，要么不认 API Key。真实余额在 `/api/user/self`，但它只认**访问令牌**（个人设置里生成的那串，不是 sk- Key）。这种要在 `~/.config/apim/recipes/<id>.yaml` 手写：
+```sh
+#!/bin/sh
+# 访问令牌放 recipe 的 vars: {access_token: ...}，apim 注入为 APIM_VAR_ACCESS_TOKEN
+RESP="$(curl -sS --max-time 10 \
+  -H "Authorization: Bearer ${APIM_VAR_ACCESS_TOKEN:?}" \
+  "${APIM_BASE_URL}/api/user/self")"
+printf '%s' "$RESP" | jq -r '"剩余 $\(.data.quota / 500000 | floor)  （已用 $\(.data.used_quota / 500000 | floor)）"'
+```
+
+recipe 里绑定并放访问令牌：
 
 ```yaml
 vars:
@@ -168,21 +177,8 @@ vars:
 health:
   url: '{base_url}/v1/models'
 balance:
-  request:
-    url: '{base_url}/api/user/self'
-    headers:
-      Authorization: 'Bearer {access_token}'
-  parse:
-    divisor: 500000      # new-api: 500000 quota = $1
-    currency: USD
-    fields:
-      total_balance: data.quota
-      used: data.used_quota
-  render:
-    headline: '{total_balance}'
-    fields:
-      - {label: 剩余, value: '{total_balance}'}
-      - {label: 已用, value: '{used}'}
+  kind: script
+  command: ~/.config/apim/scripts/<id>-quota.sh
 ```
 
 探活仍用每条密钥自己的 sk- Key；额度用 `vars` 里的访问令牌（额度是账户级的，同账户多条 Key 显示一样）。文件含令牌，保持 600 权限，别分享。
@@ -195,9 +191,9 @@ balance:
 models_url: '{base_url}/api/paas/v4/models'
 ```
 
-### 自定义脚本额度（接口长得怪的厂商）
+### 自定义脚本额度（所有厂商统一走这条路）
 
-有些厂商的额度没法用「一个请求 + JSON 取值」描述——要发多个请求、算日期、查表映射。比如 GLM Coding Plan：两个接口、按 `unit/number` 挑窗口、按套餐等级映射 MCP 次数。这种走脚本逃生舱 `balance.kind=script`：apim 带着密钥跑一个脚本，把 stdout 逐行显示在额度面板，不再为它们扩配置语法。
+**额度查询一律是脚本**：apim 带着密钥跑一个脚本，把 stdout 逐行显示在额度面板（首行高亮）。脚本想怎么查、怎么算都行——单请求的规整接口（DeepSeek/Moonshot/OpenRouter…）几行 shell + jq 搞定，要发多个请求、算日期的（GLM Coding Plan）也装得下。
 
 ```yaml
 balance:
@@ -217,3 +213,5 @@ balance:
 TUI 里也可以配：厂商表单的「脚本路径」就是它；编辑时路径没改就原样保留手写的 `run:`/`shell:`/`timeout_secs`，清空即取消脚本额度。
 
 让 AI 代写：把 `docs/quota-script-prompt.md` 整体复制给任意 Agent，再附上厂商官方的查询方式（文档 / curl 示例），它会产出脚本 + recipe 并给验证命令——密钥只在验证时用环境变量传，不用贴给 AI。
+
+内置四家（DeepSeek/OpenAI/Moonshot/OpenRouter）的 recipe 编译在二进制里，但它们引用的脚本在 `~/.config/apim/scripts/`——本机已就位；换新机器时按 `docs/quota-script-prompt.md` 让 AI 重新生成，或从旧机器拷贝脚本目录。

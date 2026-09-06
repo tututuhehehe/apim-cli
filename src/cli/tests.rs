@@ -60,7 +60,7 @@ async fn provider_key_crud_roundtrip() -> Result<()> {
     assert_eq!(r.base_url, "https://r.example.com"); // 去尾斜杠
     assert_eq!(r.homepage.as_deref(), Some("https://console.example.com"));
     assert_eq!(r.health.as_ref().unwrap().url, "{base_url}/v1/models");
-    assert!(r.balance.as_ref().unwrap().script().is_some());
+    assert!(r.balance.as_ref().unwrap().command.is_some());
 
     // 密钥 add + 覆盖更新 token
     let args = argv(&["add", "relay", "main"]);

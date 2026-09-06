@@ -2,7 +2,7 @@
 #
 # 字段来源：openrouter.ai 文档「Credits」GET /api/v1/credits（2026-09 核对），
 # 响应形如 {"data":{"total_credits":12.5,"total_usage":3.2}}。
-# total_credits 是累计充值总额（剩余 = 总额 - 已用，DSL 无算术，故只如实展示两项）。
+# total_credits 是累计充值总额；剩余 = 总额 - 已用，脚本里算好再输出。
 
 id: openrouter
 name: OpenRouter
@@ -19,20 +19,6 @@ health:
   url: "{base_url}/key"
 
 balance:
-  request:
-    method: GET
-    url: "{base_url}/credits"
-    headers:
-      Accept: application/json
-  parse:
-    fields:
-      total_balance: data.total_credits
-      used: data.total_usage
-    currency: USD
-  render:
-    headline: "{total_balance}"
-    fields:
-      - label: 总额
-        value: "{total_balance}"
-      - label: 已用
-        value: "{used}"
+  kind: script
+  command: ~/.config/apim/scripts/openrouter-quota.sh
+  timeout_secs: 15

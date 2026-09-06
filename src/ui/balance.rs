@@ -1,4 +1,4 @@
-//! 右下额度面板：选中密钥的余额明细。
+//! 右下额度面板：选中密钥的余额明细（脚本 stdout 逐行直显）。
 
 use ratatui::Frame;
 use ratatui::layout::Rect;
@@ -8,7 +8,6 @@ use ratatui::widgets::{Clear, Paragraph};
 
 use super::{App, pane_block, theme};
 use crate::probe::Health;
-use crate::recipe;
 
 pub(crate) fn draw_balance(frame: &mut Frame, app: &App, area: Rect) {
     frame.render_widget(Clear, area);
@@ -47,25 +46,21 @@ pub(crate) fn draw_balance(frame: &mut Frame, app: &App, area: Rect) {
                 err.clone(),
                 Style::new().fg(theme::ERR),
             )));
-        } else if let Some(view) = &balance.view {
-            lines.push(availability_line(view.available));
+        } else if let Some(output) = &balance.lines {
             if let Some(recipe) = app.current_recipe() {
                 lines.push(Line::from(Span::styled(
                     format!("  {}  ·  分组 {}", recipe.base_url, key.group_label()),
                     Style::new().fg(theme::MUTED),
                 )));
             }
-            // 脚本形态：原始输出逐行直显，首行当 headline 高亮。
-            for (i, line) in view.lines.iter().enumerate() {
+            // 脚本 stdout 逐行直显，首行当 headline 高亮。
+            for (i, line) in output.iter().enumerate() {
                 let style = if i == 0 {
                     Style::new().fg(theme::GOLD).add_modifier(Modifier::BOLD)
                 } else {
                     Style::new().fg(theme::TEXT)
                 };
                 lines.push(Line::from(Span::styled(format!("  {line}  "), style)));
-            }
-            for item in &view.items {
-                lines.extend(item_lines(item, view));
             }
         }
 
@@ -83,49 +78,10 @@ pub(crate) fn draw_balance(frame: &mut Frame, app: &App, area: Rect) {
         ]));
     } else {
         lines.push(Line::from(Span::styled(
-            "该厂商还没有配置额度查询",
+            "该厂商还没有绑定额度脚本",
             Style::new().fg(theme::MUTED),
         )));
     }
 
     frame.render_widget(Paragraph::new(lines), inner);
-}
-
-fn availability_line(available: Option<bool>) -> Line<'static> {
-    let span = match available {
-        Some(true) => Span::styled("● 账号可用", Style::new().fg(theme::OK)),
-        Some(false) => Span::styled("● 账号不可用 / 无余额", Style::new().fg(theme::GOLD)),
-        None => Span::styled("● 已返回额度", Style::new().fg(theme::ACCENT)),
-    };
-    Line::from(span)
-}
-
-fn item_lines(item: &recipe::BalanceItem, view: &recipe::BalanceView) -> Vec<Line<'static>> {
-    let mut lines = Vec::new();
-    let amount = item
-        .ctx
-        .get("total_balance")
-        .cloned()
-        .unwrap_or_else(|| view.headline.clone());
-    let money = recipe::money(item.currency.as_deref(), &amount);
-    let currency = item.currency.clone().unwrap_or_default();
-    lines.push(Line::from(vec![
-        Span::styled(
-            format!("  {money}  "),
-            Style::new().fg(theme::GOLD).add_modifier(Modifier::BOLD),
-        ),
-        Span::styled(currency, Style::new().fg(theme::MUTED)),
-    ]));
-    if !item.fields.is_empty() {
-        let parts: Vec<String> = item
-            .fields
-            .iter()
-            .map(|(k, v)| format!("{k} {v}"))
-            .collect();
-        lines.push(Line::from(Span::styled(
-            format!("  {}", parts.join("    ")),
-            Style::new().fg(theme::TEXT),
-        )));
-    }
-    lines
 }

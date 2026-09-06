@@ -8,7 +8,7 @@ use anyhow::{Context, Result};
 
 use super::{BalanceSnapshot, compact_error, elapsed_ms, truncate};
 use crate::config::KeyEntry;
-use crate::recipe::{BalanceView, Recipe, ScriptSpec};
+use crate::recipe::{Recipe, ScriptSpec};
 
 /// stdout 最多保留的行数，超出截断（防野脚本刷屏）。
 const MAX_LINES: usize = 50;
@@ -22,15 +22,15 @@ pub(super) async fn run_script_balance(
     let started = Instant::now();
     let endpoint = format!("script {}", recipe.id);
     match exec_script_balance(recipe, spec, key).await {
-        Ok(view) => BalanceSnapshot {
-            view: Some(view),
+        Ok(lines) => BalanceSnapshot {
+            lines: Some(lines),
             endpoint,
             status: None,
             elapsed_ms: elapsed_ms(started),
             error: None,
         },
         Err(err) => BalanceSnapshot {
-            view: None,
+            lines: None,
             endpoint,
             status: None,
             elapsed_ms: elapsed_ms(started),
@@ -43,7 +43,7 @@ async fn exec_script_balance(
     recipe: &Recipe,
     spec: &ScriptSpec,
     key: &KeyEntry,
-) -> Result<BalanceView> {
+) -> Result<Vec<String>> {
     let mut cmd = match (spec.command.as_deref(), spec.run.as_deref()) {
         (Some(path), None) => tokio::process::Command::new(expand_tilde(path)),
         (None, Some(script)) => {
@@ -90,12 +90,7 @@ async fn exec_script_balance(
     if lines.is_empty() {
         anyhow::bail!("脚本无输出");
     }
-    Ok(BalanceView {
-        available: None,
-        headline: lines[0].clone(),
-        items: Vec::new(),
-        lines,
-    })
+    Ok(lines)
 }
 
 /// recipe.vars → APIM_VAR_<大写名>，脚本里能取到自定义变量（如访问令牌）。
@@ -125,7 +120,6 @@ pub(crate) fn expand_tilde(path: &str) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::recipe::BalanceMode;
 
     fn script_recipe(run: &str, timeout_secs: Option<u64>) -> Recipe {
         Recipe {
@@ -138,12 +132,12 @@ mod tests {
             vars: HashMap::from([("access_token".to_string(), "at-123".to_string())]),
             auth: Default::default(),
             health: None,
-            balance: Some(BalanceMode::Script(ScriptSpec {
+            balance: Some(ScriptSpec {
                 command: None,
                 run: Some(run.to_string()),
                 shell: None,
                 timeout_secs,
-            })),
+            }),
             origin: None,
         }
     }
@@ -158,7 +152,7 @@ mod tests {
     }
 
     fn script_spec(recipe: &Recipe) -> &ScriptSpec {
-        recipe.balance.as_ref().unwrap().script().unwrap()
+        recipe.balance.as_ref().unwrap()
     }
 
     #[tokio::test]
@@ -169,9 +163,9 @@ mod tests {
         );
         let snapshot = run_script_balance(&recipe, script_spec(&recipe), &demo_key()).await;
         assert!(snapshot.error.is_none(), "{:?}", snapshot.error);
-        let view = snapshot.view.unwrap();
-        assert_eq!(view.headline, "token=sk-test var=at-123");
-        assert_eq!(view.lines, vec!["token=sk-test var=at-123", "周 3/4"]);
+        let lines = snapshot.lines.unwrap();
+        assert_eq!(lines[0], "token=sk-test var=at-123");
+        assert_eq!(lines, vec!["token=sk-test var=at-123", "周 3/4"]);
         assert_eq!(snapshot.endpoint, "script demo");
     }
 
@@ -179,7 +173,7 @@ mod tests {
     async fn script_nonzero_exit_reports_stderr() {
         let recipe = script_recipe("echo 配置坏了 >&2; exit 3", None);
         let snapshot = run_script_balance(&recipe, script_spec(&recipe), &demo_key()).await;
-        assert!(snapshot.view.is_none());
+        assert!(snapshot.lines.is_none());
         assert_eq!(snapshot.error.as_deref(), Some("exit 3 · 配置坏了"));
     }
 
@@ -187,7 +181,7 @@ mod tests {
     async fn script_timeout_kills_process() {
         let recipe = script_recipe("sleep 30", Some(1));
         let snapshot = run_script_balance(&recipe, script_spec(&recipe), &demo_key()).await;
-        assert!(snapshot.view.is_none());
+        assert!(snapshot.lines.is_none());
         assert!(snapshot.error.unwrap().contains("脚本超时"));
     }
 
@@ -202,7 +196,7 @@ mod tests {
     async fn script_output_over_limit_is_truncated() {
         let recipe = script_recipe("seq 60", None);
         let snapshot = run_script_balance(&recipe, script_spec(&recipe), &demo_key()).await;
-        let lines = snapshot.view.unwrap().lines;
+        let lines = snapshot.lines.unwrap();
         assert_eq!(lines.len(), MAX_LINES + 1);
         assert_eq!(lines[0], "1");
         assert_eq!(lines[MAX_LINES - 1], "50");

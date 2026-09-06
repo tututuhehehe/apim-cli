@@ -6,7 +6,7 @@ use anyhow::{Result, bail};
 use serde_json::json;
 
 use super::{Args, Ctx};
-use crate::recipe::{BalanceMode, HttpCall, Recipe, ScriptSpec};
+use crate::recipe::{HttpCall, Recipe, ScriptSpec};
 
 pub(crate) async fn run(ctx: &Ctx, argv: &[String]) -> Result<()> {
     let args = Args::parse(argv)?;
@@ -36,7 +36,7 @@ fn ls(ctx: &Ctx, args: &Args) -> Result<()> {
                     "base_url": r.base_url,
                     "homepage": r.homepage,
                     "health": r.health.as_ref().map(|h| h.url.clone()),
-                    "balance": balance_json(&r.balance),
+                    "balance": balance_json(r.balance.as_ref()),
                     "origin": r.origin.as_ref().map(|p| p.display().to_string()),
                     "keys": keys.iter().filter(|k| &k.provider == id).map(|k| k.id()).collect::<Vec<_>>(),
                 })
@@ -49,10 +49,7 @@ fn ls(ctx: &Ctx, args: &Args) -> Result<()> {
         let r = &recipes[&id];
         let n_keys = keys.iter().filter(|k| k.provider == id).count();
         let balance = match &r.balance {
-            Some(BalanceMode::Script(s)) => {
-                format!("script {}", s.command.as_deref().unwrap_or("(内联)"))
-            }
-            Some(BalanceMode::Http(_)) => "http".into(),
+            Some(spec) => format!("script {}", spec.command.as_deref().unwrap_or("(内联)")),
             None => "—".into(),
         };
         let origin = if r.origin.is_none() { " [内置]" } else { "" };
@@ -70,15 +67,14 @@ fn ls(ctx: &Ctx, args: &Args) -> Result<()> {
     Ok(())
 }
 
-fn balance_json(balance: &Option<BalanceMode>) -> serde_json::Value {
+fn balance_json(balance: Option<&ScriptSpec>) -> serde_json::Value {
     match balance {
-        Some(BalanceMode::Script(s)) => json!({
+        Some(s) => json!({
             "kind": "script",
             "command": s.command,
             "run": s.run.is_some(),
             "timeout_secs": s.timeout_secs,
         }),
-        Some(BalanceMode::Http(_)) => json!({"kind": "http"}),
         None => serde_json::Value::Null,
     }
 }
@@ -237,7 +233,7 @@ fn health_call(args: &Args) -> Result<Option<HttpCall>> {
 
 /// --script 的值 → 额度绑定；none / 空串 / 缺省 = 不绑（解绑）。
 /// 空串与 none 同义，避免误报「脚本不存在」。
-fn script_spec(args: &Args) -> Result<Option<BalanceMode>> {
+fn script_spec(args: &Args) -> Result<Option<ScriptSpec>> {
     let Some(path) = args.flag("script") else {
         return Ok(None);
     };
@@ -248,8 +244,8 @@ fn script_spec(args: &Args) -> Result<Option<BalanceMode>> {
     if !std::path::Path::new(&expanded).is_file() {
         bail!("脚本不存在：{path}");
     }
-    Ok(Some(BalanceMode::Script(ScriptSpec {
+    Ok(Some(ScriptSpec {
         command: Some(path.to_string()),
         ..ScriptSpec::default()
-    })))
+    }))
 }

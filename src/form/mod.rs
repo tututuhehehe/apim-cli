@@ -252,7 +252,6 @@ pub fn provider_edit(recipe: &crate::recipe::Recipe, health_path: &str) -> Form 
     let script_cmd = recipe
         .balance
         .as_ref()
-        .and_then(|b| b.script())
         .and_then(|s| s.command.clone())
         .unwrap_or_default();
     Form::new(

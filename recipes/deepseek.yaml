@@ -16,23 +16,6 @@ health:
   url: "{base_url}/models"
 
 balance:
-  request:
-    method: GET
-    url: "{base_url}/user/balance"
-    headers:
-      Accept: application/json
-  parse:
-    # JSON dotted paths relative to the response root.
-    available: is_available
-    # Each element of this array becomes one "额度" card.
-    items: balance_infos
-  render:
-    # Placeholders are flattened keys from each item object.
-    headline: "{total_balance}"
-    fields:
-      - label: 总额
-        value: "{total_balance}"
-      - label: 充值
-        value: "{topped_up_balance}"
-      - label: 赠款
-        value: "{granted_balance}"
+  kind: script
+  command: ~/.config/apim/scripts/deepseek-quota.sh
+  timeout_secs: 15
