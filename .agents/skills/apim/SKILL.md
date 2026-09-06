@@ -3,18 +3,18 @@ name: apim
 description: 用 apim CLI 管理模型厂商/API Key：厂商与密钥的增删改查、探活与余额查询、编写和绑定额度查询脚本（balance.kind=script）。当用户要加厂商、配密钥、查额度/余额、写额度脚本、或提到 apim 项目本身时使用。
 ---
 
-# apim 使用指南（CLI）
+# apim 使用指南（CLI + 额度脚本）
 
-apim 是本仓库的终端 API Key 管理器（TUI + CLI）。心智模型：**TUI 管人，CLI 管机器（AI/脚本）**，同一份数据（`~/.config/apim/`），互相实时可见。命令行入口 `apim`（`cargo install --path .` 安装；开发时用 `target/debug/apim`）。
+apim 是终端 API Key 管理器。AI/脚本一律走 CLI，入口 `apim`（`cargo install --path .` 安装；开发时用 `target/debug/apim`）。数据都在 `~/.config/apim/`：`config.toml`（密钥清单）、`secrets.toml`（token，600 权限）、`recipes/<id>.yaml`（厂商协议）、`scripts/`（额度脚本）。
 
-## 命令速查
+## CLI 命令速查
 
 ```
 # 厂商 CRUD
 apim provider ls [--json]
 apim provider add <id> --name <名> --base-url <URL> [--homepage <主页URL>|none] [--health <路径>|none] [--script <脚本路径>|none]
 apim provider set <id> [--name <名>] [--base-url <URL>] [--homepage <主页URL>|none] [--health <路径>|none] [--script <脚本路径>|none]
-apim provider rm <id> [--force]          # 有密钥时拒绝；--force 连带删密钥；内置(deepseek/openai/moonshot/openrouter)不可删
+apim provider rm <id> [--force]          # 有密钥时拒绝；--force 连带删密钥；内置四家(deepseek/openai/moonshot/openrouter)不可删
 
 # 密钥 CRUD（token 一律走 stdin，绝不进 argv / shell history）
 apim key ls [<provider>] [--json]        # token 掩码显示
@@ -30,24 +30,64 @@ apim use <厂商.别名>                     # 输出 export OPENAI_API_KEY=... 
 
 要点：
 
-- `--script none` = 解绑额度脚本；空串（`--script ""`）同义。`--health none` = 不探活。`--homepage` 是厂商控制面板主页，TUI 选中厂商按 `Enter` 用默认浏览器打开。
-- `provider set` 只改传了的字段，是显式整体替换 `--script`，没有 TUI 的「未改保留」语义。
-- 坏配置（recipe 误删 / secrets 缺条目）不会锁死 CLI：命令会跳过坏条目并打警告，下一次成功写盘自动清除；TUI 则保持严格报错。
-- 测试/沙盒：设 `APIM_CONFIG_DIR=<临时目录>` 重定向整个配置目录，绝不碰真实 `~/.config/apim`。
+- `--script none` = 解绑额度脚本；空串（`--script ""`）同义。`--health none` = 不探活。`--homepage` 是厂商控制面板主页。
+- `provider set` 只改传了的字段；`--script` 是显式整体替换，没有「未改保留」语义。
+- 坏配置（recipe 误删 / secrets 缺条目）不会锁死 CLI：命令跳过坏条目并打警告，下一次成功写盘自动清除。
+- 测试/沙盒：每条会写盘的命令都显式前缀 `APIM_CONFIG_DIR=<临时目录>`（shell 每次调用是新的，export 不跨调用），绝不碰真实 `~/.config/apim`。
 
-## 余额查询脚本（balance.kind=script，所有厂商统一走这条路）
+## recipe YAML 字段含义
 
-**额度查询一律是脚本，没有例外**——内置四家（DeepSeek/OpenAI/Moonshot/OpenRouter）也一样，各自的脚本已在本机 `~/.config/apim/scripts/<厂商id>-quota.sh`（换新机器时按提示词重新生成或拷贝脚本目录）。apim 带着密钥跑脚本，stdout 逐行进额度面板（首行高亮）。完整的代写提示词（给任意 AI 用）在 **`docs/quota-script-prompt.md`**，接新厂商时整体复制它并附官方查询方式即可。
+`~/.config/apim/recipes/<id>.yaml`，一个文件描述一个厂商「怎么鉴权、怎么探活、怎么查额度」：
 
-### 脚本契约（必须严格遵守）
+| 字段 | 含义 |
+|---|---|
+| `id` / `name` | 厂商标识（小写字母/数字/-，密钥配置里 `provider` 引用它）/ 显示名 |
+| `base_url` | API 根地址，`{base_url}` 占位符在请求/脚本里展开 |
+| `homepage` | 控制面板主页（可选）；TUI 选中厂商按 Enter 用默认浏览器打开 |
+| `models_url` | 模型列表端点模板（可选，按 key 浏览模型用）。缺省按序尝试 `{base_url}/models` → `{base_url}/v1/models`，404 自动换下一个；OpenAI 兼容厂商不用配，GLM 这类非标路径的才配（如 `'{base_url}/api/paas/v4/models'`） |
+| `auth.kind` | `bearer`（发 `Authorization: Bearer <key>`）｜ `header`（发裸 key）｜ `query`（拼 `?api_key=<key>`）；探活请求也用它 |
+| `health` | 探活 GET（`{base_url}` 模板），HTTP 2xx 即算活；留空 = 不探活 |
+| `vars` | 自定义变量表。两个用途：注入脚本 env（`APIM_VAR_<大写名>`，如访问令牌）、参与脚本/YAML 的 `{placeholder}` 替换。存敏感值时整个文件保持 600 |
+| `balance` | 额度查询绑定，**必须脚本**（见下） |
 
-- **env 注入**：`APIM_TOKEN`（密钥）、`APIM_BASE_URL`、`APIM_ALIAS`、`APIM_PROVIDER`，recipe `vars:` 每项 → `APIM_VAR_<大写名>`。密钥只走 env。
-- **exit 0**：stdout 逐行显示（首行高亮，建议 1~4 行）；**exit 非 0**：stderr（截断 200 字符）显示为红色错误；超时（recipe `timeout_secs`，缺省 15s）杀进程；stdout 超 50 行截断。
-- 已知坑：HTTP 200 不等于成功（有的厂商坏 Key 也回 200，要校验 body 里的 success/code 字段）；jq 数值可能是浮点，运算前取整。
+## 余额查询脚本（每个厂商一个，唯一的额度实现方式）
 
-### 绑定与解绑
+**所有厂商——包括内置四家（deepseek/openai/moonshot/openrouter）——额度一律走脚本**，没有声明式配置。apim 带着密钥跑脚本，stdout 逐行进额度面板（首行高亮）。本机六个现成实例在 `~/.config/apim/scripts/`：GLM（两接口+日期计算）、DeepSeek/Moonshot/OpenAI/OpenRouter（单请求+ jq）、ikun（new-api 面板，访问令牌走 `APIM_VAR_ACCESS_TOKEN`）。
 
-脚本建议放 `~/.config/apim/scripts/<厂商id>-quota.sh`（可执行）。三个等价入口：CLI `--script`、TUI 表单「脚本路径」、直接写 recipe YAML。绑定后 `apim status <厂商>` 与 TUI 面板跑同一脚本，结果一致。
+### 绑定方式
+
+```yaml
+balance:
+  kind: script                                    # 文档标记，可选
+  command: ~/.config/apim/scripts/<id>-quota.sh   # 外部可执行文件（尊重 shebang），~ 会展开
+  # run: |                                        # 或内联脚本，二选一；经 /bin/sh -c 执行
+  #   echo "剩余 45/100"
+  # shell: /bin/zsh                               # 仅 run 时有效，缺省 /bin/sh
+  timeout_secs: 15                                # 可选，缺省 15
+```
+
+三个等价入口：直接写 recipe YAML、CLI `--script`、TUI 表单「脚本路径」。脚本建议放 `~/.config/apim/scripts/<id>-quota.sh` 并 `chmod +x`。绑定后 `apim status <id>` 与额度面板跑同一脚本。
+
+### 脚本能拿到的参数（env 注入，脚本从 env 读，不要让用户手填）
+
+| 变量 | 含义 |
+|---|---|
+| `APIM_TOKEN` | 当前密钥的 API Key（用户在 TUI/CLI 里存的，随选中/绑定的 key 变化） |
+| `APIM_BASE_URL` | recipe 的 `base_url`（去尾斜杠） |
+| `APIM_ALIAS` / `APIM_PROVIDER` | 密钥别名 / 厂商 id |
+| `APIM_VAR_<大写名>` | recipe `vars:` 里的每项变量，如访问令牌 `access_token` → `APIM_VAR_ACCESS_TOKEN`（new-api 系面板的 /api/user/self 只认它，不认 sk- Key） |
+
+密钥只走 env，不进 argv（`ps` 看不到）、不进脚本文件。
+
+### 输出契约（必须严格遵守）
+
+- **exit 0**：stdout 逐行显示，**首行高亮当 headline**（放最重要的数字，建议 1~4 行）。
+- **exit 非 0**：stderr（截断 200 字符）显示为红色错误。网络失败、Key 无效、字段缺失都要走这条路，**宁可报错不显示假数字**。
+- **超时**：`timeout_secs`（缺省 15s）杀进程；stdout 超 50 行截断；stdout 为空也算失败。
+- 已知坑：
+  - HTTP 200 不等于成功（GLM/new-api 系坏 Key 也回 200）——校验 body 的 `success`/`code`/`status` 字段，失败 stderr + exit 1；
+  - `sh` 的 `echo` 会解释反斜杠转义，含 `\"` 的 JSON 会被吃坏——用 `printf '%s' "$RESP" | jq`；
+  - jq 数值可能是浮点，整数运算前取整；`bc` 做小数运算。
 
 ### 新接一个厂商的标准流程
 
@@ -60,12 +100,6 @@ echo 'sk-...' | apim key add <id> main
 # 3. 验证（期望 balance.ok=true 且 lines 有额度行）：
 apim status <id> --json
 ```
-
-现有实例参考（六家脚本全部就位并实测过）：GLM（`glm-quota.sh`，两接口+日期计算）、DeepSeek/Moonshot/OpenRouter/OpenAI（单请求+ jq）、ikun（new-api 面板，访问令牌走 `APIM_VAR_ACCESS_TOKEN`）。
-
-## TUI 快捷键（驱动 TUI 时用）
-
-`j/k` 移动、`Tab` 切换左右栏、`a/e/d` 增删改、`c` 复制、`r` 刷新、`q` 退出；厂商栏：`⏎` 开控制面板主页、`i` 厂商档案；密钥栏：`m` 用**选中的这把 key** 拉它的模型列表（弹窗内 `j/k` 滚动、`c` 复制模型名、`/` 过滤）、`i` 密钥详情（`r` 显隐完整 token，`c` 复制）、`/` 过滤密钥（再按 Esc 清除）。
 
 ## 红线
 
