@@ -1,6 +1,6 @@
 //! 应用状态：选中项、导航、探活调度。弹窗与存取在子模块。
 
-pub use modal::{InspectorTarget, Modal, ModelsStatus, SearchTarget};
+pub use modal::{InspectorTarget, Modal, ModelsStatus, SearchTarget, filter_models};
 
 mod keys_store;
 mod modal;

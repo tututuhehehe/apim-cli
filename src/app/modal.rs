@@ -22,6 +22,7 @@ pub enum InspectorTarget {
 }
 
 /// 模型列表弹窗的状态机：打开即 Loading，拉取结果落地转 Done/Error。
+/// Done.items 恒为全量列表；selected 是「过滤后视图」里的下标。
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum ModelsStatus {
     Loading,
@@ -29,25 +30,17 @@ pub enum ModelsStatus {
     Error { message: String },
 }
 
-impl ModelsStatus {
-    /// Done 状态下移动选中项（delta 正负皆可），两端钳制；非 Done 或空列表不动。
-    pub fn move_selection(&mut self, delta: isize) {
-        if let ModelsStatus::Done { items, selected } = self {
-            let len = items.len() as isize;
-            if len == 0 {
-                return;
-            }
-            *selected = ((*selected as isize + delta).clamp(0, len - 1)) as usize;
-        }
+/// 模型名过滤：大小写不敏感的包含匹配。空关键字 = 全量。
+pub fn filter_models(items: &[String], filter: &str) -> Vec<String> {
+    if filter.is_empty() {
+        return items.to_vec();
     }
-
-    /// Done 状态下当前选中的模型名。
-    pub fn selected_item(&self) -> Option<&str> {
-        match self {
-            ModelsStatus::Done { items, selected } => items.get(*selected).map(String::as_str),
-            _ => None,
-        }
-    }
+    let needle = filter.to_lowercase();
+    items
+        .iter()
+        .filter(|m| m.to_lowercase().contains(&needle))
+        .cloned()
+        .collect()
 }
 
 /// `/` 搜索弹窗的目标列表：按焦点决定过滤密钥还是厂商。
@@ -78,9 +71,12 @@ pub enum Modal {
         reveal_token: bool,
     },
     /// 模型列表浏览：迟到的拉取结果按 key_id 匹配，弹窗已关/已换密钥则丢弃。
+    /// filter 为搜索关键字（`/` 聚焦输入，实时过滤），searching = 输入框聚焦中。
     Models {
         key_id: String,
         status: ModelsStatus,
+        filter: String,
+        searching: bool,
     },
     /// 实时过滤搜索：边输入边改 key_filter / provider_filter，
     /// original 记打开前的旧值，Esc 恢复。
@@ -394,6 +390,8 @@ impl App {
         self.modal = Modal::Models {
             key_id: key_id.clone(),
             status: ModelsStatus::Loading,
+            filter: String::new(),
+            searching: false,
         };
         let client = self.client.clone();
         let tx = self.tx_models.clone();
@@ -409,6 +407,7 @@ impl App {
         let Modal::Models {
             key_id: modal_key_id,
             status,
+            ..
         } = &mut self.modal
         else {
             return;
@@ -422,20 +421,93 @@ impl App {
         };
     }
 
-    /// 模型弹窗内 j/k：移动选中项。
-    pub fn move_models_selection(&mut self, delta: isize) {
-        if let Modal::Models { status, .. } = &mut self.modal {
-            status.move_selection(delta);
+    /// 模型弹窗是否处于搜索输入态。
+    pub(crate) fn models_is_searching(&self) -> bool {
+        matches!(
+            &self.modal,
+            Modal::Models {
+                searching: true,
+                ..
+            }
+        )
+    }
+
+    /// 当前过滤关键字（测试与渲染用）。
+    #[cfg(test)]
+    pub(crate) fn models_search_text(&self) -> &str {
+        match &self.modal {
+            Modal::Models { filter, .. } => filter,
+            _ => "",
         }
     }
 
-    /// 模型弹窗按 `c`：复制当前选中的模型名。
+    /// `/`：进入搜索输入态（仅 Done 态有意义，其他态无操作）。
+    pub fn models_start_search(&mut self) {
+        if let Modal::Models { searching, .. } = &mut self.modal {
+            *searching = true;
+        }
+    }
+
+    /// 搜索输入一个字符：实时过滤，选中项回到过滤后列表顶部。
+    pub fn models_search_char(&mut self, c: char) {
+        if let Modal::Models {
+            status: ModelsStatus::Done { selected, .. },
+            filter,
+            ..
+        } = &mut self.modal
+        {
+            filter.push(c);
+            *selected = 0;
+        }
+    }
+
+    /// 搜索输入退格。
+    pub fn models_search_backspace(&mut self) {
+        if let Modal::Models {
+            status: ModelsStatus::Done { selected, .. },
+            filter,
+            ..
+        } = &mut self.modal
+        {
+            filter.pop();
+            *selected = 0;
+        }
+    }
+
+    /// 退出搜索输入态：过滤结果保留，j/k 继续在过滤后的列表里移动。
+    pub fn models_exit_search(&mut self) {
+        if let Modal::Models { searching, .. } = &mut self.modal {
+            *searching = false;
+        }
+    }
+
+    /// 模型弹窗内 j/k：移动选中项（按过滤后列表的长度钳制）。
+    pub fn move_models_selection(&mut self, delta: isize) {
+        if let Modal::Models {
+            status: ModelsStatus::Done { items, selected },
+            filter,
+            ..
+        } = &mut self.modal
+        {
+            let len = filter_models(items, filter).len() as isize;
+            if len == 0 {
+                return;
+            }
+            *selected = ((*selected as isize + delta).clamp(0, len - 1)) as usize;
+        }
+    }
+
+    /// 模型弹窗按 `c`：复制当前选中的模型名（过滤后视图里选中的那个）。
     pub fn copy_selected_model(&mut self) {
-        let name = match &self.modal {
-            Modal::Models { status, .. } => status.selected_item().map(str::to_string),
-            _ => None,
+        let (items, filter, selected) = match &self.modal {
+            Modal::Models {
+                status: ModelsStatus::Done { items, selected },
+                filter,
+                ..
+            } => (items, filter, *selected),
+            _ => return,
         };
-        let Some(name) = name else {
+        let Some(name) = filter_models(items, filter).get(selected).cloned() else {
             return;
         };
         match clipboard::copy(&name) {
@@ -562,8 +634,32 @@ mod tests {
     /// 断言当前是 Models 弹窗并拆出 (key_id, status)。
     fn models_modal(app: &App) -> (&str, &ModelsStatus) {
         match &app.modal {
-            Modal::Models { key_id, status } => (key_id, status),
+            Modal::Models { key_id, status, .. } => (key_id, status),
             other => panic!("期望 Models 弹窗，实际 {other:?}"),
+        }
+    }
+
+    /// 过滤后视图里当前选中的模型名。
+    fn models_selected(app: &App) -> Option<String> {
+        match &app.modal {
+            Modal::Models {
+                status: ModelsStatus::Done { items, selected },
+                filter,
+                ..
+            } => filter_models(items, filter).get(*selected).cloned(),
+            _ => None,
+        }
+    }
+
+    /// 过滤后视图的完整列表。
+    fn models_visible(app: &App) -> Vec<String> {
+        match &app.modal {
+            Modal::Models {
+                status: ModelsStatus::Done { items, .. },
+                filter,
+                ..
+            } => filter_models(items, filter),
+            _ => Vec::new(),
         }
     }
 
@@ -571,33 +667,81 @@ mod tests {
         Modal::Models {
             key_id: key_id.into(),
             status: ModelsStatus::Loading,
+            filter: String::new(),
+            searching: false,
         }
     }
 
     #[test]
-    fn move_selection_clamps_at_both_ends() {
-        let mut status = done(&["a", "b", "c"]);
-        status.move_selection(1);
-        assert_eq!(status.selected_item(), Some("b"));
-        status.move_selection(10);
-        assert_eq!(status.selected_item(), Some("c"));
-        status.move_selection(-10);
-        assert_eq!(status.selected_item(), Some("a"));
-        status.move_selection(-1); // 已在顶端，再上不动
-        assert_eq!(status.selected_item(), Some("a"));
+    fn models_search_filters_and_esc_keeps_filter() {
+        let (mut app, _rx, _rx_models) = crate::app::tests::test_app(&[("alpha", &["a1"])]);
+        app.modal = models_loading("alpha.a1");
+        app.apply_models(
+            "alpha.a1".into(),
+            Ok(vec!["claude-4".into(), "gpt-5".into(), "Claude-3".into()]),
+        );
+        assert!(!app.models_is_searching());
+
+        // / 进入搜索态，输入实时过滤（大小写不敏感），选中回到顶部
+        app.models_start_search();
+        assert!(app.models_is_searching());
+        app.models_search_char('c');
+        app.models_search_char('L');
+        assert_eq!(app.models_search_text(), "cL");
+        // items 恒为全量，过滤是视图层
+        let (_, status) = models_modal(&app);
+        let (items, selected) = match status {
+            ModelsStatus::Done { items, selected } => (items, *selected),
+            other => panic!("应为 Done: {other:?}"),
+        };
+        assert_eq!(
+            filter_models(items, app.models_search_text()),
+            vec!["claude-4", "Claude-3"],
+            "输入应实时过滤"
+        );
+        assert_eq!(selected, 0);
+
+        // j 在过滤后的列表里移动
+        app.move_models_selection(1);
+        assert_eq!(models_selected(&app).as_deref(), Some("Claude-3"));
+
+        // Esc 退出聚焦但保留过滤；再按 j 仍在过滤列表内移动
+        app.models_exit_search();
+        assert!(!app.models_is_searching());
+        app.move_models_selection(-1);
+        assert_eq!(models_selected(&app).as_deref(), Some("claude-4"));
+
+        // 重新 / 聚焦可继续编辑；退格清空后过滤恢复全量
+        app.models_start_search();
+        app.models_search_backspace();
+        assert_eq!(app.models_search_text(), "c");
+        app.models_search_backspace();
+        assert_eq!(app.models_search_text(), "");
+        assert_eq!(
+            models_visible(&app),
+            vec!["claude-4", "gpt-5", "Claude-3"],
+            "清空过滤恢复全量"
+        );
+        assert_eq!(models_selected(&app).as_deref(), Some("claude-4"));
     }
 
     #[test]
-    fn move_selection_noop_when_empty_or_not_done() {
-        let mut empty = ModelsStatus::Done {
-            items: Vec::new(),
-            selected: 0,
-        };
-        empty.move_selection(1);
-        assert_eq!(empty.selected_item(), None);
-        let mut loading = ModelsStatus::Loading;
-        loading.move_selection(1);
-        assert_eq!(loading, ModelsStatus::Loading);
+    fn models_copy_uses_filtered_selection() {
+        let (mut app, _rx, _rx_models) = crate::app::tests::test_app(&[("alpha", &["a1"])]);
+        app.modal = models_loading("alpha.a1");
+        app.apply_models(
+            "alpha.a1".into(),
+            Ok(vec!["claude-4".into(), "gpt-5".into()]),
+        );
+        app.models_start_search();
+        app.models_search_char('g');
+        app.copy_selected_model();
+        let toast = app
+            .toast
+            .as_ref()
+            .map(|(t, _)| t.clone())
+            .unwrap_or_default();
+        assert!(toast.contains("gpt-5"), "复制的是过滤后选中的模型: {toast}");
     }
 
     #[test]

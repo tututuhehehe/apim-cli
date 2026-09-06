@@ -142,13 +142,31 @@ fn handle_key(app: &mut App, key: KeyEvent) {
             KeyCode::Esc | KeyCode::Enter | KeyCode::Char('q') => app.cancel_modal(),
             _ => {}
         },
-        Modal::Models { .. } => match key.code {
-            KeyCode::Char('j') | KeyCode::Down => app.move_models_selection(1),
-            KeyCode::Char('k') | KeyCode::Up => app.move_models_selection(-1),
-            KeyCode::Char('c') => app.copy_selected_model(),
-            KeyCode::Esc | KeyCode::Enter | KeyCode::Char('q') => app.cancel_modal(),
-            _ => {}
-        },
+        Modal::Models { .. } => {
+            // 双态：搜索输入态（/ 进入）里字符进过滤器、Esc/Enter 退回列表态；
+            // 列表态 j/k 移动、c 复制、/ 再搜索、Esc/Enter/q 关闭。
+            let searching = app.models_is_searching();
+            match key.code {
+                KeyCode::Esc => {
+                    if searching {
+                        app.models_exit_search();
+                    } else {
+                        app.cancel_modal();
+                    }
+                }
+                KeyCode::Enter if searching => app.models_exit_search(),
+                KeyCode::Enter | KeyCode::Char('q') => app.cancel_modal(),
+                KeyCode::Char('/') if !searching => app.models_start_search(),
+                KeyCode::Char('j') | KeyCode::Down if !searching => app.move_models_selection(1),
+                KeyCode::Char('k') | KeyCode::Up if !searching => app.move_models_selection(-1),
+                KeyCode::Char('c') if !searching => app.copy_selected_model(),
+                KeyCode::Backspace if searching => app.models_search_backspace(),
+                KeyCode::Char(c) if searching && !key.modifiers.contains(KeyModifiers::CONTROL) => {
+                    app.models_search_char(c)
+                }
+                _ => {}
+            }
+        }
         Modal::None => match key.code {
             KeyCode::Char('c') if key.modifiers.contains(KeyModifiers::CONTROL) => {}
             KeyCode::Char('q') => {}

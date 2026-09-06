@@ -54,7 +54,12 @@ pub fn draw(frame: &mut Frame, app: &App) {
             confirm::draw_confirm(frame, "删除厂商", std::slice::from_ref(provider_id), area);
         }
         Modal::Inspector { .. } => inspector::draw_inspector(frame, app, area),
-        Modal::Models { key_id, status } => {
+        Modal::Models {
+            key_id,
+            status,
+            filter,
+            searching,
+        } => {
             // 弹窗标题显示该 key 所属厂商名
             let name = app
                 .keys
@@ -63,7 +68,7 @@ pub fn draw(frame: &mut Frame, app: &App) {
                 .and_then(|k| app.recipes.get(&k.provider))
                 .map(|r| r.name.as_str())
                 .unwrap_or("模型");
-            models::draw_models(frame, name, status, area);
+            models::draw_models(frame, name, status, filter, *searching, area);
         }
         Modal::Search { target, edit, .. } => search::draw_search(frame, *target, edit, area),
         Modal::None => {}
