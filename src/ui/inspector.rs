@@ -603,6 +603,7 @@ mod tests {
 
     fn inspector_app(target: InspectorTarget, reveal_token: bool) -> App {
         let (tx, _rx) = tokio::sync::mpsc::unbounded_channel();
+        let (tx_models, _rx_models) = tokio::sync::mpsc::unbounded_channel();
         let mut recipes = HashMap::new();
         let r = recipe(None, &[("access_token", "at-secret-value")], None);
         recipes.insert(r.id.clone(), r);
@@ -623,6 +624,7 @@ mod tests {
             },
             inflight: HashSet::new(),
             tx,
+            tx_models,
             client: reqwest::Client::new(),
             next_auto_refresh: Instant::now(),
         }

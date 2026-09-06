@@ -6,6 +6,7 @@ mod form_modal;
 mod header;
 mod inspector;
 mod keys;
+mod models;
 mod providers;
 
 use ratatui::Frame;
@@ -52,6 +53,17 @@ pub fn draw(frame: &mut Frame, app: &App) {
             confirm::draw_confirm(frame, "删除厂商", std::slice::from_ref(provider_id), area);
         }
         Modal::Inspector { .. } => inspector::draw_inspector(frame, app, area),
+        Modal::Models {
+            provider_id,
+            status,
+        } => {
+            let name = app
+                .recipes
+                .get(provider_id)
+                .map(|r| r.name.as_str())
+                .unwrap_or(provider_id);
+            models::draw_models(frame, name, status, area);
+        }
         Modal::None => {}
     }
 }
@@ -91,11 +103,12 @@ pub(crate) fn pane_block<'a>(
 }
 
 pub(crate) fn centered(width: u16, height: u16, area: Rect) -> Rect {
+    // 宽高都钳到区域内，矮终端下弹窗贴顶显示而非溢出裁切
     let v = Layout::default()
         .direction(Direction::Vertical)
         .constraints([
             Constraint::Fill(1),
-            Constraint::Length(height),
+            Constraint::Length(height.min(area.height)),
             Constraint::Fill(1),
         ])
         .split(area);

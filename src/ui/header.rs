@@ -43,7 +43,7 @@ pub(crate) fn draw_header(frame: &mut Frame, app: &App, area: Rect) {
 pub(crate) fn draw_footer(frame: &mut Frame, app: &App, area: Rect) {
     let toast = app.toast_text();
     let keys = if app.focus == Focus::Providers {
-        " j/k 移动  Tab 切换  ⏎ 打开主页  c 复制BaseURL  i 详情  a 添加  e 编辑  d 删除  r 刷新  q 退出 "
+        " j/k 移动  Tab 切换  ⏎ 打开主页  m 模型  c 复制BaseURL  i 详情  a 添加  e 编辑  d 删除  r 刷新  q 退出 "
     } else {
         " j/k 移动  Tab 切换  c 复制密钥  i 详情  a 添加  e 编辑  d 删除  r 刷新  q 退出 "
     };

@@ -1,4 +1,4 @@
-//! 弹窗生命周期：打开、分发保存/删除确认、取消。
+//! 弹窗生命周期：打开、分发保存/删除确认、取消。模型列表弹窗也在本文件。
 
 use std::path::PathBuf;
 use std::time::Instant;
@@ -6,6 +6,7 @@ use std::time::Instant;
 use super::{App, Focus};
 use crate::clipboard;
 use crate::form::{self, Form};
+use crate::probe;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum FormKind {
@@ -20,6 +21,36 @@ pub enum InspectorTarget {
     Key(String),
 }
 
+/// 模型列表弹窗的状态机：打开即 Loading，拉取结果落地转 Done/Error。
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum ModelsStatus {
+    Loading,
+    Done { items: Vec<String>, selected: usize },
+    Error { message: String },
+}
+
+impl ModelsStatus {
+    /// Done 状态下移动选中项（delta 正负皆可），两端钳制；非 Done 或空列表不动。
+    pub fn move_selection(&mut self, delta: isize) {
+        if let ModelsStatus::Done { items, selected } = self {
+            let len = items.len() as isize;
+            if len == 0 {
+                return;
+            }
+            *selected = ((*selected as isize + delta).clamp(0, len - 1)) as usize;
+        }
+    }
+
+    /// Done 状态下当前选中的模型名。
+    pub fn selected_item(&self) -> Option<&str> {
+        match self {
+            ModelsStatus::Done { items, selected } => items.get(*selected).map(String::as_str),
+            _ => None,
+        }
+    }
+}
+
+#[derive(Debug)]
 pub enum Modal {
     None,
     Form {
@@ -38,6 +69,11 @@ pub enum Modal {
     Inspector {
         target: InspectorTarget,
         reveal_token: bool,
+    },
+    /// 模型列表浏览：迟到的拉取结果按 provider_id 匹配，弹窗已关/已换厂商则丢弃。
+    Models {
+        provider_id: String,
+        status: ModelsStatus,
     },
 }
 
@@ -195,7 +231,7 @@ impl App {
         match &self.modal {
             Modal::ConfirmDeleteKey { .. } => self.confirm_delete_key(),
             Modal::ConfirmDeleteProvider { .. } => self.confirm_delete_provider(),
-            Modal::None | Modal::Form { .. } | Modal::Inspector { .. } => {}
+            Modal::None | Modal::Form { .. } | Modal::Inspector { .. } | Modal::Models { .. } => {}
         }
     }
 
@@ -262,6 +298,75 @@ impl App {
             Err(err) => self.toast = Some((format!("复制失败: {err}"), Instant::now())),
         }
     }
+
+    // ---- 模型列表弹窗 ----------------------------------------------------
+
+    /// 厂商栏按 `m`：打开模型列表弹窗并异步拉取。token 取该厂商第一条密钥；
+    /// 没有密钥就没法鉴权，提示后不开弹窗。
+    pub fn open_models(&mut self) {
+        let Some(id) = self.current_provider_id().map(String::from) else {
+            return;
+        };
+        let Some(recipe) = self.recipes.get(&id).cloned() else {
+            return;
+        };
+        let Some(key) = self.keys.iter().find(|k| k.provider == id) else {
+            self.toast = Some(("该厂商还没有密钥，无法获取模型".into(), Instant::now()));
+            return;
+        };
+        let token = key.token.clone();
+        self.modal = Modal::Models {
+            provider_id: id.clone(),
+            status: ModelsStatus::Loading,
+        };
+        let client = self.client.clone();
+        let tx = self.tx_models.clone();
+        tokio::spawn(async move {
+            let result = probe::fetch_models(&client, &recipe, &token).await;
+            let _ = tx.send((id, result));
+        });
+    }
+
+    /// 模型列表拉取结果落地：弹窗还开着且 provider_id 匹配才更新，否则丢弃
+    /// （弹窗可能已被关掉或换了个厂商打开）。
+    pub fn apply_models(&mut self, provider_id: String, result: Result<Vec<String>, String>) {
+        let Modal::Models {
+            provider_id: modal_id,
+            status,
+        } = &mut self.modal
+        else {
+            return;
+        };
+        if *modal_id != provider_id {
+            return;
+        }
+        *status = match result {
+            Ok(items) => ModelsStatus::Done { items, selected: 0 },
+            Err(message) => ModelsStatus::Error { message },
+        };
+    }
+
+    /// 模型弹窗内 j/k：移动选中项。
+    pub fn move_models_selection(&mut self, delta: isize) {
+        if let Modal::Models { status, .. } = &mut self.modal {
+            status.move_selection(delta);
+        }
+    }
+
+    /// 模型弹窗按 `c`：复制当前选中的模型名。
+    pub fn copy_selected_model(&mut self) {
+        let name = match &self.modal {
+            Modal::Models { status, .. } => status.selected_item().map(str::to_string),
+            _ => None,
+        };
+        let Some(name) = name else {
+            return;
+        };
+        match clipboard::copy(&name) {
+            Ok(()) => self.toast = Some((format!("已复制 {name}"), Instant::now())),
+            Err(err) => self.toast = Some((format!("复制失败: {err}"), Instant::now())),
+        }
+    }
 }
 
 #[cfg(test)]
@@ -289,6 +394,7 @@ mod tests {
             },
         );
         let (tx, _rx) = tokio::sync::mpsc::unbounded_channel();
+        let (tx_models, _rx_models) = tokio::sync::mpsc::unbounded_channel();
         let mut app = App {
             recipes,
             keys: vec![KeyEntry {
@@ -307,6 +413,7 @@ mod tests {
             modal: Modal::None,
             inflight: HashSet::new(),
             tx,
+            tx_models,
             client: crate::probe::client().expect("client"),
             next_auto_refresh: Instant::now() + std::time::Duration::from_secs(300),
         };
@@ -364,5 +471,112 @@ mod tests {
         app.open_inspector();
         app.inspector_copy_token();
         assert!(app.toast.is_none(), "厂商详情按 c 不应触发复制");
+    }
+
+    fn done(items: &[&str]) -> ModelsStatus {
+        ModelsStatus::Done {
+            items: items.iter().map(|s| (*s).to_string()).collect(),
+            selected: 0,
+        }
+    }
+
+    /// 断言当前是 Models 弹窗并拆出 (provider_id, status)。
+    fn models_modal(app: &App) -> (&str, &ModelsStatus) {
+        match &app.modal {
+            Modal::Models {
+                provider_id,
+                status,
+            } => (provider_id, status),
+            other => panic!("期望 Models 弹窗，实际 {other:?}"),
+        }
+    }
+
+    fn models_loading(provider_id: &str) -> Modal {
+        Modal::Models {
+            provider_id: provider_id.into(),
+            status: ModelsStatus::Loading,
+        }
+    }
+
+    #[test]
+    fn move_selection_clamps_at_both_ends() {
+        let mut status = done(&["a", "b", "c"]);
+        status.move_selection(1);
+        assert_eq!(status.selected_item(), Some("b"));
+        status.move_selection(10);
+        assert_eq!(status.selected_item(), Some("c"));
+        status.move_selection(-10);
+        assert_eq!(status.selected_item(), Some("a"));
+        status.move_selection(-1); // 已在顶端，再上不动
+        assert_eq!(status.selected_item(), Some("a"));
+    }
+
+    #[test]
+    fn move_selection_noop_when_empty_or_not_done() {
+        let mut empty = ModelsStatus::Done {
+            items: Vec::new(),
+            selected: 0,
+        };
+        empty.move_selection(1);
+        assert_eq!(empty.selected_item(), None);
+        let mut loading = ModelsStatus::Loading;
+        loading.move_selection(1);
+        assert_eq!(loading, ModelsStatus::Loading);
+    }
+
+    #[test]
+    fn apply_models_updates_matching_modal_and_drops_mismatch() {
+        let (mut app, _rx, _rx_models) = crate::app::tests::test_app(&[("alpha", &["a1"])]);
+        app.modal = models_loading("alpha");
+        // provider_id 匹配：Loading → Done，选中从 0 开始
+        app.apply_models("alpha".into(), Ok(vec!["m1".into(), "m2".into()]));
+        let (id, status) = models_modal(&app);
+        assert_eq!(id, "alpha");
+        assert_eq!(status, &done(&["m1", "m2"]));
+        // provider_id 不匹配（迟到结果）：丢弃，状态不变
+        app.apply_models("beta".into(), Err("late".into()));
+        assert_eq!(models_modal(&app).1, &done(&["m1", "m2"]));
+        // 匹配的错误结果：转 Error
+        app.apply_models("alpha".into(), Err("HTTP 401".into()));
+        assert!(
+            matches!(models_modal(&app).1, ModelsStatus::Error { .. }),
+            "错误结果应落地 Error"
+        );
+        // 弹窗已关：结果丢弃，不复活
+        app.modal = Modal::None;
+        app.apply_models("alpha".into(), Ok(vec!["m1".into()]));
+        assert!(matches!(app.modal, Modal::None));
+    }
+
+    #[tokio::test]
+    async fn open_models_sets_loading_and_delivers_result() {
+        let (mut app, _rx, mut rx_models) = crate::app::tests::test_app(&[("alpha", &["a1"])]);
+        app.focus = Focus::Providers;
+        app.open_models();
+        let (id, status) = models_modal(&app);
+        assert_eq!(id, "alpha");
+        assert_eq!(status, &ModelsStatus::Loading);
+        // spawn 出去的 fetch 打 example.invalid 必失败，结果经通道回来后落地 Error
+        let (back_id, result) =
+            tokio::time::timeout(std::time::Duration::from_secs(10), rx_models.recv())
+                .await
+                .expect("应收到模型拉取结果")
+                .expect("channel 不应关闭");
+        assert_eq!(back_id, "alpha");
+        assert!(result.is_err(), "假厂商拉模型应失败: {result:?}");
+        app.apply_models(back_id, result);
+        assert!(
+            matches!(models_modal(&app).1, ModelsStatus::Error { .. }),
+            "错误结果应落地 Error"
+        );
+    }
+
+    #[test]
+    fn open_models_without_key_toasts_and_keeps_modal() {
+        let (mut app, _rx, _rx_models) = crate::app::tests::test_app(&[("alpha", &[])]);
+        app.focus = Focus::Providers;
+        app.open_models();
+        assert!(matches!(app.modal, Modal::None), "没有密钥不应开弹窗");
+        assert!(app.toast.is_some(), "没有密钥应提示");
     }
 }

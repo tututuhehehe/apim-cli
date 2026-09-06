@@ -83,6 +83,58 @@ pub async fn probe(client: &Client, recipe: &Recipe, key: &KeyEntry) -> ProbeRes
     }
 }
 
+/// 拉取厂商模型列表：GET `{base_url}/models`（探活同款路径），复用 recipe 鉴权。
+/// 超时由 client 自带（15s）。错误以 String 返回，直接进弹窗展示。
+pub async fn fetch_models(
+    client: &Client,
+    recipe: &Recipe,
+    token: &str,
+) -> std::result::Result<Vec<String>, String> {
+    let call = HttpCall::get("{base_url}/models");
+    let response = send(client, recipe, &call, token)
+        .await
+        .map_err(|err| compact_error(&err))?;
+    let status = response.status();
+    let body = response
+        .text()
+        .await
+        .map_err(|err| truncate(&err.to_string(), 200))?;
+    if !status.is_success() {
+        return Err(format!("HTTP {} {}", status.as_u16(), truncate(&body, 180)));
+    }
+    parse_models(&body)
+}
+
+/// 纯函数：模型列表 JSON → 排序去重后的模型名。认 OpenAI 风格
+/// `{"data":[{"id":"..."}]}`，兼容裸数组（字符串或 `{"id":...}`）。
+fn parse_models(body: &str) -> std::result::Result<Vec<String>, String> {
+    let json: serde_json::Value =
+        serde_json::from_str(body).map_err(|err| format!("parse JSON: {err}"))?;
+    let entries: Vec<&serde_json::Value> = match &json {
+        serde_json::Value::Array(items) => items.iter().collect(),
+        serde_json::Value::Object(map) => match map.get("data") {
+            Some(serde_json::Value::Array(items)) => items.iter().collect(),
+            _ => return Err("响应缺少 data 数组，无法解析模型列表".into()),
+        },
+        _ => return Err("响应结构异常，无法解析模型列表".into()),
+    };
+    let mut names: Vec<String> = Vec::with_capacity(entries.len());
+    for entry in entries {
+        match entry {
+            serde_json::Value::String(s) => names.push(s.clone()),
+            serde_json::Value::Object(fields) => {
+                if let Some(serde_json::Value::String(id)) = fields.get("id") {
+                    names.push(id.clone());
+                }
+            }
+            _ => {}
+        }
+    }
+    names.sort();
+    names.dedup();
+    Ok(names)
+}
+
 async fn hit_health(
     client: &Client,
     recipe: &Recipe,
@@ -222,7 +274,37 @@ fn truncate(s: &str, max: usize) -> String {
 
 #[cfg(test)]
 mod tests {
-    use super::display_endpoint;
+    use super::*;
+
+    #[test]
+    fn parse_models_openai_data_shape() {
+        let body = r#"{"object":"list","data":[
+            {"id":"deepseek-reasoner","object":"model"},
+            {"id":"deepseek-chat","object":"model"}
+        ]}"#;
+        let models = parse_models(body).expect("OpenAI 形态应解析成功");
+        assert_eq!(models, vec!["deepseek-chat", "deepseek-reasoner"]);
+    }
+
+    #[test]
+    fn parse_models_bare_array_sorts_and_dedupes() {
+        let body = r#"["b-model", {"id":"a-model"}, "b-model", {"object":"model"}]"#;
+        let models = parse_models(body).expect("裸数组应解析成功");
+        // 排序去重；没有 id 的对象跳过
+        assert_eq!(models, vec!["a-model", "b-model"]);
+    }
+
+    #[test]
+    fn parse_models_bad_json_errors() {
+        let err = parse_models("<html>502</html>").expect_err("坏 JSON 应报错");
+        assert!(err.contains("parse JSON"), "实际错误: {err}");
+    }
+
+    #[test]
+    fn parse_models_object_without_data_errors() {
+        let err = parse_models(r#"{"error":{"message":"nope"}}"#).expect_err("缺 data 应报错");
+        assert!(err.contains("data"), "实际错误: {err}");
+    }
 
     #[test]
     fn display_endpoint_redacts_token_in_query_urls() {
