@@ -467,6 +467,7 @@ pub(crate) mod tests {
                     name: format!("{pid} 假厂商"),
                     base_url: "https://example.invalid".into(),
                     homepage: None,
+                    models_url: None,
                     supports_groups: false,
                     vars: HashMap::new(),
                     auth: Auth::default(),

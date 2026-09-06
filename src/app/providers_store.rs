@@ -150,6 +150,7 @@ fn default_recipe(id: &str, name: &str, base_url: &str) -> Recipe {
         name: name.into(),
         base_url: base_url.into(),
         homepage: None,
+        models_url: None,
         supports_groups: false,
         vars: HashMap::new(),
         auth: Auth {

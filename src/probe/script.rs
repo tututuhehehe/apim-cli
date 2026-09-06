@@ -133,6 +133,7 @@ mod tests {
             name: "Demo".into(),
             base_url: "https://example.com".into(),
             homepage: None,
+            models_url: None,
             supports_groups: false,
             vars: HashMap::from([("access_token".to_string(), "at-123".to_string())]),
             auth: Default::default(),

@@ -119,6 +119,7 @@ fn add(ctx: &Ctx, args: &Args) -> Result<()> {
         name,
         base_url,
         homepage: homepage_opt(args)?,
+        models_url: None,
         supports_groups: false,
         vars: HashMap::new(),
         auth: Default::default(),

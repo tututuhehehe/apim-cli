@@ -77,9 +77,9 @@ pub enum Modal {
         target: InspectorTarget,
         reveal_token: bool,
     },
-    /// 模型列表浏览：迟到的拉取结果按 provider_id 匹配，弹窗已关/已换厂商则丢弃。
+    /// 模型列表浏览：迟到的拉取结果按 key_id 匹配，弹窗已关/已换密钥则丢弃。
     Models {
-        provider_id: String,
+        key_id: String,
         status: ModelsStatus,
     },
     /// 实时过滤搜索：边输入边改 key_filter / provider_filter，
@@ -379,43 +379,39 @@ impl App {
 
     // ---- 模型列表弹窗 ----------------------------------------------------
 
-    /// 厂商栏按 `m`：打开模型列表弹窗并异步拉取。token 取该厂商第一条密钥；
-    /// 没有密钥就没法鉴权，提示后不开弹窗。
+    /// 密钥栏按 `m`：用当前选中的这把 key 拉取它的模型列表。
+    /// 模型可见性随 key（分组）不同而不同，所以按 key 而不是按厂商取第一把。
     pub fn open_models(&mut self) {
-        let Some(id) = self.current_provider_id().map(String::from) else {
+        let Some(key) = self.selected_key_entry().cloned() else {
             return;
         };
-        let Some(recipe) = self.recipes.get(&id).cloned() else {
+        let Some(recipe) = self.recipes.get(&key.provider).cloned() else {
             return;
         };
-        let Some(key) = self.keys.iter().find(|k| k.provider == id) else {
-            self.toast = Some(("该厂商还没有密钥，无法获取模型".into(), Instant::now()));
-            return;
-        };
-        let token = key.token.clone();
+        let key_id = key.id();
         self.modal = Modal::Models {
-            provider_id: id.clone(),
+            key_id: key_id.clone(),
             status: ModelsStatus::Loading,
         };
         let client = self.client.clone();
         let tx = self.tx_models.clone();
         tokio::spawn(async move {
-            let result = probe::fetch_models(&client, &recipe, &token).await;
-            let _ = tx.send((id, result));
+            let result = probe::fetch_models(&client, &recipe, &key.token).await;
+            let _ = tx.send((key_id, result));
         });
     }
 
-    /// 模型列表拉取结果落地：弹窗还开着且 provider_id 匹配才更新，否则丢弃
-    /// （弹窗可能已被关掉或换了个厂商打开）。
-    pub fn apply_models(&mut self, provider_id: String, result: Result<Vec<String>, String>) {
+    /// 模型列表拉取结果落地：弹窗还开着且 key_id 匹配才更新，否则丢弃
+    /// （弹窗可能已被关掉或换了把密钥打开）。
+    pub fn apply_models(&mut self, key_id: String, result: Result<Vec<String>, String>) {
         let Modal::Models {
-            provider_id: modal_id,
+            key_id: modal_key_id,
             status,
         } = &mut self.modal
         else {
             return;
         };
-        if *modal_id != provider_id {
+        if *modal_key_id != key_id {
             return;
         }
         *status = match result {
@@ -463,6 +459,7 @@ mod tests {
                 name: "P".into(),
                 base_url: "https://p.example".into(),
                 homepage: None,
+                models_url: None,
                 supports_groups: false,
                 vars: HashMap::new(),
                 auth: Default::default(),
@@ -560,20 +557,17 @@ mod tests {
         }
     }
 
-    /// 断言当前是 Models 弹窗并拆出 (provider_id, status)。
+    /// 断言当前是 Models 弹窗并拆出 (key_id, status)。
     fn models_modal(app: &App) -> (&str, &ModelsStatus) {
         match &app.modal {
-            Modal::Models {
-                provider_id,
-                status,
-            } => (provider_id, status),
+            Modal::Models { key_id, status } => (key_id, status),
             other => panic!("期望 Models 弹窗，实际 {other:?}"),
         }
     }
 
-    fn models_loading(provider_id: &str) -> Modal {
+    fn models_loading(key_id: &str) -> Modal {
         Modal::Models {
-            provider_id: provider_id.into(),
+            key_id: key_id.into(),
             status: ModelsStatus::Loading,
         }
     }
@@ -607,34 +601,34 @@ mod tests {
     #[test]
     fn apply_models_updates_matching_modal_and_drops_mismatch() {
         let (mut app, _rx, _rx_models) = crate::app::tests::test_app(&[("alpha", &["a1"])]);
-        app.modal = models_loading("alpha");
-        // provider_id 匹配：Loading → Done，选中从 0 开始
-        app.apply_models("alpha".into(), Ok(vec!["m1".into(), "m2".into()]));
+        app.modal = models_loading("alpha.a1");
+        // key_id 匹配：Loading → Done，选中从 0 开始
+        app.apply_models("alpha.a1".into(), Ok(vec!["m1".into(), "m2".into()]));
         let (id, status) = models_modal(&app);
-        assert_eq!(id, "alpha");
+        assert_eq!(id, "alpha.a1");
         assert_eq!(status, &done(&["m1", "m2"]));
-        // provider_id 不匹配（迟到结果）：丢弃，状态不变
-        app.apply_models("beta".into(), Err("late".into()));
+        // key_id 不匹配（迟到结果）：丢弃，状态不变
+        app.apply_models("alpha.b2".into(), Err("late".into()));
         assert_eq!(models_modal(&app).1, &done(&["m1", "m2"]));
         // 匹配的错误结果：转 Error
-        app.apply_models("alpha".into(), Err("HTTP 401".into()));
+        app.apply_models("alpha.a1".into(), Err("HTTP 401".into()));
         assert!(
             matches!(models_modal(&app).1, ModelsStatus::Error { .. }),
             "错误结果应落地 Error"
         );
         // 弹窗已关：结果丢弃，不复活
         app.modal = Modal::None;
-        app.apply_models("alpha".into(), Ok(vec!["m1".into()]));
+        app.apply_models("alpha.a1".into(), Ok(vec!["m1".into()]));
         assert!(matches!(app.modal, Modal::None));
     }
 
     #[tokio::test]
     async fn open_models_sets_loading_and_delivers_result() {
         let (mut app, _rx, mut rx_models) = crate::app::tests::test_app(&[("alpha", &["a1"])]);
-        app.focus = Focus::Providers;
+        app.focus = Focus::Keys;
         app.open_models();
         let (id, status) = models_modal(&app);
-        assert_eq!(id, "alpha");
+        assert_eq!(id, "alpha.a1");
         assert_eq!(status, &ModelsStatus::Loading);
         // spawn 出去的 fetch 打 example.invalid 必失败，结果经通道回来后落地 Error
         let (back_id, result) =
@@ -642,7 +636,7 @@ mod tests {
                 .await
                 .expect("应收到模型拉取结果")
                 .expect("channel 不应关闭");
-        assert_eq!(back_id, "alpha");
+        assert_eq!(back_id, "alpha.a1");
         assert!(result.is_err(), "假厂商拉模型应失败: {result:?}");
         app.apply_models(back_id, result);
         assert!(
@@ -652,11 +646,11 @@ mod tests {
     }
 
     #[test]
-    fn open_models_without_key_toasts_and_keeps_modal() {
+    fn open_models_without_key_does_nothing() {
+        // 厂商没有密钥时密钥栏无行可选，按 m 是无操作
         let (mut app, _rx, _rx_models) = crate::app::tests::test_app(&[("alpha", &[])]);
-        app.focus = Focus::Providers;
+        app.focus = Focus::Keys;
         app.open_models();
         assert!(matches!(app.modal, Modal::None), "没有密钥不应开弹窗");
-        assert!(app.toast.is_some(), "没有密钥应提示");
     }
 }

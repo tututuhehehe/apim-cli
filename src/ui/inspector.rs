@@ -369,6 +369,7 @@ mod tests {
             name: "Demo".into(),
             base_url: "https://api.demo.com".into(),
             homepage: None,
+            models_url: None,
             supports_groups: false,
             vars: vars
                 .iter()

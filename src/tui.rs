@@ -158,7 +158,7 @@ fn handle_key(app: &mut App, key: KeyEvent) {
             }
             KeyCode::Char('/') => app.open_search(),
             KeyCode::Enter if app.focus == Focus::Providers => app.open_homepage(),
-            KeyCode::Char('m') if app.focus == Focus::Providers => app.open_models(),
+            KeyCode::Char('m') if app.focus == Focus::Keys => app.open_models(),
             KeyCode::Char('c') => app.copy_selected(),
             KeyCode::Char('r') => app.refresh_current_provider(),
             KeyCode::Char('a') => app.open_add(),

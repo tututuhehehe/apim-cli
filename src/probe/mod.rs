@@ -85,24 +85,58 @@ pub async fn probe(client: &Client, recipe: &Recipe, key: &KeyEntry) -> ProbeRes
 
 /// 拉取厂商模型列表：GET `{base_url}/models`（探活同款路径），复用 recipe 鉴权。
 /// 超时由 client 自带（15s）。错误以 String 返回，直接进弹窗展示。
+/// 模型列表端点候选（按序尝试，404 换下一个）：
+/// recipe 显式 `models_url` → 探活路径（以 models 结尾时）→ `{base_url}/models` → `/v1/models`。
+/// OpenAI 兼容的 /models|/v1/models 是事实标准，GLM 这类例外用 models_url 配置。
+fn model_endpoint_candidates(recipe: &Recipe, token: &str) -> Vec<String> {
+    let ctx = recipe::request_ctx(recipe, token);
+    let mut urls: Vec<String> = Vec::new();
+    let mut push = |tpl: Option<&str>| {
+        if let Some(tpl) = tpl {
+            let url = recipe::subst(tpl, &ctx);
+            if !urls.contains(&url) {
+                urls.push(url);
+            }
+        }
+    };
+    push(recipe.models_url.as_deref());
+    if let Some(health) = &recipe.health
+        && health.url.ends_with("models")
+    {
+        push(Some(&health.url));
+    }
+    push(Some("{base_url}/models"));
+    push(Some("{base_url}/v1/models"));
+    urls
+}
+
 pub async fn fetch_models(
     client: &Client,
     recipe: &Recipe,
     token: &str,
 ) -> std::result::Result<Vec<String>, String> {
-    let call = HttpCall::get("{base_url}/models");
-    let response = send(client, recipe, &call, token)
-        .await
-        .map_err(|err| compact_error(&err))?;
-    let status = response.status();
-    let body = response
-        .text()
-        .await
-        .map_err(|err| truncate(&err.to_string(), 200))?;
-    if !status.is_success() {
-        return Err(format!("HTTP {} {}", status.as_u16(), truncate(&body, 180)));
+    let mut last_err = "没有可用的模型端点".to_string();
+    for url in model_endpoint_candidates(recipe, token) {
+        let call = HttpCall::get(url);
+        let response = send(client, recipe, &call, token)
+            .await
+            .map_err(|err| compact_error(&err))?;
+        let status = response.status();
+        let body = response
+            .text()
+            .await
+            .map_err(|err| truncate(&err.to_string(), 200))?;
+        if status == reqwest::StatusCode::NOT_FOUND {
+            // 该厂商不用这个约定路径，试下一个候选
+            last_err = format!("HTTP 404 {}", truncate(&body, 120));
+            continue;
+        }
+        if !status.is_success() {
+            return Err(format!("HTTP {} {}", status.as_u16(), truncate(&body, 180)));
+        }
+        return parse_models(&body);
     }
-    parse_models(&body)
+    Err(last_err)
 }
 
 /// 纯函数：模型列表 JSON → 排序去重后的模型名。认 OpenAI 风格
@@ -275,6 +309,53 @@ fn truncate(s: &str, max: usize) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::recipe::Recipe;
+    use std::collections::HashMap;
+
+    fn candidates_recipe(models_url: Option<&str>, health_url: Option<&str>) -> Recipe {
+        Recipe {
+            id: "p".into(),
+            name: "P".into(),
+            base_url: "https://p.example".into(),
+            homepage: None,
+            models_url: models_url.map(String::from),
+            supports_groups: false,
+            vars: HashMap::new(),
+            auth: Default::default(),
+            health: health_url.map(HttpCall::get),
+            balance: None,
+            origin: None,
+        }
+    }
+
+    #[test]
+    fn model_endpoint_candidates_follow_resolution_order() {
+        // 缺省：/models 与 /v1/models 两个候选，去重后有序
+        assert_eq!(
+            model_endpoint_candidates(&candidates_recipe(None, None), "sk-x"),
+            vec!["https://p.example/models", "https://p.example/v1/models"]
+        );
+        // 探活路径以 models 结尾时优先复用（与默认 /v1/models 去重合并）
+        assert_eq!(
+            model_endpoint_candidates(
+                &candidates_recipe(None, Some("{base_url}/v1/models")),
+                "sk-x"
+            ),
+            vec!["https://p.example/v1/models", "https://p.example/models"]
+        );
+        // 显式 models_url 最优先（GLM 这类非标厂商），token 不进 URL
+        assert_eq!(
+            model_endpoint_candidates(
+                &candidates_recipe(Some("{base_url}/api/paas/v4/models"), None),
+                "sk-secret"
+            ),
+            vec![
+                "https://p.example/api/paas/v4/models",
+                "https://p.example/models",
+                "https://p.example/v1/models"
+            ]
+        );
+    }
 
     #[test]
     fn parse_models_openai_data_shape() {

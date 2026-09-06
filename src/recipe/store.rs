@@ -64,6 +64,7 @@ mod tests {
             name: "我的中转站".into(),
             base_url: "https://relay.example.com/v1".into(),
             homepage: None,
+            models_url: None,
             supports_groups: false,
             vars: HashMap::new(),
             auth: Auth {

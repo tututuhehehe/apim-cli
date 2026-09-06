@@ -26,6 +26,7 @@ fn readonly_field_ignores_input() {
         name: "DeepSeek".into(),
         base_url: "https://x".into(),
         homepage: None,
+        models_url: None,
         supports_groups: false,
         vars: Default::default(),
         auth: Default::default(),
