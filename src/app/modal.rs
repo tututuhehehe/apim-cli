@@ -383,6 +383,8 @@ impl App {
     /// 模型可见性随 key（分组）不同而不同，所以按 key 而不是按厂商取第一把。
     pub fn open_models(&mut self) {
         let Some(key) = self.selected_key_entry().cloned() else {
+            // 与 c/e/i/d 同款：没得选就提示，别让按键无声无息
+            self.toast = Some(("没有可查询的密钥".into(), Instant::now()));
             return;
         };
         let Some(recipe) = self.recipes.get(&key.provider).cloned() else {
@@ -646,11 +648,12 @@ mod tests {
     }
 
     #[test]
-    fn open_models_without_key_does_nothing() {
-        // 厂商没有密钥时密钥栏无行可选，按 m 是无操作
+    fn open_models_without_key_toasts() {
+        // 厂商没有密钥时密钥栏无行可选：不开弹窗，但与 c/e/i/d 同样给出提示
         let (mut app, _rx, _rx_models) = crate::app::tests::test_app(&[("alpha", &[])]);
         app.focus = Focus::Keys;
         app.open_models();
         assert!(matches!(app.modal, Modal::None), "没有密钥不应开弹窗");
+        assert!(app.toast.is_some(), "没有密钥应提示");
     }
 }

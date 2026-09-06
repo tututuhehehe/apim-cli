@@ -44,7 +44,7 @@ impl Default for KeyState {
 /// 自动全量刷新间隔：启动刷一次，之后到点后台全量重刷（含探活+额度）。
 pub const AUTO_REFRESH_INTERVAL: Duration = Duration::from_secs(5 * 60);
 
-/// 模型列表拉取结果：连同 provider_id 一起回传，弹窗按 id 匹配（不匹配丢弃）。
+/// 模型列表拉取结果：连同 key_id 一起回传，弹窗按 key_id 匹配（不匹配丢弃）。
 pub type ModelsMsg = (String, std::result::Result<Vec<String>, String>);
 
 pub struct App {

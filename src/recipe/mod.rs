@@ -28,7 +28,7 @@ pub struct Recipe {
     /// 控制面板主页，TUI 选中厂商按 Enter 用默认浏览器打开。
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub homepage: Option<String>,
-    /// 模型列表端点模板（按 m 浏览模型用）。缺省依次尝试探活路径（以 models
+    /// 模型列表端点模板（按 m 浏览模型用）。缺省依次尝试探活路径（以 `/models`
     /// 结尾时）、{base_url}/models、{base_url}/v1/models；GLM 这类非标厂商才需要配。
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub models_url: Option<String>,

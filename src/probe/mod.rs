@@ -79,11 +79,11 @@ pub async fn probe(client: &Client, recipe: &Recipe, key: &KeyEntry) -> ProbeRes
     }
 }
 
-/// 拉取厂商模型列表：GET `{base_url}/models`（探活同款路径），复用 recipe 鉴权。
-/// 超时由 client 自带（15s）。错误以 String 返回，直接进弹窗展示。
-/// 模型列表端点候选（按序尝试，404 换下一个）：
-/// recipe 显式 `models_url` → 探活路径（以 models 结尾时）→ `{base_url}/models` → `/v1/models`。
-/// OpenAI 兼容的 /models|/v1/models 是事实标准，GLM 这类例外用 models_url 配置。
+/// 拉取厂商模型列表，复用 recipe 鉴权。超时由 client 自带（15s）。
+/// 错误以 String 返回，直接进弹窗展示。
+/// 端点候选（按序尝试，仅 404 换下一个，其余错误直接返回保留真实原因）：
+/// recipe 显式 `models_url` → 探活路径（以 `/models` 结尾时）→ `{base_url}/models` → `{base_url}/v1/models`。
+/// OpenAI 兼容约定是事实标准，GLM 这类例外用 models_url 配置。
 fn model_endpoint_candidates(recipe: &Recipe, token: &str) -> Vec<String> {
     let ctx = recipe::request_ctx(recipe, token);
     let mut urls: Vec<String> = Vec::new();
@@ -97,7 +97,7 @@ fn model_endpoint_candidates(recipe: &Recipe, token: &str) -> Vec<String> {
     };
     push(recipe.models_url.as_deref());
     if let Some(health) = &recipe.health
-        && health.url.ends_with("models")
+        && health.url.ends_with("/models")
     {
         push(Some(&health.url));
     }
@@ -293,6 +293,15 @@ mod tests {
                 "https://p.example/models",
                 "https://p.example/v1/models"
             ]
+        );
+        // 探活路径只是「以 models 结尾」但不是 /models 端点时不收进候选，
+        // 免得它 200 返回非模型 JSON 就提前判死整个回退链
+        assert_eq!(
+            model_endpoint_candidates(
+                &candidates_recipe(None, Some("{base_url}/freemodels")),
+                "sk-x"
+            ),
+            vec!["https://p.example/models", "https://p.example/v1/models"]
         );
     }
 

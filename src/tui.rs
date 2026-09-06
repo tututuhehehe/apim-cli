@@ -79,9 +79,9 @@ async fn loop_tui(
                 }
             }
             msg = rx_models.recv() => {
-                if let Some((provider_id, result)) = msg {
-                    // 弹窗可能已被关掉/换厂商打开：apply_models 按 id 匹配，不匹配丢弃
-                    app.apply_models(provider_id, result);
+                if let Some((key_id, result)) = msg {
+                    // 弹窗可能已被关掉/换了把密钥打开：apply_models 按 key_id 匹配，不匹配丢弃
+                    app.apply_models(key_id, result);
                 }
             }
             _ = tokio::time::sleep(std::time::Duration::from_millis(200)) => {

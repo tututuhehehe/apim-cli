@@ -186,7 +186,7 @@ balance:
 
 ### 模型列表端点（`m` 键）
 
-密钥表里选中某条 key 按 `m`，用**这把 key** 拉取它可见的模型列表（模型可见性随 key/分组不同）。端点自动按序尝试：recipe 显式 `models_url` → 探活路径（以 `models` 结尾时）→ `{base_url}/models` → `{base_url}/v1/models`，404 自动换下一个。绝大多数 OpenAI 兼容厂商无需配置；GLM 这类非标路径的在 recipe 里加一行：
+密钥表里选中某条 key 按 `m`，用**这把 key** 拉取它可见的模型列表（模型可见性随 key/分组不同）。端点自动按序尝试：recipe 显式 `models_url` → 探活路径（以 `/models` 结尾时）→ `{base_url}/models` → `{base_url}/v1/models`，404 自动换下一个（其余错误直接返回，保留真实原因）。绝大多数 OpenAI 兼容厂商无需配置；GLM 这类非标路径的在 recipe 里加一行：
 
 ```yaml
 models_url: '{base_url}/api/paas/v4/models'
