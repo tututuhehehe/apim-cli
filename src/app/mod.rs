@@ -1,6 +1,6 @@
 //! 应用状态：选中项、导航、探活调度。弹窗与存取在子模块。
 
-pub use modal::Modal;
+pub use modal::{InspectorTarget, Modal};
 
 mod keys_store;
 mod modal;
@@ -27,6 +27,8 @@ pub enum Focus {
 pub struct KeyState {
     pub health: Health,
     pub balance: Option<BalanceSnapshot>,
+    /// 该 key 最近一次探测结果到达的时间；从未收到结果时为 None。
+    pub updated: Option<Instant>,
 }
 
 impl Default for KeyState {
@@ -34,6 +36,7 @@ impl Default for KeyState {
         Self {
             health: Health::Unknown,
             balance: None,
+            updated: None,
         }
     }
 }
@@ -96,6 +99,7 @@ impl App {
         let state = self.states.entry(result.key_id.clone()).or_default();
         state.health = result.health;
         state.balance = result.balance;
+        state.updated = Some(Instant::now());
     }
 
     pub fn tick(&mut self) {

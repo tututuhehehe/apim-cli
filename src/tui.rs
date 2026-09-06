@@ -1,5 +1,7 @@
 //! 事件循环、按键路由、快照渲染。
 
+use std::time::Instant;
+
 use anyhow::Result;
 use crossterm::event::{
     EnableBracketedPaste, Event, EventStream, KeyCode, KeyEvent, KeyEventKind, KeyModifiers,
@@ -11,8 +13,10 @@ use ratatui::backend::TestBackend;
 use ratatui::buffer::Buffer;
 use unicode_width::UnicodeWidthStr;
 
-use crate::app::{App, Focus, Modal};
+use crate::app::{App, Focus, KeyState, Modal};
 use crate::form::{Field, FormEvent};
+use crate::probe::{BalanceSnapshot, Health};
+use crate::recipe::BalanceView;
 use crate::ui;
 
 pub(crate) async fn run_tui() -> Result<()> {
@@ -81,6 +85,18 @@ fn handle_key(app: &mut App, key: KeyEvent) {
             KeyCode::Esc | KeyCode::Char('n') | KeyCode::Char('q') => app.cancel_modal(),
             _ => {}
         },
+        Modal::Inspector { .. } => match key.code {
+            // r 只切遮掩/完整（方法内部限定密钥详情且有 token），c 复制完整 token。
+            // Ctrl 组合不拦（同主界面的 Ctrl+C）：避免终端中断手势误把密钥写上剪贴板
+            KeyCode::Char('r') if !key.modifiers.contains(KeyModifiers::CONTROL) => {
+                app.inspector_toggle_reveal()
+            }
+            KeyCode::Char('c') if !key.modifiers.contains(KeyModifiers::CONTROL) => {
+                app.inspector_copy_token()
+            }
+            KeyCode::Esc | KeyCode::Enter | KeyCode::Char('q') => app.cancel_modal(),
+            _ => {}
+        },
         Modal::None => match key.code {
             KeyCode::Char('c') if key.modifiers.contains(KeyModifiers::CONTROL) => {}
             KeyCode::Char('q') | KeyCode::Esc => {}
@@ -89,6 +105,7 @@ fn handle_key(app: &mut App, key: KeyEvent) {
             KeyCode::Char('r') => app.refresh_current_provider(),
             KeyCode::Char('a') => app.open_add(),
             KeyCode::Char('e') => app.open_edit(),
+            KeyCode::Char('i') => app.open_inspector(),
             KeyCode::Char('d') => app.open_delete(),
             KeyCode::Char('j') | KeyCode::Down => app.move_down(),
             KeyCode::Char('k') | KeyCode::Up => app.move_up(),
@@ -136,6 +153,49 @@ pub(crate) async fn run_snapshot_provider_form() -> Result<()> {
         form.fields[5] = Field::text("脚本路径", "~/.config/apim/scripts/my-relay.sh");
         form.active = 5;
     }
+    render_snapshot(&app).await
+}
+
+/// 检查器快照：不拉真实接口，给选中密钥塞一份假探测状态后渲染详情弹窗。
+/// 默认密钥详情；`APIM_SNAPSHOT_INSPECTOR=provider` 出厂商详情。
+/// 数据来自 APIM_CONFIG_DIR（测试时指向假配置目录）。
+pub(crate) async fn run_snapshot_inspector() -> Result<()> {
+    let (mut app, _rx) = App::start()?;
+    if let Ok(id) = std::env::var("APIM_SNAPSHOT_PROVIDER")
+        && let Some(pos) = app.provider_ids.iter().position(|p| p == &id)
+    {
+        app.selected_provider = pos;
+    }
+    if let Some(key) = app.selected_key_entry().cloned() {
+        // 清掉启动自动探测的在途标记，否则快照里「健康」行永远显示「检查中」，
+        // 盖住我们注入的假探测结果
+        app.inflight.clear();
+        app.states.insert(
+            key.id(),
+            KeyState {
+                health: Health::Live { ms: 120 },
+                balance: Some(BalanceSnapshot {
+                    view: Some(BalanceView {
+                        available: Some(true),
+                        headline: "¥ 4.22".into(),
+                        items: Vec::new(),
+                        lines: Vec::new(),
+                    }),
+                    endpoint: "GET https://api.example.invalid/user/balance".into(),
+                    status: Some(200),
+                    elapsed_ms: 88,
+                    error: None,
+                }),
+                updated: Some(Instant::now()),
+            },
+        );
+    }
+    app.focus = if std::env::var("APIM_SNAPSHOT_INSPECTOR").as_deref() == Ok("provider") {
+        Focus::Providers
+    } else {
+        Focus::Keys
+    };
+    app.open_inspector();
     render_snapshot(&app).await
 }
 

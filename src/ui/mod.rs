@@ -4,6 +4,7 @@ mod balance;
 mod confirm;
 mod form_modal;
 mod header;
+mod inspector;
 mod keys;
 mod providers;
 
@@ -50,6 +51,7 @@ pub fn draw(frame: &mut Frame, app: &App) {
         Modal::ConfirmDeleteProvider { provider_id, .. } => {
             confirm::draw_confirm(frame, "删除厂商", std::slice::from_ref(provider_id), area);
         }
+        Modal::Inspector { .. } => inspector::draw_inspector(frame, app, area),
         Modal::None => {}
     }
 }

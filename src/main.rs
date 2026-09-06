@@ -19,6 +19,7 @@ async fn main() -> Result<()> {
         Some(flag) if flag.starts_with("--snapshot") => match flag {
             "--snapshot-form" => tui::run_snapshot_key_form().await,
             "--snapshot-provider-form" => tui::run_snapshot_provider_form().await,
+            "--snapshot-inspector" => tui::run_snapshot_inspector().await,
             "--snapshot" => tui::run_snapshot().await,
             other => {
                 eprintln!("未知参数 {other}");
