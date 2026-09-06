@@ -166,6 +166,9 @@ fn handle_key(app: &mut App, key: KeyEvent) {
             KeyCode::Char('d') => app.open_delete(),
             KeyCode::Char('j') | KeyCode::Down => app.move_down(),
             KeyCode::Char('k') | KeyCode::Up => app.move_up(),
+            // vim 方向：h 左 = 厂商栏，l 右 = 密钥栏；已在边缘侧时不动
+            KeyCode::Char('h') if app.focus == Focus::Keys => app.toggle_focus(),
+            KeyCode::Char('l') if app.focus == Focus::Providers => app.toggle_focus(),
             KeyCode::Tab | KeyCode::Left | KeyCode::Right => app.toggle_focus(),
             _ => {}
         },
