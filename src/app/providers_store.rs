@@ -29,10 +29,7 @@ impl App {
                 self.set_form_error("ID 必填");
                 return;
             }
-            if !id
-                .chars()
-                .all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || c == '-')
-            {
+            if !recipe::is_valid_id(&id) {
                 self.set_form_error("ID 只能用小写字母、数字、-");
                 return;
             }
@@ -107,9 +104,11 @@ impl App {
             Some(prev) => UndoAction::ProviderUpdated {
                 id: id.clone(),
                 before: prev,
+                path: path.clone(),
             },
             None => UndoAction::ProviderCreated {
                 id: id.clone(),
+                path: path.clone(),
                 script_copy: None,
                 copied: false,
             },
@@ -167,7 +166,7 @@ impl App {
             None,
             None,
             &self.recipes_dir(),
-            &self.config_dir.join("scripts"),
+            &self.scripts_dir(),
         ) {
             Ok(outcome) => outcome,
             Err(err) => {
@@ -184,6 +183,10 @@ impl App {
             .unwrap_or_default();
         self.push_undo(UndoAction::ProviderCreated {
             id: new_id.clone(),
+            path: recipe
+                .origin
+                .clone()
+                .unwrap_or_else(|| self.recipes_dir().join(format!("{new_id}.yaml"))),
             script_copy,
             copied: true,
         });

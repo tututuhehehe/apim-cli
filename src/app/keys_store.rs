@@ -36,12 +36,13 @@ impl App {
         };
         // 记撤销用：改动前的旧条目（改名的场景 id 也会变）
         let before = original.and_then(|id| self.keys.iter().find(|k| k.id() == id).cloned());
+        // 先写盘再改内存：写盘失败时内存不变，不会出现“内存有了磁盘没有”的分歧
+        let mut next = self.keys.clone();
         match original {
-            None => self.keys.push(entry),
+            None => next.push(entry),
             Some(orig) => {
-                if let Some(slot) = self.keys.iter_mut().find(|k| k.id() == orig) {
+                if let Some(slot) = next.iter_mut().find(|k| k.id() == orig) {
                     *slot = entry;
-                    self.states.remove(orig);
                 } else {
                     self.modal = Modal::None;
                     return;
@@ -49,10 +50,14 @@ impl App {
             }
         }
 
-        if let Err(err) = config::save_keys_to(&self.config_dir, &self.keys) {
+        if let Err(err) = config::save_keys_to(&self.config_dir, &next) {
             self.toast = Some((format!("保存失败: {err}"), Instant::now()));
             self.modal = Modal::None;
             return;
+        }
+        self.keys = next;
+        if let Some(orig) = original {
+            self.states.remove(orig);
         }
         match original {
             None => self.push_undo(UndoAction::KeyAdded {
@@ -93,10 +98,17 @@ impl App {
         };
         let key_id = key_id.clone();
         let removed = self.keys.iter().find(|k| k.id() == key_id).cloned();
-        self.keys.retain(|k| k.id() != key_id);
-        if let Err(err) = config::save_keys_to(&self.config_dir, &self.keys) {
+        // 先写盘再改内存（失败时内存保持原样）
+        let next: Vec<KeyEntry> = self
+            .keys
+            .iter()
+            .filter(|k| k.id() != key_id)
+            .cloned()
+            .collect();
+        if let Err(err) = config::save_keys_to(&self.config_dir, &next) {
             self.toast = Some((format!("保存失败: {err}"), Instant::now()));
         } else {
+            self.keys = next;
             if let Some(key) = removed {
                 self.push_undo(UndoAction::KeyDeleted { key });
             }

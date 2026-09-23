@@ -43,8 +43,9 @@ src/
 │   ├── form_modal.rs  表单弹窗（光标截断渲染）
 │   └── confirm.rs     删除确认弹窗
 ├── recipe/            厂商协议
-│   ├── mod.rs         Recipe/Auth/HttpCall 模型、YAML 加载（builtin→manifest→user 逐级覆盖）、{token}/{base_url} 模板替换
+│   ├── mod.rs         Recipe/Auth/HttpCall 模型、YAML 加载（builtin→manifest→user 逐级覆盖，加载期校验 id 字符集）、is_valid_id、{token}/{base_url} 模板替换
 │   ├── script.rs      ScriptSpec（balance.kind=script，command/run 二选一，自定义 serde 校验）
+│   ├── dup.rs         厂商整份复制（新 id 自动顺延 + 额度脚本文件副本）
 │   └── store.rs       用户 recipe 读写（~/.config/apim/recipes/*.yaml）
 ├── config/            密钥清单
 │   ├── mod.rs         KeyEntry、读取 config.toml + secrets.toml（严格版给 TUI，宽松版 load_keys_lenient 给 CLI 自救）

@@ -101,10 +101,7 @@ fn add(ctx: &Ctx, args: &Args) -> Result<()> {
     if recipes.contains_key(&id) {
         bail!("厂商 {id} 已存在，改配置用 provider set");
     }
-    if !id
-        .chars()
-        .all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || c == '-')
-    {
+    if !crate::recipe::is_valid_id(&id) {
         bail!("ID 只能用小写字母、数字、-");
     }
     if !(base_url.starts_with("http://") || base_url.starts_with("https://")) {

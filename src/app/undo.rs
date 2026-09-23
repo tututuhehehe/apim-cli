@@ -8,7 +8,7 @@ use std::fs;
 use std::path::{Path, PathBuf};
 use std::time::Instant;
 
-use anyhow::{Context, Result};
+use anyhow::{Context, Result, bail};
 
 use super::App;
 use crate::config::{self, KeyEntry};
@@ -28,13 +28,20 @@ pub enum UndoAction {
     /// 删除密钥：撤销 = 加回来。
     KeyDeleted { key: KeyEntry },
     /// 新增 / 复制厂商：撤销 = 删掉生成的用户 YAML（复制时连带删掉脚本副本）。
+    /// path / script_copy 都是写盘时记录的真实路径，不靠 id 反推。
     ProviderCreated {
         id: String,
+        path: PathBuf,
         script_copy: Option<PathBuf>,
         copied: bool,
     },
-    /// 编辑厂商：撤销 = 写回旧 recipe；旧的是内置（origin=None）时删掉用户覆盖即可。
-    ProviderUpdated { id: String, before: Recipe },
+    /// 编辑厂商：撤销 = 写回旧 recipe（按其 origin 真实路径）；
+    /// 旧的是内置（origin=None）时删掉本次新建的覆盖 YAML 即可。
+    ProviderUpdated {
+        id: String,
+        before: Recipe,
+        path: PathBuf,
+    },
     /// 删除厂商：撤销 = 重新写回 YAML 与内存。
     ProviderDeleted { recipe: Recipe },
 }
@@ -47,9 +54,19 @@ impl UndoAction {
             Self::KeyUpdated { key_id, .. } => format!("修改密钥 {key_id}"),
             Self::KeyDeleted { key } => format!("删除密钥 {}", key.id()),
             Self::ProviderCreated {
-                id, copied: true, ..
-            } => format!("复制厂商 {id}"),
-            Self::ProviderCreated { id, .. } => format!("新增厂商 {id}"),
+                id,
+                script_copy,
+                copied,
+                ..
+            } => {
+                let what = if *copied { "复制" } else { "新增" };
+                let script = script_copy
+                    .as_ref()
+                    .and_then(|p| p.file_name())
+                    .map(|f| format!("（含脚本 {}）", f.to_string_lossy()))
+                    .unwrap_or_default();
+                format!("{what}厂商 {id}{script}")
+            }
             Self::ProviderUpdated { id, .. } => format!("编辑厂商 {id}"),
             Self::ProviderDeleted { recipe } => format!("删除厂商 {}", recipe.id),
         }
@@ -74,7 +91,11 @@ impl App {
         let label = action.label();
         match self.apply_undo(&action) {
             Ok(()) => self.toast = Some((format!("已撤销：{label}"), Instant::now())),
-            Err(err) => self.toast = Some((format!("撤销 {label} 失败: {err}"), Instant::now())),
+            Err(err) => {
+                // 失败不丢历史：放回栈尾让用户可重试（删除/写盘都幂等）
+                self.undo_stack.push_back(action);
+                self.toast = Some((format!("撤销 {label} 失败: {err}"), Instant::now()));
+            }
         }
         self.rebuild_provider_list();
     }
@@ -101,33 +122,49 @@ impl App {
                 config::save_keys_to(&self.config_dir, &self.keys)?;
             }
             UndoAction::ProviderCreated {
-                id, script_copy, ..
+                id,
+                path,
+                script_copy,
+                ..
             } => {
-                self.remove_user_recipe(id)?;
-                if let Some(script) = script_copy
-                    && script.exists()
-                {
-                    fs::remove_file(script)
-                        .with_context(|| format!("delete {}", script.display()))?;
+                // 尽力而为：两个文件都尝试删，最后统一报错（内存状态照样回退）
+                let mut failed: Vec<String> = Vec::new();
+                let mut targets = vec![path.clone()];
+                targets.extend(script_copy.clone());
+                for file in &targets {
+                    if let Err(err) = remove_file_if_exists(file) {
+                        failed.push(err.to_string());
+                    }
                 }
                 self.recipes.remove(id);
                 self.drop_provider_states(id);
+                if !failed.is_empty() {
+                    bail!("{}", failed.join("；"));
+                }
             }
-            UndoAction::ProviderUpdated { id, before } => {
-                if before.origin.is_none() {
-                    // 之前是内置：删掉用户覆盖，内置定义自动恢复
-                    self.remove_user_recipe(id)?;
-                } else {
-                    // 之前就有用户 YAML：按旧内容重写
-                    recipe::save_user_recipe_to(&self.recipes_dir(), before)?;
+            UndoAction::ProviderUpdated { id, before, path } => {
+                match before.origin.as_deref() {
+                    // 旧内容在手写的另一个文件里（.yml）：写回原文件并清掉本次新建的
+                    Some(origin) if origin != path.as_path() => {
+                        recipe::write_recipe_file(origin, before)?;
+                        remove_file_if_exists(path)?;
+                    }
+                    Some(_) => recipe::write_recipe_file(path, before)?,
+                    // 之前是内置：删掉覆盖 YAML，内置定义自动恢复
+                    None => remove_file_if_exists(path)?,
                 }
                 self.recipes.insert(id.clone(), before.clone());
                 self.drop_provider_states(id);
             }
             UndoAction::ProviderDeleted { recipe: deleted } => {
-                let written = recipe::save_user_recipe_to(&self.recipes_dir(), deleted)?;
+                // 删除只允许用户 recipe（origin 必为 Some），按原路径写回
+                let path = match deleted.origin.clone() {
+                    Some(path) => path,
+                    None => self.recipes_dir().join(format!("{}.yaml", deleted.id)),
+                };
+                recipe::write_recipe_file(&path, deleted)?;
                 let mut restored = deleted.clone();
-                restored.origin = Some(written);
+                restored.origin = Some(path);
                 self.recipes.insert(restored.id.clone(), restored);
                 self.drop_provider_states(&deleted.id);
             }
@@ -136,15 +173,11 @@ impl App {
     }
 
     /// 丢该厂商的缓存探测结果（配置回退后旧数字/状态不再可信，下次刷新重算）。
+    /// 注意：已发出的探针无法撤回，若“编辑后按 r → 立即撤销”可能有迟到结果
+    /// 重新填上旧配置的数字；窗口很小，且至多 5 分钟后的自动全量刷新会覆盖。
     fn drop_provider_states(&mut self, id: &str) {
         self.states
             .retain(|key, _| !key.starts_with(&format!("{id}.")));
-    }
-
-    /// 删用户 YAML；文件已不在就当删过了（幂等，撤销不因边界状态失败）。
-    fn remove_user_recipe(&self, id: &str) -> Result<()> {
-        let path = self.recipes_dir().join(format!("{id}.yaml"));
-        remove_file_if_exists(&path)
     }
 }
 

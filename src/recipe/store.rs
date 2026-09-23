@@ -17,9 +17,19 @@ pub fn delete_user_recipe(path: &Path) -> Result<()> {
 pub(crate) fn save_user_recipe_to(dir: &Path, recipe: &Recipe) -> Result<PathBuf> {
     fs::create_dir_all(dir).with_context(|| format!("mkdir {}", dir.display()))?;
     let path = dir.join(format!("{}.yaml", recipe.id));
+    write_recipe_file(&path, recipe)?;
+    Ok(path)
+}
+
+/// 按**显式路径**原子写（tmp+rename，600）：撤销时按原 origin 回写，
+/// 避免用 id 推导路径把 `.yml` 手写 recipe 写成 `.yaml` 双份。
+pub(crate) fn write_recipe_file(path: &Path, recipe: &Recipe) -> Result<()> {
+    if let Some(parent) = path.parent() {
+        fs::create_dir_all(parent).with_context(|| format!("mkdir {}", parent.display()))?;
+    }
     let yaml = serde_yaml::to_string(recipe).context("serialize recipe")?;
     // recipe 可能带 vars 里的访问令牌，按私钥文件权限写。
-    let tmp = crate::config::tmp_path(&path);
+    let tmp = crate::config::tmp_path(path);
     fs::write(&tmp, yaml).with_context(|| format!("write {}", tmp.display()))?;
     #[cfg(unix)]
     {
@@ -27,8 +37,8 @@ pub(crate) fn save_user_recipe_to(dir: &Path, recipe: &Recipe) -> Result<PathBuf
         fs::set_permissions(&tmp, fs::Permissions::from_mode(0o600))
             .with_context(|| format!("chmod {}", tmp.display()))?;
     }
-    fs::rename(&tmp, &path).with_context(|| format!("rename {}", path.display()))?;
-    Ok(path)
+    fs::rename(&tmp, path).with_context(|| format!("rename {}", path.display()))?;
+    Ok(())
 }
 
 #[cfg(test)]

@@ -150,6 +150,11 @@ impl App {
         self.config_dir.join("recipes")
     }
 
+    /// 额度脚本目录（复制厂商时脚本副本落这里）。
+    pub(crate) fn scripts_dir(&self) -> PathBuf {
+        self.config_dir.join("scripts")
+    }
+
     /// 当前焦点厂商（provider_filter 生效时 selected_provider 是过滤后视图的下标）。
     pub fn current_provider_id(&self) -> Option<&str> {
         let filtered = self.provider_ids_filtered();

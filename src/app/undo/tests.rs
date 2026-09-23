@@ -237,14 +237,148 @@ fn labels_read_naturally() {
     assert_eq!(
         UndoAction::ProviderCreated {
             id: "relay".into(),
+            path: Path::new("/tmp/relay.yaml").to_path_buf(),
             script_copy: None,
             copied: true
         }
         .label(),
         "复制厂商 relay"
     );
+    // 带脚本副本时 toast 要说明脚本名（否则用户不知道文件一起没了）
+    assert_eq!(
+        UndoAction::ProviderCreated {
+            id: "relay".into(),
+            path: Path::new("/tmp/relay.yaml").to_path_buf(),
+            script_copy: Some(Path::new("/tmp/relay-copy-quota.sh").to_path_buf()),
+            copied: true
+        }
+        .label(),
+        "复制厂商 relay（含脚本 relay-copy-quota.sh）"
+    );
     assert_eq!(
         UndoAction::ProviderDeleted { recipe: deleted }.label(),
         "删除厂商 relay"
     );
+}
+
+// ---- 补充：失败序 / 多步时序 / 状态清理 / 幂等 ----
+
+/// 编辑“已有用户 YAML”的厂商（ProviderUpdated 的 else 分支）：撤销要按旧内容重写。
+#[test]
+fn undo_provider_edit_of_user_recipe_rewrites_old_content() {
+    let mut app = app_with(&[("p", &[])], "edit-user");
+    app.focus = Focus::Providers;
+    // 先真存一份用户 YAML（origin=Some）
+    app.save_provider_form(
+        &provider_form("relay", "原名", "https://a.example.com", ""),
+        None,
+    );
+    app.undo_stack.clear();
+    // 再编辑它
+    app.save_provider_form(
+        &provider_form("relay", "改名", "https://b.example.com", ""),
+        Some("relay"),
+    );
+    assert_eq!(app.recipes["relay"].name, "改名");
+    let yaml = app.config_dir.join("recipes/relay.yaml");
+    assert!(fs::read_to_string(&yaml).unwrap().contains("改名"));
+
+    app.undo();
+    assert_eq!(app.recipes["relay"].name, "原名", "旧内容要写回");
+    assert_eq!(app.recipes["relay"].base_url, "https://a.example.com");
+    let text = fs::read_to_string(&yaml).unwrap();
+    assert!(
+        text.contains("原名") && !text.contains("改名"),
+        "YAML 要回退: {text}"
+    );
+    assert!(app.recipes["relay"].origin.is_some(), "仍是用户 recipe");
+    // 磁盘回读应与内存一致
+    let mut reloaded = HashMap::new();
+    crate::recipe::load_dir(&app.config_dir.join("recipes"), &mut reloaded).unwrap();
+    assert_eq!(reloaded["relay"].name, "原名");
+}
+
+/// 撤销厂商配置变更后，该厂商的缓存探活/额度状态必须清掉（旧数字不可信）。
+#[test]
+fn undo_provider_edit_drops_stale_states_but_keeps_keys() {
+    let mut app = app_with(&[("p", &["main"])], "drop-states");
+    app.focus = Focus::Providers;
+    app.states.insert(
+        "p.main".into(),
+        crate::app::KeyState {
+            health: crate::probe::Health::Live { ms: 42 },
+            ..Default::default()
+        },
+    );
+    app.save_provider_form(
+        &provider_form("p", "改名", "https://p2.example.com", ""),
+        Some("p"),
+    );
+    app.undo();
+    assert!(!app.states.contains_key("p.main"), "旧探活结果要丢弃");
+    assert_eq!(app.keys.len(), 1, "撤销厂商配置不应动密钥");
+    assert_eq!(app.recipes["p"].name, "p 假厂商");
+}
+
+/// 多步时序：复制 → 编辑副本 → 撤销编辑 → 撤销复制（LIFO，文件逐步清干净）。
+#[test]
+fn undo_walks_back_copy_then_edit_in_order() {
+    let mut app = app_with(&[("p", &[])], "multi-step");
+    app.focus = Focus::Providers;
+    app.duplicate_selected_provider();
+    let copied_yaml = app.config_dir.join("recipes/p-copy.yaml");
+    assert!(copied_yaml.is_file());
+
+    app.focus = Focus::Providers;
+    app.save_provider_form(
+        &provider_form("p-copy", "改了", "https://c.example.com", ""),
+        Some("p-copy"),
+    );
+    assert_eq!(app.recipes["p-copy"].name, "改了");
+
+    app.undo(); // 撤销编辑：副本回到复制时的内容
+    assert_eq!(app.recipes["p-copy"].name, "p 假厂商 副本");
+    assert!(copied_yaml.is_file(), "副本文件还在");
+
+    app.undo(); // 撤销复制：YAML 与内存条目都清掉
+    assert!(!copied_yaml.exists(), "复制出的 YAML 要删掉");
+    assert!(!app.recipes.contains_key("p-copy"));
+    assert!(app.undo_stack.is_empty());
+    assert!(!app.provider_ids.contains(&"p-copy".to_string()));
+}
+
+/// 外部已把文件删了：撤销要幂等成功（不能报错卡住）。
+#[test]
+fn undo_is_idempotent_when_target_file_already_gone() {
+    let mut app = app_with(&[("p", &[])], "idempotent");
+    app.focus = Focus::Providers;
+    app.save_provider_form(
+        &provider_form("relay", "中转", "https://r.example.com", ""),
+        None,
+    );
+    let yaml = app.config_dir.join("recipes/relay.yaml");
+    fs::remove_file(&yaml).unwrap(); // 模拟被外部删掉/同步工具移走
+    app.undo();
+    assert!(
+        app.toast_text().unwrap().starts_with("已撤销"),
+        "已不存在的文件不应让撤销失败: {:?}",
+        app.toast_text()
+    );
+    assert!(!app.recipes.contains_key("relay"));
+    assert!(app.undo_stack.is_empty(), "成功后历史条目出栈");
+}
+
+/// 跨厂商改名：KeyUpdated 记的是改后 id，撤销后旧 provider 的条目要回来。
+#[tokio::test]
+async fn undo_key_rename_across_providers() {
+    let mut app = app_with(&[("p", &["main"]), ("q", &[])], "cross-provider");
+    let mut form = key_form("main", "sk-moved");
+    form.fields[0] = Field::select("厂商", vec!["p".into(), "q".into()], 1, "←/→ 切换");
+    app.save_key_form(&form, Some("p.main"));
+    assert_eq!(app.keys[0].id(), "q.main");
+
+    app.undo();
+    assert_eq!(app.keys.len(), 1, "不能留下 q.main + p.main 两条");
+    assert_eq!(app.keys[0].id(), "p.main");
+    assert_eq!(on_disk(&app)[0].id(), "p.main");
 }

@@ -2,6 +2,7 @@
 
 pub use script::ScriptSpec;
 pub(crate) use store::save_user_recipe_to;
+pub(crate) use store::write_recipe_file;
 pub use store::{delete_user_recipe, user_recipes_dir};
 
 mod dup;
@@ -14,7 +15,7 @@ use std::collections::HashMap;
 use std::fs;
 use std::path::{Path, PathBuf};
 
-use anyhow::{Context, Result};
+use anyhow::{Context, Result, bail};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
@@ -103,6 +104,15 @@ fn default_get() -> String {
     "GET".into()
 }
 
+/// 厂商标识的合法字符集：小写字母、数字、`-`。表单/CLI/复制/加载都用这一处判断，
+/// 也是路径安全的前提（id 会参与 `<id>.yaml` 拼路径，不能含分隔符或 `..`）。
+pub fn is_valid_id(id: &str) -> bool {
+    !id.is_empty()
+        && id
+            .chars()
+            .all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || c == '-')
+}
+
 pub fn load_recipes() -> Result<HashMap<String, Recipe>> {
     load_recipes_with(&user_recipes_dir())
 }
@@ -158,6 +168,13 @@ fn insert_yaml(
     let mut recipe: Recipe =
         serde_yaml::from_str(raw).with_context(|| format!("parse {origin}"))?;
     recipe.normalize();
+    // id 会参与 `<id>.yaml` 拼路径，加载期就拦住手写 YAML 里的非法值（含 ../）
+    if !is_valid_id(&recipe.id) {
+        bail!(
+            "{origin}: 非法厂商 id「{}」（只允许小写字母、数字、-）",
+            recipe.id
+        );
+    }
     recipe.origin = path;
     map.insert(recipe.id.clone(), recipe);
     Ok(())
@@ -223,6 +240,30 @@ mod tests {
             ("a".to_string(), "{b}".to_string()),
             ("b".to_string(), "x".to_string()),
         ])
+    }
+
+    #[test]
+    fn invalid_recipe_id_is_rejected_at_load() {
+        // id 参与 `<id>.yaml` 拼路径：手写 YAML 里带 ../ 或大写必须在加载期就拦住
+        assert!(is_valid_id("relay-copy-2"));
+        for bad in ["../evil", "a/b", "Relay", "", "a b", "."] {
+            assert!(!is_valid_id(bad), "应判定非法: {bad:?}");
+        }
+        let dir = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+            .join("target")
+            .join(format!("apim-invalid-id-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        std::fs::write(
+            dir.join("evil.yaml"),
+            "id: ../evil\nname: x\nbase_url: 'https://x'\nauth: {kind: bearer}\n",
+        )
+        .unwrap();
+        let mut map = HashMap::new();
+        let err = load_dir(&dir, &mut map).expect_err("非法 id 应报错");
+        assert!(err.to_string().contains("非法厂商 id"), "{err}");
+        assert!(map.is_empty());
+        let _ = std::fs::remove_dir_all(&dir);
     }
 
     #[test]

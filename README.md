@@ -26,7 +26,7 @@ apim
 | `e` | 编辑厂商（名称 / Base URL / 主页 / 探活 / 额度） | 编辑密钥（别名 / 分组 / token） |
 | `d` | 删除厂商（须先删光它下面的密钥） | 删除密钥 |
 | `c` | 复制 Base URL | 复制密钥 |
-| `y` | 复制厂商：整份 recipe 另存为新厂商（id 自动 `<id>-copy`，名称加「副本」），绑定的外部额度脚本复制成独立文件，改两边的脚本互不影响；密钥不跟随 | — |
+| `y` | 复制厂商：整份 recipe 另存为新厂商（id 自动 `<id>-copy`，名称加「副本」），绑定的外部额度脚本复制成独立文件，改两边的脚本互不影响；`secrets.toml` 里的密钥不跟随 | — |
 | `i` | 厂商详情（鉴权 / 端点 / 额度脚本 / 来源 / vars，值不外显） | 密钥详情（`r` 显隐完整 token，`c` 复制） |
 | `Enter` | 用默认浏览器打开厂商主页（控制面板） | — |
 | `m` | — | 用**当前选中的这把 key** 拉取它的模型列表（模型可见性随 key/分组不同；弹窗内 `/` 聚焦搜索框实时过滤、`Esc` 退出搜索回到列表（过滤保留）、`j/k` 滚动、`c` 复制模型名、`Esc` 关闭弹窗） |
@@ -55,7 +55,7 @@ apim
 
 **删除（`d`）**：都弹确认框。厂商下面还有密钥时会拒绝，先删密钥。内置厂商（DeepSeek / OpenAI / Moonshot AI / OpenRouter）不可删除，但可以 `e` 编辑覆盖（会在用户目录生成同名 YAML）。
 
-**复制（厂商栏 `y`）**：把选中厂商整份复制成新厂商——auth/vars/探活路径/额度绑定全带走，id 自动取 `<源id>-copy`（被占则 `-copy-2`…），名称加「副本」后缀。绑定了外部额度脚本的，脚本**文件本身复制一份**到 `~/.config/apim/scripts/`（命名跟随新 id，如 `glm-quota.sh` → `glm-copy-quota.sh`），新厂商指向新文件，之后改脚本互不影响；没绑脚本或内联 `run` 就没有文件要复制。密钥不跟随（复制的是协议配置，不是凭据），复制完按 `a` 给新厂商配自己的 key。
+**复制（厂商栏 `y`）**：把选中厂商整份复制成新厂商——auth/vars/探活路径/额度绑定全带走（`vars` 里可能存的访问令牌也会一起复制），id 自动取 `<源id>-copy`（被占则 `-copy-2`…），名称加「副本」后缀。绑定了外部额度脚本的，脚本**文件本身复制一份**到 `~/.config/apim/scripts/`（命名跟随新 id，如 `glm-quota.sh` → `glm-copy-quota.sh`；同名已存在则顺延 `-2`、`-3`，绝不覆盖），新厂商指向新文件，之后改脚本互不影响；没绑脚本或内联 `run` 就没有文件要复制。`secrets.toml` 里的密钥**不**跟随（复制的是协议配置，不是凭据），复制完按 `a` 给新厂商配自己的 key。
 
 **撤销（`Ctrl+Z`）**：本次打开面板后的写操作都进历史（新增/修改/删除厂商、密钥，以及复制厂商连带产生的 YAML / 脚本副本），在主界面按 `Ctrl+Z` 逐步回退最近一步——内存和磁盘一起回退，底部 toast 会说明撤销了哪一步（弹窗内不响应）。只读动作（探活、复制到剪贴板、打开主页、浏览/搜索）不进历史；历史是本次会话的，退出 TUI 即清空。
 
@@ -82,7 +82,7 @@ TUI 管人，CLI 管机器：`cargo install --path .` 之后所有操作都能�
 | `apim provider add <id> --name <名> --base-url <URL> [--homepage <主页URL>\|none] [--health <路径>\|none] [--script <脚本路径>\|none]` | 建厂商 |
 | `apim provider set <id> [--name <名>] [--base-url <URL>] [--homepage <主页URL>\|none] [--health <路径>\|none] [--script <脚本路径>\|none]` | 改厂商（只动传了的字段） |
 | `apim provider rm <id> [--force]` | 删厂商（有密钥时拒绝，`--force` 连带删密钥；内置不可删） |
-| `apim provider copy <源id> [新id] [--name 名]` | 整份复制厂商（auth/vars/探活/额度全带走，密钥不跟随）；外部额度脚本复制成独立文件（命名跟随新 id，不引用原脚本）；新 id 缺省 `<源id>-copy`，被占自动顺延 |
+| `apim provider copy <源id> [新id] [--name 名]` | 整份复制厂商（auth/vars/探活/额度全带走，`secrets.toml` 里的密钥不跟随）；外部额度脚本复制成独立文件（命名跟随新 id，同名已存在则顺延 `-2`）；新 id 缺省 `<源id>-copy`，被占自动顺延 |
 | `apim key ls [<provider>] [--json]` | 列密钥（token 掩码显示） |
 | `apim key add <provider> <别名> [--group <分组>]` | 加密钥；已存在则更新 token |
 | `apim key set <厂商.别名> [--alias <新别名>] [--group <分组>\|none]` | 改别名 / 分组 |

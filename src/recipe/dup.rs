@@ -29,7 +29,7 @@ pub fn duplicate_recipe(
 ) -> Result<(Recipe, Option<PathBuf>)> {
     let new_id = resolve_new_id(recipes, &src.id, new_id)?;
     let name = match new_name {
-        Some(n) if !n.is_empty() => n.to_string(),
+        Some(n) if !n.trim().is_empty() => n.trim().to_string(),
         Some(_) => bail!("新名称不能为空"),
         None => format!("{} 副本", src.name),
     };
@@ -64,13 +64,7 @@ fn resolve_new_id(
 ) -> Result<String> {
     match explicit {
         Some(id) => {
-            if id.is_empty() {
-                bail!("新 ID 不能为空");
-            }
-            if !id
-                .chars()
-                .all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || c == '-')
-            {
+            if !super::is_valid_id(id) {
                 bail!("新 ID 只能用小写字母、数字、-");
             }
             if recipes.contains_key(id) {
@@ -117,13 +111,34 @@ fn copy_balance_script(
         None => format!("{new_id}-{file}"),
     };
     fs::create_dir_all(scripts_dir).with_context(|| format!("mkdir {}", scripts_dir.display()))?;
-    let target = scripts_dir.join(target_name);
-    if target.exists() {
-        bail!("目标脚本已存在：{}", target.display());
-    }
+    // 同名残留（例如删掉副本厂商后遗留的脚本）不报错也不覆盖，顺延计数
+    let target = unique_script_target(scripts_dir, &target_name);
     // fs::copy 连权限位一起复制（可执行位保住，recipe YAML 本身仍是 600）。
     fs::copy(&source, &target).with_context(|| format!("copy → {}", target.display()))?;
     Ok(Some((tilde_path(&target), target)))
+}
+
+/// 目标文件名被占时在扩展名前顺延（`x-quota.sh` → `x-quota-2.sh`）：
+/// 与 resolve_new_id 同策略——绝不覆盖已有文件，也不会因残留文件卡死复制。
+fn unique_script_target(scripts_dir: &Path, name: &str) -> PathBuf {
+    let candidate = scripts_dir.join(name);
+    if !candidate.exists() {
+        return candidate;
+    }
+    let path = Path::new(name);
+    let stem = path.file_stem().and_then(|s| s.to_str()).unwrap_or(name);
+    let ext = path.extension().and_then(|s| s.to_str());
+    for n in 2.. {
+        let cand_name = match ext {
+            Some(ext) => format!("{stem}-{n}.{ext}"),
+            None => format!("{stem}-{n}"),
+        };
+        let cand = scripts_dir.join(cand_name);
+        if !cand.exists() {
+            return cand;
+        }
+    }
+    unreachable!()
 }
 
 /// $HOME 下的绝对路径缩写成 ~/ 前缀（与 recipe 里手写脚本的惯例一致）。
@@ -138,229 +153,4 @@ fn tilde_path(path: &Path) -> String {
 }
 
 #[cfg(test)]
-mod tests {
-    use std::collections::HashMap;
-    use std::fs;
-    use std::os::unix::fs::PermissionsExt;
-    use std::path::{Path, PathBuf};
-
-    use super::super::{Auth, AuthKind, ScriptSpec, load_dir};
-    use super::*;
-
-    fn temp_dir(name: &str) -> PathBuf {
-        let dir = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-            .join("target")
-            .join(format!("apim-dup-{name}-{}", std::process::id()));
-        let _ = fs::remove_dir_all(&dir);
-        fs::create_dir_all(&dir).unwrap();
-        dir
-    }
-
-    /// 造一个最小可用 recipe；脚本与名称由用例自行覆盖。
-    fn base_recipe(id: &str) -> Recipe {
-        Recipe {
-            id: id.into(),
-            name: format!("{id} 站"),
-            base_url: "https://relay.example.com/v1".into(),
-            homepage: Some("https://console.example.com".into()),
-            models_url: None,
-            supports_groups: false,
-            vars: HashMap::from([("access_token".to_string(), "at-1".to_string())]),
-            auth: Auth {
-                kind: AuthKind::Bearer,
-                header: None,
-                prefix: None,
-                query_param: None,
-            },
-            health: None,
-            balance: None,
-            origin: None,
-        }
-    }
-
-    /// 在 scripts_dir 里造一个可执行的源脚本，返回绝对路径。
-    fn real_script(scripts_dir: &Path, name: &str, body: &str) -> PathBuf {
-        fs::create_dir_all(scripts_dir).unwrap();
-        let path = scripts_dir.join(name);
-        fs::write(&path, body).unwrap();
-        fs::set_permissions(&path, fs::Permissions::from_mode(0o755)).unwrap();
-        path
-    }
-
-    fn with_script(mut r: Recipe, script: &Path, timeout_secs: Option<u64>) -> Recipe {
-        r.balance = Some(ScriptSpec {
-            command: Some(script.display().to_string()),
-            run: None,
-            shell: None,
-            timeout_secs,
-        });
-        r
-    }
-
-    fn one_recipe_map(recipe: &Recipe) -> HashMap<String, Recipe> {
-        HashMap::from([(recipe.id.clone(), recipe.clone())])
-    }
-
-    #[test]
-    fn duplicate_copies_recipe_and_script_as_independent_file() {
-        let recipes_dir = temp_dir("full");
-        let scripts_dir = temp_dir("full-scripts");
-        let src_script = real_script(&scripts_dir, "my-relay-quota.sh", "#!/bin/sh\necho q\n");
-        let src = with_script(base_recipe("my-relay"), &src_script, Some(20));
-        save_user_recipe_to(&recipes_dir, &src).unwrap();
-        let map = one_recipe_map(&src);
-
-        let (recipe, script_copy) =
-            duplicate_recipe(&map, &src, None, None, &recipes_dir, &scripts_dir)
-                .expect("复制应成功");
-
-        // 新 id / 默认名称 / origin 指向新 YAML；vars / timeout / homepage 全带走
-        assert_eq!(recipe.id, "my-relay-copy");
-        assert_eq!(recipe.name, "my-relay 站 副本");
-        assert_eq!(
-            recipe.origin.as_deref(),
-            Some(recipes_dir.join("my-relay-copy.yaml").as_path())
-        );
-        assert_eq!(
-            recipe.vars.get("access_token").map(String::as_str),
-            Some("at-1")
-        );
-        assert_eq!(
-            recipe.homepage.as_deref(),
-            Some("https://console.example.com")
-        );
-
-        // 脚本被复制成独立文件（命名跟随新 id），内容与可执行位保留
-        let copied = script_copy.as_ref().expect("脚本应被复制");
-        assert_eq!(*copied, scripts_dir.join("my-relay-copy-quota.sh"));
-        assert_eq!(fs::read_to_string(copied).unwrap(), "#!/bin/sh\necho q\n");
-        let mode = fs::metadata(copied).unwrap().permissions().mode();
-        assert!(mode & 0o111 != 0, "可执行位要保留: {mode:o}");
-        let balance = recipe.balance.as_ref().unwrap();
-        let stored_cmd = balance.command.as_deref().unwrap();
-        assert_eq!(
-            crate::probe::expand_tilde(stored_cmd),
-            copied.display().to_string(),
-            "存储值（可能是 ~/ 缩写）展开后应指向新脚本文件"
-        );
-        assert_eq!(balance.timeout_secs, Some(20));
-
-        // 原厂商与原脚本分毫未动
-        let mut reloaded = HashMap::new();
-        load_dir(&recipes_dir, &mut reloaded).unwrap();
-        assert_eq!(reloaded.len(), 2, "新 YAML 落盘且原 YAML 还在");
-        assert_eq!(
-            reloaded["my-relay"].balance.as_ref().unwrap().command,
-            Some(src_script.display().to_string())
-        );
-
-        // 再复制一次：自动顺延 -copy-2
-        let mut map2 = map.clone();
-        map2.insert("my-relay-copy".into(), recipe.clone());
-        let (second, second_script) =
-            duplicate_recipe(&map2, &src, None, None, &recipes_dir, &scripts_dir).unwrap();
-        assert_eq!(second.id, "my-relay-copy-2");
-        assert_eq!(
-            second_script.as_ref().unwrap(),
-            &scripts_dir.join("my-relay-copy-2-quota.sh")
-        );
-    }
-
-    #[test]
-    fn duplicate_explicit_id_and_name() {
-        let recipes_dir = temp_dir("explicit");
-        let scripts_dir = temp_dir("explicit-scripts");
-        let src = base_recipe("my-relay"); // 无脚本：验证「没有就不复制」
-        let map = one_recipe_map(&src);
-        let (recipe, script_copy) = duplicate_recipe(
-            &map,
-            &src,
-            Some("backup"),
-            Some("备份"),
-            &recipes_dir,
-            &scripts_dir,
-        )
-        .unwrap();
-        assert_eq!(recipe.id, "backup");
-        assert_eq!(recipe.name, "备份");
-        assert!(script_copy.is_none(), "没绑脚本就不复制");
-        assert!(recipe.balance.is_none());
-
-        // 冲突 / 非法 id / 空名都要拦
-        assert!(
-            duplicate_recipe(
-                &map,
-                &src,
-                Some("my-relay"),
-                None,
-                &recipes_dir,
-                &scripts_dir
-            )
-            .is_err()
-        );
-        assert!(
-            duplicate_recipe(&map, &src, Some("Bad_ID"), None, &recipes_dir, &scripts_dir).is_err()
-        );
-        assert!(
-            duplicate_recipe(
-                &map,
-                &src,
-                Some("ok2"),
-                Some(""),
-                &recipes_dir,
-                &scripts_dir
-            )
-            .is_err()
-        );
-    }
-
-    #[test]
-    fn duplicate_inline_run_and_dangling_command_need_no_file() {
-        let recipes_dir = temp_dir("inline");
-        let scripts_dir = temp_dir("inline-scripts");
-
-        // 内联 run：内容就在 YAML 里，没有文件要复制，原样带走
-        let mut inline = base_recipe("my-relay");
-        inline.balance = Some(ScriptSpec {
-            command: None,
-            run: Some("echo 1".into()),
-            shell: Some("/bin/zsh".into()),
-            timeout_secs: None,
-        });
-        let (recipe, script_copy) = duplicate_recipe(
-            &one_recipe_map(&inline),
-            &inline,
-            None,
-            None,
-            &recipes_dir,
-            &scripts_dir,
-        )
-        .unwrap();
-        assert!(script_copy.is_none());
-        let spec = recipe.balance.as_ref().unwrap();
-        assert_eq!(spec.command, None);
-        assert_eq!(spec.run.as_deref(), Some("echo 1"));
-        assert_eq!(spec.shell.as_deref(), Some("/bin/zsh"));
-
-        // 悬空 command（脚本文件不存在）：不报错，引用原样保留
-        let dangling = with_script(base_recipe("my-relay"), Path::new("/no/such/file.sh"), None);
-        let (recipe, script_copy) = duplicate_recipe(
-            &one_recipe_map(&dangling),
-            &dangling,
-            Some("d2"),
-            None,
-            &recipes_dir,
-            &scripts_dir,
-        )
-        .unwrap();
-        assert!(script_copy.is_none());
-        assert_eq!(
-            recipe.balance.as_ref().unwrap().command.as_deref(),
-            Some("/no/such/file.sh")
-        );
-        // scripts_dir 即使被 mkdir 也不能凭空多出文件
-        if scripts_dir.exists() {
-            assert!(fs::read_dir(&scripts_dir).unwrap().count() == 0);
-        }
-    }
-}
+mod tests;
