@@ -11,6 +11,11 @@ pub fn user_recipes_dir() -> PathBuf {
     crate::config::config_dir().join("recipes")
 }
 
+/// 额度脚本目录：~/.config/apim/scripts/（约定位置，复制厂商时脚本落这里）。
+pub fn user_scripts_dir() -> PathBuf {
+    crate::config::config_dir().join("scripts")
+}
+
 /// 写入用户 recipe 目录，返回文件路径。
 pub fn save_user_recipe(recipe: &Recipe) -> Result<PathBuf> {
     save_user_recipe_to(&user_recipes_dir(), recipe)

@@ -180,6 +180,9 @@ fn handle_key(app: &mut App, key: KeyEvent) {
             KeyCode::Char('r') => app.refresh_current_provider(),
             KeyCode::Char('a') => app.open_add(),
             KeyCode::Char('e') => app.open_edit(),
+            KeyCode::Char('y') if app.focus == Focus::Providers => {
+                app.duplicate_selected_provider()
+            }
             KeyCode::Char('i') => app.open_inspector(),
             KeyCode::Char('d') => app.open_delete(),
             KeyCode::Char('j') | KeyCode::Down => app.move_down(),

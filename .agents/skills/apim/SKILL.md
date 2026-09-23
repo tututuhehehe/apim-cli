@@ -15,6 +15,7 @@ apim provider ls [--json]
 apim provider add <id> --name <名> --base-url <URL> [--homepage <主页URL>|none] [--health <路径>|none] [--script <脚本路径>|none]
 apim provider set <id> [--name <名>] [--base-url <URL>] [--homepage <主页URL>|none] [--health <路径>|none] [--script <脚本路径>|none]
 apim provider rm <id> [--force]          # 有密钥时拒绝；--force 连带删密钥；内置四家(deepseek/openai/moonshot/openrouter)不可删
+apim provider copy <源id> [新id] [--name 名]  # 整份复制厂商；外部额度脚本 fs::copy 成独立文件（命名跟随新 id，不引用原脚本）；新 id 缺省 <源id>-copy，被占自动顺延 -copy-2；密钥不跟随
 
 # 密钥 CRUD（token 一律走 stdin，绝不进 argv / shell history）
 apim key ls [<provider>] [--json]        # token 掩码显示
@@ -32,6 +33,7 @@ apim use <厂商.别名>                     # 输出 export OPENAI_API_KEY=... 
 
 - `--script none` = 解绑额度脚本；空串（`--script ""`）同义。`--health none` = 不探活。`--homepage` 是厂商控制面板主页。
 - `provider set` 只改传了的字段；`--script` 是显式整体替换，没有「未改保留」语义。
+- `provider copy` 复制协议配置不复制密钥；绑定外部脚本时新厂商指向新副本（如 `glm-quota.sh` → `glm-copy-quota.sh`，权限位保留），没绑/内联 run/原文件丢失则无文件动作。TUI 厂商栏同功能按 `y`。
 - 坏配置（recipe 误删 / secrets 缺条目）不会锁死 CLI：命令跳过坏条目并打警告，下一次成功写盘自动清除。
 - 测试/沙盒：每条会写盘的命令都显式前缀 `APIM_CONFIG_DIR=<临时目录>`（shell 每次调用是新的，export 不跨调用），绝不碰真实 `~/.config/apim`。
 

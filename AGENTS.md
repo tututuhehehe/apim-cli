@@ -20,7 +20,7 @@ src/
 ├── browser.rs         用默认浏览器打开厂商主页（open/xdg-open，只放行 http(s)）
 ├── cli/               CLI 子命令（AI/脚本的机器接口，与 TUI 共用底层）
 │   ├── mod.rs         Args 解析（--flag 值/布尔）、Ctx（config+recipes 目录，可注入测试）、分发与帮助
-│   ├── provider.rs    provider ls/add/set/rm（--script 绑定/解绑额度脚本）
+│   ├── provider.rs    provider ls/add/set/rm/copy（--script 绑定/解绑；copy 整份复制含脚本文件）
 │   ├── keys.rs        key ls/add/set/rm（token 只走 stdin，不进 argv）
 │   ├── query.rs       status（并发探活+额度，--json）/ copy / use
 │   └── tests.rs       CLI 沙盒测试（临时目录全流程）
@@ -32,7 +32,7 @@ src/
 │   ├── mod.rs         App 结构、start、导航、探活调度
 │   ├── modal.rs       Modal 枚举 + 打开/保存分发/删除确认分发
 │   ├── keys_store.rs  密钥保存/删除（写 config.toml + secrets.toml）
-│   └── providers_store.rs  厂商保存/删除（生成/删除用户 recipe YAML）
+│   └── providers_store.rs  厂商保存/删除/整份复制（recipe YAML + 额度脚本文件）
 ├── ui/                一个面板一个文件
 │   ├── mod.rs         draw 分发 + theme + pane_block/centered
 │   ├── header.rs      顶栏/底栏（底栏按焦点显示 c 复制什么）

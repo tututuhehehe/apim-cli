@@ -271,6 +271,75 @@ async fn provider_rm_protections() {
     );
 }
 
+/// provider copy：整份复制厂商，额度脚本复制成独立文件（不引用原脚本）。
+#[tokio::test]
+async fn provider_copy_duplicates_recipe_and_script() -> Result<()> {
+    let ctx = temp_ctx("copy");
+    let body = "#!/bin/sh\necho '剩余 9/10'\n";
+    let script = fake_script(&ctx, "relay-quota.sh", body);
+    provider::run(
+        &ctx,
+        &argv(&[
+            "add",
+            "relay",
+            "--name",
+            "中转",
+            "--base-url",
+            "https://r.example.com",
+            "--script",
+            &script,
+        ]),
+    )
+    .await?;
+
+    // 自动新 id：relay → relay-copy，脚本文件同名换前缀
+    provider::run(&ctx, &argv(&["copy", "relay"])).await?;
+    let recipes = ctx.load_recipes()?;
+    let copied = recipes.get("relay-copy").expect("自动 id 应为 relay-copy");
+    assert_eq!(copied.name, "中转 副本");
+    let cmd = copied.balance.as_ref().unwrap().command.clone().unwrap();
+    assert_ne!(cmd, script, "不能引用原脚本");
+    assert!(
+        cmd.ends_with("relay-copy-quota.sh"),
+        "脚本名跟随新 id: {cmd}"
+    );
+    let cmd_file = PathBuf::from(crate::probe::expand_tilde(&cmd));
+    assert!(cmd_file.is_file(), "新脚本应落盘: {cmd}");
+    assert_eq!(fs::read_to_string(&cmd_file)?, body);
+    // 原厂商与原脚本不动
+    assert_eq!(
+        recipes["relay"]
+            .balance
+            .as_ref()
+            .unwrap()
+            .command
+            .as_deref(),
+        Some(script.as_str())
+    );
+    assert_eq!(fs::read_to_string(&script)?, body);
+
+    // 显式新 id + --name；再复制自动顺延 -copy-2
+    provider::run(&ctx, &argv(&["copy", "relay", "backup", "--name", "备份"])).await?;
+    provider::run(&ctx, &argv(&["copy", "relay"])).await?;
+    let recipes = ctx.load_recipes()?;
+    assert_eq!(recipes["backup"].name, "备份");
+    assert!(recipes.contains_key("relay-copy-2"), "自动顺延 -copy-2");
+
+    // 新 id 冲突 / 源不存在 / 空名都拦截
+    assert!(
+        provider::run(&ctx, &argv(&["copy", "relay", "backup"]))
+            .await
+            .is_err()
+    );
+    assert!(provider::run(&ctx, &argv(&["copy", "nope"])).await.is_err());
+    assert!(
+        provider::run(&ctx, &argv(&["copy", "relay", "ok3", "--name", ""]))
+            .await
+            .is_err()
+    );
+    Ok(())
+}
+
 /// 坏配置自救：CLI 的宽松加载跳过坏条目，严格版（TUI 用）整体报错。
 #[tokio::test]
 async fn cli_load_keys_is_lenient_for_broken_entries() -> Result<()> {

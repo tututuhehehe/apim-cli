@@ -15,8 +15,9 @@ pub(crate) async fn run(ctx: &Ctx, argv: &[String]) -> Result<()> {
         Some("add") => add(ctx, &args),
         Some("set") => set(ctx, &args),
         Some("rm") | Some("remove") => rm(ctx, &args),
-        Some(other) => bail!("未知子命令：provider {other}（可用 ls/add/set/rm）"),
-        None => bail!("用法：apim provider <ls|add|set|rm> ..."),
+        Some("copy") | Some("cp") => copy(ctx, &args),
+        Some(other) => bail!("未知子命令：provider {other}（可用 ls/add/set/rm/copy）"),
+        None => bail!("用法：apim provider <ls|add|set|rm|copy> ..."),
     }
 }
 
@@ -197,6 +198,35 @@ fn rm(ctx: &Ctx, args: &Args) -> Result<()> {
         ctx.save_keys(&keys)?;
     }
     println!("已删除厂商 {id}");
+    Ok(())
+}
+
+/// `provider copy <源id> [新id] [--name 名]`：整份复制厂商（auth/vars/探活/额度全带走），
+/// 外部额度脚本复制成独立文件，不引用原脚本；新 id 缺省 `<源id>-copy`。
+fn copy(ctx: &Ctx, args: &Args) -> Result<()> {
+    let Some(src_id) = args.pos(1) else {
+        bail!("用法：apim provider copy <源id> [新id] [--name 名]（新 id 缺省 <源id>-copy）");
+    };
+    let recipes = ctx.load_recipes()?;
+    let Some(src) = recipes.get(src_id) else {
+        bail!("厂商 {src_id} 不存在");
+    };
+    let (recipe, script_copy) = crate::recipe::duplicate_recipe(
+        &recipes,
+        src,
+        args.pos(2),
+        args.flag("name"),
+        &ctx.recipes_dir,
+        &ctx.config_dir.join("scripts"),
+    )?;
+    let new_id = recipe.id.clone();
+    match &script_copy {
+        Some(path) => println!(
+            "已复制厂商 {src_id} → {new_id}（额度脚本 {}）",
+            path.display()
+        ),
+        None => println!("已复制厂商 {src_id} → {new_id}（无外部额度脚本）"),
+    }
     Ok(())
 }
 

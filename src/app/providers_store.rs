@@ -1,4 +1,4 @@
-//! 厂商的保存与删除：写 ~/.config/apim/recipes/<id>.yaml。
+//! 厂商的保存、删除与整份复制：写 ~/.config/apim/recipes/<id>.yaml。
 
 use std::collections::HashMap;
 use std::time::Instant;
@@ -129,6 +129,51 @@ impl App {
             .retain(|id, _| !id.starts_with(&format!("{provider_id}.")));
         self.modal = Modal::None;
         self.rebuild_provider_list();
+    }
+
+    /// 厂商栏按 `y`：整份复制当前厂商为新用户 recipe（id 自动 `<id>-copy`，被占则顺延），
+    /// 名称加「副本」；绑定的外部额度脚本复制成独立文件，不引用原脚本。
+    /// 密钥不跟随（复制的是协议配置，不是凭据）。
+    pub(crate) fn duplicate_selected_provider(&mut self) {
+        let Some(id) = self.current_provider_id().map(String::from) else {
+            return;
+        };
+        let Some(src) = self.recipes.get(&id).cloned() else {
+            return;
+        };
+        let outcome = match recipe::duplicate_recipe(
+            &self.recipes,
+            &src,
+            None,
+            None,
+            &recipe::user_recipes_dir(),
+            &recipe::user_scripts_dir(),
+        ) {
+            Ok(outcome) => outcome,
+            Err(err) => {
+                self.toast = Some((format!("复制失败: {err}"), Instant::now()));
+                return;
+            }
+        };
+        let (recipe, script_copy) = outcome;
+        let new_id = recipe.id.clone();
+        let script_note = script_copy
+            .as_ref()
+            .and_then(|p| p.file_name())
+            .map(|f| format!("，脚本 {}", f.to_string_lossy()))
+            .unwrap_or_default();
+        self.recipes.insert(new_id.clone(), recipe);
+        self.rebuild_provider_list();
+        self.selected_provider = self
+            .provider_ids_filtered()
+            .iter()
+            .position(|p| *p == new_id)
+            .unwrap_or(self.selected_provider);
+        self.selected_key = 0;
+        self.toast = Some((
+            format!("已复制 {id} → {new_id}{script_note}"),
+            Instant::now(),
+        ));
     }
 }
 
