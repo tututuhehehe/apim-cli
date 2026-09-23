@@ -339,7 +339,7 @@ fn truncate_cols(s: &str, max_cols: usize) -> String {
 mod tests {
     use super::*;
     use crate::recipe::{HttpCall, ScriptSpec};
-    use std::collections::{HashMap, HashSet};
+    use std::collections::HashMap;
     use std::path::PathBuf;
     use std::time::Instant;
 
@@ -554,7 +554,8 @@ mod tests {
                 target,
                 reveal_token,
             },
-            inflight: HashSet::new(),
+            probe_seq: HashMap::new(),
+            next_probe_seq: 0,
             key_filter: None,
             provider_filter: None,
             tx,

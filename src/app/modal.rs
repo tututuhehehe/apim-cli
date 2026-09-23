@@ -522,7 +522,7 @@ mod tests {
     use super::*;
     use crate::config::KeyEntry;
     use crate::recipe::Recipe;
-    use std::collections::{HashMap, HashSet};
+    use std::collections::HashMap;
 
     fn one_key_app() -> App {
         let mut recipes = HashMap::new();
@@ -560,7 +560,8 @@ mod tests {
             toast: None,
             last_refresh: None,
             modal: Modal::None,
-            inflight: HashSet::new(),
+            probe_seq: HashMap::new(),
+            next_probe_seq: 0,
             key_filter: None,
             provider_filter: None,
             tx,

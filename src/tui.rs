@@ -38,7 +38,7 @@ pub(crate) async fn run_tui() -> Result<()> {
 async fn loop_tui(
     terminal: &mut ratatui::DefaultTerminal,
     app: &mut App,
-    rx: &mut tokio::sync::mpsc::UnboundedReceiver<crate::probe::ProbeResult>,
+    rx: &mut tokio::sync::mpsc::UnboundedReceiver<crate::app::ProbeMsg>,
     rx_models: &mut tokio::sync::mpsc::UnboundedReceiver<ModelsMsg>,
     events: &mut EventStream,
 ) -> Result<()> {
@@ -252,7 +252,7 @@ pub(crate) async fn run_snapshot_inspector() -> Result<()> {
     if let Some(key) = app.selected_key_entry().cloned() {
         // 清掉启动自动探测的在途标记，否则快照里「健康」行永远显示「检查中」，
         // 盖住我们注入的假探测结果
-        app.inflight.clear();
+        app.probe_seq.clear();
         app.states.insert(
             key.id(),
             KeyState {

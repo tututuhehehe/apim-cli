@@ -7,7 +7,7 @@ mod modal;
 mod providers_store;
 mod undo;
 
-use std::collections::{HashMap, HashSet, VecDeque};
+use std::collections::{HashMap, VecDeque};
 use std::path::PathBuf;
 use std::time::{Duration, Instant};
 
@@ -51,6 +51,10 @@ pub const AUTO_REFRESH_INTERVAL: Duration = Duration::from_secs(5 * 60);
 /// 模型列表拉取结果：连同 key_id 一起回传，弹窗按 key_id 匹配（不匹配丢弃）。
 pub type ModelsMsg = (String, std::result::Result<Vec<String>, String>);
 
+/// 探活/额度结果：带上**探针代际**。配置变更后旧代际的结果会被丢弃，
+/// 因此不会把按旧配置算出的数字填回面板（详见 App::apply）。
+pub type ProbeMsg = (u64, ProbeResult);
+
 pub struct App {
     pub recipes: HashMap<String, Recipe>,
     pub keys: Vec<KeyEntry>,
@@ -67,8 +71,12 @@ pub struct App {
     pub key_filter: Option<String>,
     /// 厂商过滤关键字（id/显示名包含，大小写不敏感）；只影响视图与导航。
     pub provider_filter: Option<String>,
-    pub(crate) inflight: HashSet<String>,
-    pub(crate) tx: UnboundedSender<ProbeResult>,
+    /// 在途探针：key_id → 代际号。既作「该 key 是否在探」的去重依据，
+    /// 也用于丢弃过期结果（代际不匹配即作废）。空 = 没有在途探针。
+    pub(crate) probe_seq: HashMap<String, u64>,
+    /// 探针代际发号器（单调递增）。
+    pub(crate) next_probe_seq: u64,
+    pub(crate) tx: UnboundedSender<ProbeMsg>,
     pub(crate) tx_models: UnboundedSender<ModelsMsg>,
     pub(crate) client: reqwest::Client,
     /// 下一次自动全量刷新的时间点。
@@ -83,7 +91,7 @@ pub struct App {
 impl App {
     pub fn start() -> Result<(
         App,
-        UnboundedReceiver<ProbeResult>,
+        UnboundedReceiver<ProbeMsg>,
         UnboundedReceiver<ModelsMsg>,
     )> {
         let recipes = crate::recipe::load_recipes()?;
@@ -103,7 +111,8 @@ impl App {
             modal: Modal::None,
             key_filter: None,
             provider_filter: None,
-            inflight: HashSet::new(),
+            probe_seq: HashMap::new(),
+            next_probe_seq: 0,
             tx,
             tx_models,
             client: probe::client()?,
@@ -117,8 +126,14 @@ impl App {
         Ok((app, rx, rx_models))
     }
 
-    pub fn apply(&mut self, result: ProbeResult) {
-        self.inflight.remove(&result.key_id);
+    pub fn apply(&mut self, msg: ProbeMsg) {
+        let (seq, result) = msg;
+        // 只接受「当前代际」的结果：配置变更（编辑厂商/换 token/删除/撤销）会让
+        // 旧代际作废，迟到的旧结果在此丢弃，不会把按旧配置算出的数字填回面板。
+        if self.probe_seq.get(&result.key_id) != Some(&seq) {
+            return;
+        }
+        self.probe_seq.remove(&result.key_id);
         // 密钥已删但探测仍在途：丢弃迟到结果，不在 states 里复活死条目。
         if !self.keys.iter().any(|k| k.id() == result.key_id) {
             return;
@@ -128,6 +143,21 @@ impl App {
         state.health = result.health;
         state.balance = result.balance;
         state.updated = Some(Instant::now());
+    }
+
+    /// 配置变更后作废该厂商的在途探针与缓存读数：
+    /// - 摘掉 probe_seq：已发出的旧探针结果回来时代际不匹配，会被 `apply` 丢弃；
+    /// - 清 states：旧配置算出的数字/健康状态不再可信，等下一次刷新重算。
+    pub(crate) fn invalidate_provider(&mut self, id: &str) {
+        let prefix = format!("{id}.");
+        self.probe_seq.retain(|key, _| !key.starts_with(&prefix));
+        self.states.retain(|key, _| !key.starts_with(&prefix));
+    }
+
+    /// 单条密钥的配置变更（换 token / 改名 / 删除）：作废它的在途探针与读数。
+    pub(crate) fn invalidate_key(&mut self, key_id: &str) {
+        self.probe_seq.remove(key_id);
+        self.states.remove(key_id);
     }
 
     pub fn tick(&mut self) {
@@ -142,7 +172,7 @@ impl App {
     }
 
     pub fn is_checking(&self, key_id: &str) -> bool {
-        self.inflight.contains(key_id)
+        self.probe_seq.contains_key(key_id)
     }
 
     /// 用户 recipe 目录（写盘统一走它，测试用临时目录）。
@@ -411,6 +441,16 @@ impl App {
         }
     }
 
+    /// 按**厂商 id** 刷新（配置变更后用新配置重探）。
+    /// 不依赖当前选中项，因此过滤生效时也不会探错厂商。
+    pub(crate) fn refresh_provider(&mut self, provider: &str) {
+        for idx in 0..self.keys.len() {
+            if self.keys[idx].provider == provider {
+                self.spawn_probe(idx);
+            }
+        }
+    }
+
     fn spawn_probe(&mut self, idx: usize) {
         let Some(key) = self.keys.get(idx).cloned() else {
             return;
@@ -419,15 +459,18 @@ impl App {
             return;
         };
         let id = key.id();
-        if !self.inflight.insert(id.clone()) {
+        if self.probe_seq.contains_key(&id) {
             return;
         }
+        self.next_probe_seq += 1;
+        let seq = self.next_probe_seq;
+        self.probe_seq.insert(id.clone(), seq);
         self.states.entry(id).or_default().health = Health::Checking;
         let tx = self.tx.clone();
         let client = self.client.clone();
         tokio::spawn(async move {
             let result = probe::probe(&client, &recipe, &key).await;
-            let _ = tx.send(result);
+            let _ = tx.send((seq, result));
         });
     }
 
@@ -443,13 +486,15 @@ impl App {
                 continue;
             };
             let id = key.id();
-            self.inflight.insert(id.clone());
+            self.next_probe_seq += 1;
+            let seq = self.next_probe_seq;
+            self.probe_seq.insert(id.clone(), seq);
             self.states.entry(id).or_default().health = Health::Checking;
             let client = client.clone();
-            futs.push(async move { probe::probe(&client, &recipe, &key).await });
+            futs.push(async move { (seq, probe::probe(&client, &recipe, &key).await) });
         }
-        for result in futures::future::join_all(futs).await {
-            self.apply(result);
+        for msg in futures::future::join_all(futs).await {
+            self.apply(msg);
         }
     }
 
@@ -467,6 +512,7 @@ fn text_contains(needle_lower: &str, haystack: &str) -> bool {
 pub(crate) mod tests {
     use super::*;
     use crate::recipe::Auth;
+    use std::collections::HashSet;
     use tokio::time::timeout;
 
     /// 直接构造 App：假 recipe（health=None、balance=None，probe 立即返回、零网络），
@@ -475,7 +521,7 @@ pub(crate) mod tests {
         providers: &[(&str, &[&str])],
     ) -> (
         App,
-        UnboundedReceiver<ProbeResult>,
+        UnboundedReceiver<ProbeMsg>,
         UnboundedReceiver<ModelsMsg>,
     ) {
         let mut recipes = HashMap::new();
@@ -521,7 +567,8 @@ pub(crate) mod tests {
             modal: Modal::None,
             key_filter: None,
             provider_filter: None,
-            inflight: HashSet::new(),
+            probe_seq: HashMap::new(),
+            next_probe_seq: 0,
             tx,
             tx_models,
             client: probe::client().expect("构建测试用 reqwest client"),
@@ -568,7 +615,7 @@ pub(crate) mod tests {
                 .await
                 .expect("到点 tick 应触发全量探测")
                 .expect("channel 不应关闭");
-            got.insert(msg.key_id);
+            got.insert(msg.1.key_id);
         }
         assert_eq!(
             got,
@@ -595,10 +642,10 @@ pub(crate) mod tests {
         assert_eq!(app.current_provider_id(), Some("beta"));
         app.move_up();
         assert_eq!(app.current_provider_id(), Some("alpha"));
-        // 切换厂商只读缓存：短时间内不应收到任何探测消息，也不应有 inflight
+        // 切换厂商只读缓存：短时间内不应收到任何探测消息，也不应有在途探针
         let leaked = timeout(Duration::from_millis(150), rx.recv()).await;
         assert!(leaked.is_err(), "切换厂商不应触发探测，却收到了消息");
-        assert!(app.inflight.is_empty());
+        assert!(app.probe_seq.is_empty());
     }
 
     #[tokio::test]
@@ -612,22 +659,22 @@ pub(crate) mod tests {
             until > AUTO_REFRESH_INTERVAL - Duration::from_secs(5),
             "排期偏差过大: {until:?}"
         );
-        // 收结果并 apply：inflight 清空、last_refresh 落地
+        // 收结果并 apply：在途清空、last_refresh 落地
         let msg = timeout(Duration::from_secs(2), rx.recv())
             .await
             .expect("应有一条探测结果")
             .expect("channel 不应关闭");
         app.apply(msg);
         assert!(!app.is_checking("alpha.a1"));
-        assert!(app.inflight.is_empty());
+        assert!(app.probe_seq.is_empty());
         assert!(app.last_refresh.is_some());
     }
 
     #[tokio::test]
-    async fn refresh_all_keys_dedupes_inflight_probes() {
+    async fn refresh_all_keys_dedupes_probes() {
         let (mut app, mut rx, _rx_models) = test_app(&[("alpha", &["a1", "a2"])]);
         app.refresh_all_keys();
-        // 结果尚未 apply（同步代码不 yield），inflight 仍在——第二次全量应被去重
+        // 结果尚未 apply（同步代码不 yield），在途仍在——第二次全量应被去重
         app.refresh_all_keys();
         let mut received = Vec::new();
         loop {
@@ -640,12 +687,102 @@ pub(crate) mod tests {
         assert_eq!(
             received.len(),
             2,
-            "每个 key 恰好一条结果，重复全量应被 inflight 去重"
+            "每个 key 恰好一条结果，重复全量应被在途标记去重"
         );
         for msg in received {
             app.apply(msg);
         }
-        assert!(app.inflight.is_empty());
+        assert!(app.probe_seq.is_empty());
+    }
+
+    /// 结果只接受「当前代际」：配置变更作废后，迟到结果不得回填旧数字。
+    /// 关键场景：作废后立刻重探会重新占上同一个 key id——旧结果仍必须被丢弃。
+    #[test]
+    fn apply_drops_results_from_stale_probe_generation() {
+        let (mut app, _rx, _rx_models) = test_app(&[("alpha", &["a1"])]);
+        let stale = |ms| ProbeResult {
+            key_id: "alpha.a1".into(),
+            health: Health::Live { ms },
+            balance: None,
+        };
+
+        // 没有任何在途探针 → 丢弃
+        app.apply((1, stale(7)));
+        assert!(!app.states.contains_key("alpha.a1"), "无在途探针不应落库");
+
+        // 当前代际 = 1 → 接受
+        app.probe_seq.insert("alpha.a1".into(), 1);
+        app.apply((1, stale(7)));
+        assert!(matches!(app.states["alpha.a1"].health, Health::Live { .. }));
+
+        // 配置变更：作废旧代际与读数
+        app.invalidate_provider("alpha");
+        assert!(!app.states.contains_key("alpha.a1"));
+        assert!(!app.is_checking("alpha.a1"));
+
+        // 立刻重探（新代际 2 占回同一个 key）→ 旧代际 1 的结果必须被丢弃
+        app.probe_seq.insert("alpha.a1".into(), 2);
+        app.apply((1, stale(99)));
+        assert!(
+            !app.states.contains_key("alpha.a1"),
+            "旧代际结果不得回填（哪怕新探针占着同一个 key）"
+        );
+        // 新代际的结果正常落地
+        app.apply((2, stale(11)));
+        assert!(matches!(
+            app.states["alpha.a1"].health,
+            Health::Live { ms: 11 }
+        ));
+    }
+
+    /// 保存厂商后：旧在途探针作废、旧读数清空，并按新配置立刻重探。
+    #[tokio::test]
+    async fn saving_provider_invalidates_and_reprobes() {
+        let (mut app, _rx, _rx_models) = test_app(&[("p", &["main"])]);
+        app.config_dir = test_config_dir("provider-reprobe");
+        app.focus = Focus::Providers;
+        // 模拟旧配置的探针在途（代际 1；发号器也推到 1，保证新探针拿到 2）+ 旧读数
+        app.next_probe_seq = 1;
+        app.probe_seq.insert("p.main".into(), 1);
+        app.states.insert(
+            "p.main".into(),
+            KeyState {
+                health: Health::Live { ms: 9 },
+                ..Default::default()
+            },
+        );
+        let mut form = crate::form::provider_add();
+        form.fields[0] = crate::form::Field::text("ID", "p");
+        form.fields[1] = crate::form::Field::text("名称", "改过");
+        form.fields[2] = crate::form::Field::text("Base URL", "https://p2.example.invalid");
+        form.fields[4] = crate::form::Field::text("探活路径", ""); // 不联网
+        form.fields[5] = crate::form::Field::text("脚本路径", "");
+
+        app.save_provider_form(&form, Some("p"));
+
+        assert!(
+            app.is_checking("p.main"),
+            "旧探针作废后应发新的（否则会被在途标记去重挡掉）"
+        );
+        assert!(
+            matches!(app.states["p.main"].health, Health::Checking),
+            "旧读数应清掉并转「检查中」"
+        );
+        // 旧代际（1）的迟到结果不得覆盖新探针
+        let new_seq = app.probe_seq["p.main"];
+        assert_ne!(new_seq, 1, "新探针必须是新代际");
+        app.apply((
+            1,
+            ProbeResult {
+                key_id: "p.main".into(),
+                health: Health::Live { ms: 9 },
+                balance: None,
+            },
+        ));
+        assert!(
+            matches!(app.states["p.main"].health, Health::Checking),
+            "旧代际结果不得覆盖新探针"
+        );
     }
 
     // ---- `/` 实时过滤 ------------------------------------------------------

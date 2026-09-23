@@ -115,6 +115,8 @@ impl App {
         });
         recipe.origin = Some(path);
         self.recipes.insert(id.clone(), recipe);
+        // 配置变了：作废旧读数与在途探针，再用新配置重探一遍
+        self.invalidate_provider(&id);
         self.modal = Modal::None;
         self.toast = Some((format!("已保存厂商 {id}"), Instant::now()));
         self.rebuild_provider_list();
@@ -125,6 +127,8 @@ impl App {
             .unwrap_or(self.selected_provider);
         self.selected_key = 0;
         self.focus = Focus::Keys;
+        // 用新配置重探（invalidate 已清掉旧在途，这里能真正发起）
+        self.refresh_provider(&id);
     }
 
     pub(crate) fn confirm_delete_provider(&mut self) {
@@ -144,8 +148,7 @@ impl App {
             Err(err) => self.toast = Some((format!("删除失败: {err}"), Instant::now())),
         }
         self.recipes.remove(&provider_id);
-        self.states
-            .retain(|id, _| !id.starts_with(&format!("{provider_id}.")));
+        self.invalidate_provider(&provider_id);
         self.modal = Modal::None;
         self.rebuild_provider_list();
     }

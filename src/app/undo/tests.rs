@@ -299,8 +299,8 @@ fn undo_provider_edit_of_user_recipe_rewrites_old_content() {
 }
 
 /// 撤销厂商配置变更后，该厂商的缓存探活/额度状态必须清掉（旧数字不可信）。
-#[test]
-fn undo_provider_edit_drops_stale_states_but_keeps_keys() {
+#[tokio::test]
+async fn undo_provider_edit_drops_stale_states_but_keeps_keys() {
     let mut app = app_with(&[("p", &["main"])], "drop-states");
     app.focus = Focus::Providers;
     app.states.insert(
@@ -310,14 +310,37 @@ fn undo_provider_edit_drops_stale_states_but_keeps_keys() {
             ..Default::default()
         },
     );
+    // 模拟旧配置的探针在途（代际 1；发号器同步推到 1，撤销后重探会拿到新代际）
+    app.next_probe_seq = 1;
+    app.probe_seq.insert("p.main".into(), 1);
     app.save_provider_form(
         &provider_form("p", "改名", "https://p2.example.com", ""),
         Some("p"),
     );
     app.undo();
-    assert!(!app.states.contains_key("p.main"), "旧探活结果要丢弃");
+    assert_eq!(app.recipes["p"].name, "p 假厂商", "配置要回退");
     assert_eq!(app.keys.len(), 1, "撤销厂商配置不应动密钥");
-    assert_eq!(app.recipes["p"].name, "p 假厂商");
+    // 撤销后按回退后的配置重探：旧读数已被清掉，状态是「检查中」而不是旧的 Live{42}
+    assert!(app.is_checking("p.main"), "应重新发起探测");
+    assert!(
+        matches!(app.states["p.main"].health, crate::probe::Health::Checking),
+        "旧读数要清掉"
+    );
+    // 旧代际（1）的迟到结果不得覆盖新探针
+    let new_seq = app.probe_seq["p.main"];
+    assert_ne!(new_seq, 1, "重探必须用新代际");
+    app.apply((
+        1,
+        crate::probe::ProbeResult {
+            key_id: "p.main".into(),
+            health: crate::probe::Health::Live { ms: 42 },
+            balance: None,
+        },
+    ));
+    assert!(
+        matches!(app.states["p.main"].health, crate::probe::Health::Checking),
+        "旧代际结果不得回填旧数字"
+    );
 }
 
 /// 多步时序：复制 → 编辑副本 → 撤销编辑 → 撤销复制（LIFO，文件逐步清干净）。

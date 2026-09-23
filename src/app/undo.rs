@@ -137,7 +137,7 @@ impl App {
                     }
                 }
                 self.recipes.remove(id);
-                self.drop_provider_states(id);
+                self.invalidate_provider(id);
                 if !failed.is_empty() {
                     bail!("{}", failed.join("；"));
                 }
@@ -154,7 +154,9 @@ impl App {
                     None => remove_file_if_exists(path)?,
                 }
                 self.recipes.insert(id.clone(), before.clone());
-                self.drop_provider_states(id);
+                self.invalidate_provider(id);
+                // 配置回退也是配置变更：按回退后的配置重探，避免面板停在「未检查」
+                self.refresh_provider(&before.id.clone());
             }
             UndoAction::ProviderDeleted { recipe: deleted } => {
                 // 删除只允许用户 recipe（origin 必为 Some），按原路径写回
@@ -166,18 +168,10 @@ impl App {
                 let mut restored = deleted.clone();
                 restored.origin = Some(path);
                 self.recipes.insert(restored.id.clone(), restored);
-                self.drop_provider_states(&deleted.id);
+                self.invalidate_provider(&deleted.id);
             }
         }
         Ok(())
-    }
-
-    /// 丢该厂商的缓存探测结果（配置回退后旧数字/状态不再可信，下次刷新重算）。
-    /// 注意：已发出的探针无法撤回，若“编辑后按 r → 立即撤销”可能有迟到结果
-    /// 重新填上旧配置的数字；窗口很小，且至多 5 分钟后的自动全量刷新会覆盖。
-    fn drop_provider_states(&mut self, id: &str) {
-        self.states
-            .retain(|key, _| !key.starts_with(&format!("{id}.")));
     }
 }
 

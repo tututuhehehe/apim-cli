@@ -57,7 +57,8 @@ impl App {
         }
         self.keys = next;
         if let Some(orig) = original {
-            self.states.remove(orig);
+            // 旧 token 的读数与在途探针一并作废，让下面的 refresh 真正重发
+            self.invalidate_key(orig);
         }
         match original {
             None => self.push_undo(UndoAction::KeyAdded {
@@ -114,7 +115,7 @@ impl App {
             }
             self.toast = Some((format!("已删除 {key_id}"), Instant::now()));
         }
-        self.states.remove(&key_id);
+        self.invalidate_key(&key_id);
         self.modal = Modal::None;
         // rebuild 内部会把选中项钳回（过滤后的）有效范围
         self.rebuild_provider_list();

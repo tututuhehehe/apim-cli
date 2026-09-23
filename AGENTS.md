@@ -29,7 +29,7 @@ src/
 │   ├── edit.rs        LineEdit：单行编辑（值 + 光标）
 │   └── tests.rs       表单引擎测试
 ├── app/               应用状态机
-│   ├── mod.rs         App 结构、start、导航、探活调度
+│   ├── mod.rs         App 结构、start、导航、探活调度（探针代际：配置变更后旧结果丢弃）
 │   ├── modal.rs       Modal 枚举 + 打开/保存分发/删除确认分发
 │   ├── keys_store.rs  密钥保存/删除（写 config.toml + secrets.toml）
 │   ├── undo.rs        Ctrl+Z 撤销栈（本次会话的写操作）+ 回退内存与磁盘
