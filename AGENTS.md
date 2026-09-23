@@ -32,6 +32,7 @@ src/
 │   ├── mod.rs         App 结构、start、导航、探活调度
 │   ├── modal.rs       Modal 枚举 + 打开/保存分发/删除确认分发
 │   ├── keys_store.rs  密钥保存/删除（写 config.toml + secrets.toml）
+│   ├── undo.rs        Ctrl+Z 撤销栈（本次会话的写操作）+ 回退内存与磁盘
 │   └── providers_store.rs  厂商保存/删除/整份复制（recipe YAML + 额度脚本文件）
 ├── ui/                一个面板一个文件
 │   ├── mod.rs         draw 分发 + theme + pane_block/centered

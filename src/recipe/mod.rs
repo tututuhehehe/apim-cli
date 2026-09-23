@@ -2,7 +2,7 @@
 
 pub use script::ScriptSpec;
 pub(crate) use store::save_user_recipe_to;
-pub use store::{delete_user_recipe, save_user_recipe, user_recipes_dir, user_scripts_dir};
+pub use store::{delete_user_recipe, user_recipes_dir};
 
 mod dup;
 mod script;

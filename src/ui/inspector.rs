@@ -561,6 +561,8 @@ mod tests {
             tx_models,
             client: reqwest::Client::new(),
             next_auto_refresh: Instant::now(),
+            config_dir: crate::app::tests::test_config_dir("inspector"),
+            undo_stack: std::collections::VecDeque::new(),
         }
     }
 

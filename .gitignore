@@ -4,3 +4,5 @@
 .env
 .env.*
 secrets.toml
+# pi 后台任务输出（本地运行产物，不进仓库）
+/.pi/

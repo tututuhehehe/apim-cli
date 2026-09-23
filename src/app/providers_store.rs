@@ -3,6 +3,7 @@
 use std::collections::HashMap;
 use std::time::Instant;
 
+use super::undo::UndoAction;
 use super::{App, Focus, Modal};
 use crate::form::Form;
 use crate::recipe::{self, Auth, AuthKind, HttpCall, Recipe, ScriptSpec};
@@ -20,6 +21,8 @@ impl App {
         let homepage = form.text(PF_HOMEPAGE).trim().to_string();
         let health_path = normalize_path(form.text(PF_HEALTH).trim());
         let script_cmd = form.text(PF_SCRIPT).trim().to_string();
+        // 记撤销用：编辑前的旧 recipe（origin=None 表示当时还是内置定义）
+        let before = original.and_then(|id| self.recipes.get(id).cloned());
 
         if original.is_none() {
             if id.is_empty() {
@@ -92,7 +95,7 @@ impl App {
         // 额度：脚本路径是唯一入口（决策见 merged_balance）。
         recipe.balance = merged_balance(&recipe.balance, &script_cmd);
 
-        let path = match recipe::save_user_recipe(&recipe) {
+        let path = match recipe::save_user_recipe_to(&self.recipes_dir(), &recipe) {
             Ok(path) => path,
             Err(err) => {
                 self.toast = Some((format!("保存失败: {err}"), Instant::now()));
@@ -100,6 +103,17 @@ impl App {
                 return;
             }
         };
+        self.push_undo(match before {
+            Some(prev) => UndoAction::ProviderUpdated {
+                id: id.clone(),
+                before: prev,
+            },
+            None => UndoAction::ProviderCreated {
+                id: id.clone(),
+                script_copy: None,
+                copied: false,
+            },
+        });
         recipe.origin = Some(path);
         self.recipes.insert(id.clone(), recipe);
         self.modal = Modal::None;
@@ -120,8 +134,14 @@ impl App {
         };
         let provider_id = provider_id.clone();
         let path = path.clone();
+        let removed = self.recipes.get(&provider_id).cloned();
         match recipe::delete_user_recipe(&path) {
-            Ok(()) => self.toast = Some((format!("已删除厂商 {provider_id}"), Instant::now())),
+            Ok(()) => {
+                if let Some(recipe) = removed {
+                    self.push_undo(UndoAction::ProviderDeleted { recipe });
+                }
+                self.toast = Some((format!("已删除厂商 {provider_id}"), Instant::now()));
+            }
             Err(err) => self.toast = Some((format!("删除失败: {err}"), Instant::now())),
         }
         self.recipes.remove(&provider_id);
@@ -146,8 +166,8 @@ impl App {
             &src,
             None,
             None,
-            &recipe::user_recipes_dir(),
-            &recipe::user_scripts_dir(),
+            &self.recipes_dir(),
+            &self.config_dir.join("scripts"),
         ) {
             Ok(outcome) => outcome,
             Err(err) => {
@@ -162,6 +182,11 @@ impl App {
             .and_then(|p| p.file_name())
             .map(|f| format!("，脚本 {}", f.to_string_lossy()))
             .unwrap_or_default();
+        self.push_undo(UndoAction::ProviderCreated {
+            id: new_id.clone(),
+            script_copy,
+            copied: true,
+        });
         self.recipes.insert(new_id.clone(), recipe);
         self.rebuild_provider_list();
         self.selected_provider = self

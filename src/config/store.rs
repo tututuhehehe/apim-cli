@@ -5,11 +5,7 @@ use std::path::{Path, PathBuf};
 
 use anyhow::{Context, Result};
 
-use super::{ConfigFile, KeyConfig, KeyEntry, config_dir};
-
-pub fn save_keys(keys: &[KeyEntry]) -> Result<()> {
-    save_keys_to(&config_dir(), keys)
-}
+use super::{ConfigFile, KeyConfig, KeyEntry};
 
 pub(crate) fn save_keys_to(dir: &Path, keys: &[KeyEntry]) -> Result<()> {
     fs::create_dir_all(dir).with_context(|| format!("mkdir {}", dir.display()))?;

@@ -5,8 +5,10 @@ pub use modal::{InspectorTarget, Modal, ModelsStatus, SearchTarget, filter_model
 mod keys_store;
 mod modal;
 mod providers_store;
+mod undo;
 
-use std::collections::{HashMap, HashSet};
+use std::collections::{HashMap, HashSet, VecDeque};
+use std::path::PathBuf;
 use std::time::{Duration, Instant};
 
 use anyhow::Result;
@@ -16,6 +18,8 @@ use crate::clipboard;
 use crate::config::{self, KeyEntry};
 use crate::probe::{self, BalanceSnapshot, Health, ProbeResult};
 use crate::recipe::Recipe;
+
+pub(crate) use undo::UndoAction;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Focus {
@@ -69,6 +73,11 @@ pub struct App {
     pub(crate) client: reqwest::Client,
     /// 下一次自动全量刷新的时间点。
     pub(crate) next_auto_refresh: Instant,
+    /// 配置根目录（`~/.config/apim` 或 `APIM_CONFIG_DIR`）。落盘都经它，
+    /// 测试注入临时目录，不碰真实配置。
+    pub(crate) config_dir: PathBuf,
+    /// 本次打开面板后的写操作历史（Ctrl+Z 逐步回退），只存可逆的写操作。
+    pub(crate) undo_stack: VecDeque<UndoAction>,
 }
 
 impl App {
@@ -99,6 +108,8 @@ impl App {
             tx_models,
             client: probe::client()?,
             next_auto_refresh: Instant::now() + AUTO_REFRESH_INTERVAL,
+            config_dir: config::config_dir(),
+            undo_stack: VecDeque::new(),
         };
         app.rebuild_provider_list();
         // 打开即全量刷一遍所有厂商；切换厂商只读缓存，到点自动重刷。
@@ -132,6 +143,11 @@ impl App {
 
     pub fn is_checking(&self, key_id: &str) -> bool {
         self.inflight.contains(key_id)
+    }
+
+    /// 用户 recipe 目录（写盘统一走它，测试用临时目录）。
+    pub(crate) fn recipes_dir(&self) -> PathBuf {
+        self.config_dir.join("recipes")
     }
 
     /// 当前焦点厂商（provider_filter 生效时 selected_provider 是过滤后视图的下标）。
@@ -505,9 +521,20 @@ pub(crate) mod tests {
             tx_models,
             client: probe::client().expect("构建测试用 reqwest client"),
             next_auto_refresh: Instant::now() + AUTO_REFRESH_INTERVAL,
+            config_dir: test_config_dir("app"),
+            undo_stack: VecDeque::new(),
         };
         app.rebuild_provider_list();
         (app, rx, rx_models)
+    }
+
+    /// 测试用配置目录：target/ 下的临时目录，避免任何测试写到真实 ~/.config/apim。
+    pub(crate) fn test_config_dir(name: &str) -> PathBuf {
+        let dir = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+            .join("target")
+            .join(format!("apim-app-{name}-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        dir
     }
 
     /// 已过期的触发点：取 1s 前；极端情况下（刚开机，时钟起点晚于 1s 前）退回 now，
