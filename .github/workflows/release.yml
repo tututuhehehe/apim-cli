@@ -112,4 +112,5 @@ jobs:
       - name: gh release edit --draft=false
         env:
           GH_TOKEN: ${{ github.token }}
-        run: gh release edit "${GITHUB_REF_NAME}" --draft=false --latest
+        # --repo：该 job 未 checkout，不传仓库上下文 gh 会报 not a git repository
+        run: gh release edit "${GITHUB_REF_NAME}" --draft=false --latest --repo "${GITHUB_REPOSITORY}"

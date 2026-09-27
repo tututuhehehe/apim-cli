@@ -193,7 +193,7 @@ fn history_is_capped_and_undo_walks_back_in_order() {
     assert_eq!(app.undo_stack.len(), MAX_UNDO, "超出上限丢最旧的");
     assert_eq!(
         app.undo_stack.front().map(UndoAction::label).unwrap(),
-        format!("新增密钥 p.k5"),
+        "新增密钥 p.k5",
         "保留最近 N 步"
     );
 }
