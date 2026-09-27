@@ -2,6 +2,10 @@
 
 终端里管理模型厂商 API Key：增删改查、看状态、看额度、复制密钥。
 
+<p align="center">
+  <img src="docs/images/tui-main.png" alt="apim TUI 主界面：左侧厂商列表带实时额度与延迟，右侧密钥表，底部额度详情；底栏为按键提示" width="900">
+</p>
+
 ## 启动
 
 ```bash
