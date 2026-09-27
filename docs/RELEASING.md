@@ -57,14 +57,30 @@ tar -xzf apim-vX.Y.Z-aarch64-apple-darwin.tar.gz && ./apim --version
 
 包结构：主包 `apim-cli` + 5 个平台子包 `apim-cli-<os>-<arch>`（见 `scripts/publish-npm.mjs`）。
 
-**首次发布（只能本地手动，因为 OIDC 需要包已存在）**：
+**首次发布（只能本地手动，因为 OIDC / Trusted Publisher 需要包已存在）**
 
-```bash
-npm login                        # 需要 npm 账号（免费）
-node scripts/publish-npm.mjs X.Y.Z --publish
-```
+npm 现在要求发布必须满足其一：账号开启 2FA，或使用**带 Bypass 2FA 的 granular access token**。
+npm 的 2FA 是**安全密钥 / 通行证（WebAuthn：Touch ID、Face ID、实体密钥）**，**没有 6 位验证码**，
+所以 CLI 非交互发布必须走 token：
 
-发布后到 npmjs.com 给这 6 个包各配一次 Trusted Publisher（仓库 `tututuhehehe/apim-cli`、workflow `publish-npm.yml`）。
+1. https://www.npmjs.com/settings/<你的用户名>/tokens → Generate New Token → **Granular Access Token**
+2. 填 Name、Expiration（7 天足够）、Permissions **Read and write**，
+   并钩上 ✅ **Bypass two-factor authentication (2FA)**
+3. 生成后设置到本地（令牌是凭据：别提交、别写进文档/日志）：
+
+   ```bash
+   npm config set //registry.npmjs.org/:_authToken=npm_xxxx
+   ```
+
+4. 发布，然后**撤销 token**（一次性用完即弃）：
+
+   ```bash
+   node scripts/publish-npm.mjs X.Y.Z --publish
+   npm config delete //registry.npmjs.org/:_authToken
+   ```
+
+发布后到 npmjs.com 给这 6 个包各配一次 Trusted Publisher（仓库 `tututuhehehe/apim-cli`、
+workflow `publish-npm.yml`），之后每次发版走 Actions（OIDC，免 token）。
 
 **之后每次发版**：GitHub → Actions → **Publish to npm** → Run workflow，填 `X.Y.Z`。
 该 workflow 用 OIDC 免 token 发布并带 provenance 签名。

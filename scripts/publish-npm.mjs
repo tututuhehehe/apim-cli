@@ -186,10 +186,12 @@ for (const dir of built) {
   } catch {
     console.error(
       `\napim npm：${pkgName} 发布失败。` +
-        '若为 2FA 相关（E403 / EOTP）：\n' +
-        '  · NPM_OTP 必须是验证器里「当前」的 6 位码（不是示例里的 123456）\n' +
-        '  · 或改用带 bypass 2FA 的 granular access token（npmjs.com → Access Tokens）\n' +
-        '已发布的包不会重发：换码 / 换 token 后直接重跑本命令即可。',
+        '若因 2FA 被拒（E403 / EOTP）：npm 的 2FA 是安全密钥 / 通行证，没有 6 位验证码，\n' +
+        '  非交互发布请用带 Bypass 2FA 的 granular access token：\n' +
+        '    npmjs.com → Access Tokens → Generate New Token → Granular，\n' +
+        '    勾选 Bypass two-factor authentication (2FA)、Read and write\n' +
+        '    npm config set //registry.npmjs.org/:_authToken=npm_xxxx\n' +
+        '已发布的包不会重发：配好 token 后直接重跑本命令即可。',
     );
     rmSync(work, { recursive: true, force: true });
     process.exit(1);
