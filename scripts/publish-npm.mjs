@@ -29,6 +29,8 @@ const REPO = 'tututuhehehe/apim-cli';
 const ROOT = path.resolve(import.meta.dirname, '..');
 
 // target triple → npm 子包信息（os/cpu 供 npm 自动挑选）
+// 注意：Windows 子包名为 windows 而非 win32 —— apim-cli-win32-x64 会被 npm
+// 风控报 403 "Package name triggered spam detection"（实测改名后即通过）。
 const PLATFORMS = [
   { target: 'aarch64-apple-darwin', pkg: 'apim-cli-darwin-arm64', os: 'darwin', arch: 'arm64', ext: '' },
   { target: 'x86_64-apple-darwin', pkg: 'apim-cli-darwin-x64', os: 'darwin', arch: 'x64', ext: '' },

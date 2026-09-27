@@ -5,6 +5,26 @@
 
 ## [Unreleased]
 
+## [0.1.1] - 2026-09-28
+
+### 新增
+
+- `install.sh` 一行安装脚本（macOS/Linux）：识别平台 → 下载预编译二进制 → 校验 sha256；
+  支持 `APIM_VERSION` 锁版本、`APIM_INSTALL_DIR` 指定目录
+- npm 分发：`npm install -g apim-cli` / `npx apim-cli`（主包 + 5 个平台子包）
+- Homebrew：`brew install tututuhehehe/tap/apim`
+- `cargo binstall apim` 的元数据（crate 发布到 crates.io 后可用）
+- `docs/RELEASING.md`：维护者发布手册
+
+### 修复
+
+- 测试不再依赖真实剪贴板（无显示环境如 Linux CI 会失败）
+- release workflow 的发布步骤补 `--repo`（该 job 未 checkout 时会报 not a git repository）
+
+### 变更
+
+- npm Windows 子包名 `win32` → `windows`（`win32` 会触发 npm 名称风控 spam detection）
+
 ## [0.1.0] - 2026-09-28
 
 首个公开版本。
@@ -22,5 +42,6 @@
 - `apim --version` 版本输出（供安装脚本与更新检测使用）
 - MIT 开源协议
 
-[Unreleased]: https://github.com/tututuhehehe/apim-cli/compare/v0.1.0...HEAD
+[Unreleased]: https://github.com/tututuhehehe/apim-cli/compare/v0.1.1...HEAD
+[0.1.1]: https://github.com/tututuhehehe/apim-cli/releases/tag/v0.1.1
 [0.1.0]: https://github.com/tututuhehehe/apim-cli/releases/tag/v0.1.0
