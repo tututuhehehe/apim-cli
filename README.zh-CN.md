@@ -275,6 +275,10 @@ TUI 里也可以配：厂商表单的「脚本路径」就是它；编辑时路�
 
 内置四家（DeepSeek/OpenAI/Moonshot/OpenRouter）的 recipe 编译在二进制里，但它们引用的脚本在 `~/.config/apim/scripts/`——本机已就位；换新机器时按 `docs/quota-script-prompt.md` 让 AI 重新生成，或从旧机器拷贝脚本目录。
 
+## 发布
+
+维护者用的发版流程（CI 发版、npm、Homebrew tap、回滚）见 [docs/RELEASING.md](docs/RELEASING.md)。
+
 ## License
 
 [MIT](LICENSE) © 2026 tututuhehehe

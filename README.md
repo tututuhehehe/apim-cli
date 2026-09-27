@@ -279,6 +279,10 @@ Let an AI write it: paste `docs/quota-script-prompt.md` into any agent along wit
 
 The recipes of the four built-ins (DeepSeek / OpenAI / Moonshot / OpenRouter) are compiled into the binary, but the scripts they reference live in `~/.config/apim/scripts/` and are **not** bundled with the binary. On a fresh machine, have an AI regenerate them following `docs/quota-script-prompt.md`, or copy the scripts directory from another machine.
 
+## Releasing
+
+Maintainer notes — release pipeline, npm and the Homebrew tap — are in [docs/RELEASING.md](docs/RELEASING.md).
+
 ## License
 
 [MIT](LICENSE) © 2026 tututuhehehe

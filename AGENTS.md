@@ -54,9 +54,14 @@ src/
     ├── mod.rs         Health/ProbeResult、client、http 一路（探活 + 模型列表拉取的鉴权请求）
     └── script.rs      脚本执行器（env 注入/超时 kill/stderr 截断 200/stdout 50 行上限）+ expand_tilde
 docs/
-└── quota-script-prompt.md  额度脚本代写提示词（整体复制给 AI Agent 用）
+├── quota-script-prompt.md  额度脚本代写提示词（整体复制给 AI Agent 用）
+└── RELEASING.md        维护者发布手册（发版、npm、Homebrew、回滚）
 README.md             英文说明（默认，GitHub 首页）
 README.zh-CN.md       中文说明（与英文版内容同步）
+install.sh            一行安装脚本（macOS/Linux：下载 Release 二进制 + 校验 sha256）
+npm/                  npm 分发（平台子包模型）：bin/apim.js 主包 shim
+scripts/              publish-npm.mjs（从 Release 资产组装并发布 6 个 npm 包）
+.github/workflows/    ci.yml（fmt/clippy/test/JS 检查）、release.yml（tag 发 5 平台二进制）、publish-npm.yml（手动发 npm）
 recipes/              内置 recipe ×4（deepseek/openai/moonshot/openrouter，include_str! 编译进二进制）
 ├── deepseek.yaml
 ├── openai.yaml
@@ -81,6 +86,7 @@ recipes/              内置 recipe ×4（deepseek/openai/moonshot/openrouter，
 6. **添加功能前先确认 git 状态，全程用 git 管理便于回退**。动手前 `git status` 看工作区：有未提交的旧改动就先提交或 `git stash`，别和新功能混在一起；`git log --oneline -3` 确认当前在哪个提交上，心里有可回退的锚点。功能完成（fmt+clippy+test 通过）后一次性提交：先 `git status` + `git diff --stat` 核对只包含本次功能相关文件（不混入 secrets/临时文件），再提交。要回退用 `git checkout <提交号> -- <路径>`（局部）或 `git revert`（整体）。
 7. **README 默认英文**（`README.md`），中文版在 `README.zh-CN.md`，两版内容保持同步：改一版必须同步另一版，顶部语言切换链接别删。
 8. 提交信息中文，一行主题 + 要点列表；功能一次一提交。
+9. **发版走 `docs/RELEASING.md`**：版本号单一来源是 `Cargo.toml`；打 `v*` tag 触发 5 平台构建；npm/Homebrew 按手册各自更新；不要手改 Release 资产。
 
 ## 验证命令速查
 
