@@ -93,25 +93,26 @@ node scripts/publish-npm.mjs X.Y.Z --out /tmp/apim-npm   # 只打包到 /tmp/api
 
 ## 6. 更新 Homebrew tap
 
-tap 仓库：<https://github.com/tututuhehehe/homebrew-tap>（本地克隆在 `../homebrew-tap`）。
-formula 里有 4 个 URL + sha256，需要每次发版更新：
+tap 仓库：<https://github.com/tututuhehehe/homebrew-tap>（本地 clone 在 `../homebrew-tap`）。
+一条命令完成（重算 4 平台 sha256 → 重写 formula → commit + push）：
 
 ```bash
-# 重新算 4 个平台的 sha256
-for t in aarch64-apple-darwin x86_64-apple-darwin x86_64-unknown-linux-gnu aarch64-unknown-linux-gnu; do
-  sha=$(curl -fsSL "https://github.com/tututuhehehe/apim-cli/releases/download/vX.Y.Z/apim-vX.Y.Z-$t.tar.gz" | shasum -a 256 | cut -d' ' -f1)
-  echo "$t  $sha"
-done
+scripts/update-tap.sh X.Y.Z
 ```
 
-把 `Formula/apim.rb` 里的 `version`、4 个 `url`、4 个 `sha256` 换成新值，然后：
+验证：
 
 ```bash
-cd ../homebrew-tap && git add -A && git commit -m "apim X.Y.Z" && git push
-# 本地验证
-brew update && brew upgrade apim   # 或 brew install tututuhehehe/tap/apim
+brew update && brew upgrade apim        # 或首次：brew install tututuhehehe/tap/apim
 brew test tututuhehehe/tap/apim
 ```
+
+> 手动做法（脚本失效时）：重算下面 4 个 sha256，填回 `Formula/apim.rb` 的 `version` 与 4 组 `url`/`sha256`。
+> ```bash
+> for t in aarch64-apple-darwin x86_64-apple-darwin x86_64-unknown-linux-gnu aarch64-unknown-linux-gnu; do
+>   curl -fsSL "https://github.com/tututuhehehe/apim-cli/releases/download/vX.Y.Z/apim-vX.Y.Z-$t.tar.gz" | shasum -a 256
+> done
+> ```
 
 ## 7. 回滚
 
