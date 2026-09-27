@@ -172,15 +172,28 @@ async function alreadyPublished(dir) {
 }
 
 for (const dir of built) {
+  const pkgName = path.basename(dir);
   if (publish && (await alreadyPublished(dir))) {
-    console.log(`apim npm: 跳过 ${path.basename(dir)}（该版本已存在，可续发）`);
+    console.log(`apim npm: 跳过 ${pkgName}（该版本已存在，可续发）`);
     continue;
   }
   const argv = publish
     ? ['publish', dir, '--access', 'public', ...provenance, ...otpArg]
     : ['pack', dir, '--pack-destination', packDir];
-  console.log(`apim npm: ${publish ? 'publish' : 'pack'} ${path.basename(dir)}`);
-  run('npm', argv);
+  console.log(`apim npm: ${publish ? 'publish' : 'pack'} ${pkgName}`);
+  try {
+    run('npm', argv);
+  } catch {
+    console.error(
+      `\napim npm：${pkgName} 发布失败。` +
+        '若为 2FA 相关（E403 / EOTP）：\n' +
+        '  · NPM_OTP 必须是验证器里「当前」的 6 位码（不是示例里的 123456）\n' +
+        '  · 或改用带 bypass 2FA 的 granular access token（npmjs.com → Access Tokens）\n' +
+        '已发布的包不会重发：换码 / 换 token 后直接重跑本命令即可。',
+    );
+    rmSync(work, { recursive: true, force: true });
+    process.exit(1);
+  }
 }
 
 if (!publish) {
