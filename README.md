@@ -2,23 +2,49 @@
 
 终端里管理模型厂商 API Key：增删改查、看状态、看额度、复制密钥。
 
+[![Release](https://github.com/tututuhehehe/apim-cli/actions/workflows/release.yml/badge.svg)](https://github.com/tututuhehehe/apim-cli/actions/workflows/release.yml)
+[![CI](https://github.com/tututuhehehe/apim-cli/actions/workflows/ci.yml/badge.svg)](https://github.com/tututuhehehe/apim-cli/actions/workflows/ci.yml)
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
+
 <p align="center">
   <img src="docs/images/tui-main.png" alt="apim TUI 主界面：左侧厂商列表带实时额度与延迟，右侧密钥表，底部额度详情；底栏为按键提示" width="900">
 </p>
 
-## 启动
+## 安装
+
+**预编译二进制（推荐）**：从 [Releases](https://github.com/tututuhehehe/apim-cli/releases) 下载对应平台压缩包（资产名 `apim-<tag>-<target>.tar.gz` / `.zip`，同目录附 `.sha256` 校验和），解压后把 `apim` 放进 `PATH`。
+
+```bash
+# 以 macOS Apple Silicon 为例
+tag=v0.1.0
+base="https://github.com/tututuhehehe/apim-cli/releases/download/$tag"
+curl -fsSL -O "$base/apim-$tag-aarch64-apple-darwin.tar.gz"
+tar -xzf "apim-$tag-aarch64-apple-darwin.tar.gz"
+sudo mv apim /usr/local/bin/
+```
+
+| 平台 | 资产后缀 |
+|---|---|
+| macOS Apple Silicon | `aarch64-apple-darwin` |
+| macOS Intel | `x86_64-apple-darwin` |
+| Linux x64 | `x86_64-unknown-linux-gnu` |
+| Linux arm64 | `aarch64-unknown-linux-gnu` |
+| Windows x64 | `x86_64-pc-windows-msvc`（实验性，额度脚本依赖 `sh`） |
+
+**从源码安装**：
 
 ```bash
 git clone https://github.com/tututuhehehe/apim-cli.git
 cd apim-cli
-cargo run
+cargo install --path .
 ```
 
-装到 PATH 以后可以直接敲：
+## 使用
 
 ```bash
-cargo install --path .
-apim
+apim            # 无参数：进 TUI
+apim help       # CLI 用法
+apim --version  # 版本
 ```
 
 ## 快捷键

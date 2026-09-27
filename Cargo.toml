@@ -2,7 +2,14 @@
 name = "apim"
 version = "0.1.0"
 edition = "2024"
+rust-version = "1.85"
 description = "Terminal manager for model-provider API keys"
+license = "MIT"
+repository = "https://github.com/tututuhehehe/apim-cli"
+homepage = "https://github.com/tututuhehehe/apim-cli"
+readme = "README.md"
+keywords = ["api-key", "cli", "tui", "llm", "openai"]
+categories = ["command-line-utilities", "development-tools"]
 publish = false
 
 [dependencies]

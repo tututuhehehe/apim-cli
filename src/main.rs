@@ -32,6 +32,11 @@ async fn main() -> Result<()> {
             cli::print_help();
             Ok(())
         }
+        // 版本：给安装脚本 / 包管理器 / 自更新检测用
+        Some("--version") | Some("-V") | Some("version") => {
+            cli::print_version();
+            Ok(())
+        }
         Some(_) => cli::run(&args).await,
     }
 }

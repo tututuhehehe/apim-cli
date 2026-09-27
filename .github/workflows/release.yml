@@ -1,0 +1,115 @@
+name: Release
+
+# 打 v* tag（如 v0.1.0）即触发：矩阵构建 5 个平台 → 上传到该 tag 的 Release。
+on:
+  push:
+    tags:
+      - "v*"
+
+permissions:
+  contents: write
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  # 先建一个草稿 Release，避免多个矩阵任务并发创建时打架
+  create-release:
+    name: 创建草稿 Release
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: gh release create
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release create "${GITHUB_REF_NAME}" \
+            --draft \
+            --title "${GITHUB_REF_NAME}" \
+            --generate-notes \
+            --verify-tag
+
+  build:
+    name: 构建 ${{ matrix.target }}
+    needs: create-release
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - target: aarch64-apple-darwin
+            os: macos-latest
+          - target: x86_64-apple-darwin
+            os: macos-latest
+          - target: x86_64-unknown-linux-gnu
+            os: ubuntu-latest
+          - target: aarch64-unknown-linux-gnu
+            os: ubuntu-24.04-arm
+          - target: x86_64-pc-windows-msvc
+            os: windows-latest
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: 安装 Rust 工具链
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.target }}
+
+      - name: 缓存 cargo
+        uses: Swatinem/rust-cache@v2
+        with:
+          key: ${{ matrix.target }}
+
+      - name: 编译（--locked 保证依赖版本可复现）
+        run: cargo build --release --locked --target ${{ matrix.target }}
+
+      - name: 打包（macOS / Linux）
+        if: runner.os != 'Windows'
+        shell: bash
+        run: |
+          set -euo pipefail
+          tag="${GITHUB_REF_NAME}"
+          target="${{ matrix.target }}"
+          archive="apim-${tag}-${target}.tar.gz"
+          stage="dist/apim-${tag}-${target}"
+          mkdir -p "$stage"
+          cp "target/${target}/release/apim" "$stage/apim"
+          cp README.md LICENSE "$stage/"
+          tar -C "$stage" -czf "$archive" apim README.md LICENSE
+          shasum -a 256 "$archive" > "$archive.sha256"
+          echo "archive=$archive" >> "$GITHUB_ENV"
+
+      - name: 打包（Windows）
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          $tag = "${{ github.ref_name }}"
+          $target = "${{ matrix.target }}"
+          $archive = "apim-$tag-$target.zip"
+          New-Item -ItemType Directory -Force -Path dist | Out-Null
+          Copy-Item "target/$target/release/apim.exe" "dist/apim.exe"
+          Copy-Item README.md, LICENSE dist/
+          Compress-Archive -Path dist/* -DestinationPath $archive
+          $hash = (Get-FileHash $archive -Algorithm SHA256).Hash.ToLower()
+          "$hash  $archive" | Out-File "$archive.sha256" -Encoding ascii -NoNewline
+          "archive=$archive" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+
+      - name: 上传资产到 Release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          gh release upload "${GITHUB_REF_NAME}" "$archive" "$archive.sha256" --clobber
+
+  # 全部平台上传完毕后，把草稿转正并标为 latest
+  publish-release:
+    name: 发布 Release
+    needs: build
+    runs-on: ubuntu-latest
+    steps:
+      - name: gh release edit --draft=false
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh release edit "${GITHUB_REF_NAME}" --draft=false --latest

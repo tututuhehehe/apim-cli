@@ -1,8 +1,11 @@
 //! 用系统默认浏览器打开 URL（厂商控制面板主页）。
 
+#[cfg(unix)]
 use std::process::Command;
 
-use anyhow::{Context, Result, bail};
+#[cfg(unix)]
+use anyhow::Context;
+use anyhow::{Result, bail};
 
 /// scheme 校验：只放行 http(s)（大小写不敏感，RFC 3986），
 /// 防 open 被拿去执行别的 scheme 或当 flag 注入（URL 必以字母开头）。

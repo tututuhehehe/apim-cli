@@ -131,8 +131,14 @@ pub(crate) fn print_help() {
          \x20 apim copy <厂商.别名> [--base-url]     # 复制密钥 / Base URL\n\
          \x20 apim use <厂商.别名>                   # 输出 export OPENAI_API_KEY=... （shell eval 用）\n\
          \n\
+         apim --version                            # 打印版本\n\
          别名：apim tui = 无参数；apim keys = apim key；provider list/remove = ls/rm。"
     );
+}
+
+/// 版本号取自 Cargo.toml（`CARGO_PKG_VERSION`），由 CI 打 tag 时锁定。
+pub(crate) fn print_version() {
+    println!("apim {}", env!("CARGO_PKG_VERSION"));
 }
 
 /// 从 stdin 读一行当 token（不进 argv，防 ps / shell history）。
