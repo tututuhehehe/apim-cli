@@ -18,6 +18,7 @@ import {
   mkdirSync,
   mkdtempSync,
   readdirSync,
+  readFileSync,
   rmSync,
   writeFileSync,
 } from 'node:fs';
@@ -156,10 +157,27 @@ const packDir = path.join(work, 'pack');
 mkdirSync(packDir, { recursive: true });
 // --provenance 需要 OIDC（GitHub Actions），本地手动首发布时不能加
 const provenance = process.env.GITHUB_ACTIONS ? ['--provenance'] : [];
+// 账号开了 2FA 时发布需要一次性验证码：NPM_OTP=123456（同一窗口内 6 个包复用）
+const otpArg = process.env.NPM_OTP ? [`--otp=${process.env.NPM_OTP}`] : [];
+
+// 已发布过的包直接跳过，便于验证码过期后换码续发
+async function alreadyPublished(dir) {
+  const { name } = JSON.parse(readFileSync(path.join(dir, 'package.json'), 'utf8'));
+  try {
+    const res = await fetch(`https://registry.npmjs.org/${name}/${version}`, { method: 'HEAD' });
+    return res.ok;
+  } catch {
+    return false;
+  }
+}
 
 for (const dir of built) {
+  if (publish && (await alreadyPublished(dir))) {
+    console.log(`apim npm: 跳过 ${path.basename(dir)}（该版本已存在，可续发）`);
+    continue;
+  }
   const argv = publish
-    ? ['publish', dir, '--access', 'public', ...provenance]
+    ? ['publish', dir, '--access', 'public', ...provenance, ...otpArg]
     : ['pack', dir, '--pack-destination', packDir];
   console.log(`apim npm: ${publish ? 'publish' : 'pack'} ${path.basename(dir)}`);
   run('npm', argv);
