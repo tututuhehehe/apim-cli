@@ -16,7 +16,15 @@ Manage model-provider API keys from the terminal: add, edit, delete, check healt
 
 ## Install
 
-**Prebuilt binary (recommended)** — grab the archive for your platform from [Releases](https://github.com/tututuhehehe/apim-cli/releases). Assets are named `apim-<tag>-<target>.tar.gz` (`.zip` on Windows), each with a matching `.sha256` checksum. Extract it and put `apim` on your `PATH`.
+**One-liner (macOS / Linux)** — detects your platform, downloads the matching prebuilt binary, verifies its sha256 and installs it:
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/tututuhehehe/apim-cli/main/install.sh | sh
+```
+
+`APIM_INSTALL_DIR` sets the destination (default: `/usr/local/bin` when writable, otherwise `~/.local/bin`); `APIM_VERSION` pins a version (e.g. `v0.1.0`; default is the latest release).
+
+**Manual download** — grab the archive for your platform from [Releases](https://github.com/tututuhehehe/apim-cli/releases). Assets are named `apim-<tag>-<target>.tar.gz` (`.zip` on Windows), each with a matching `.sha256` checksum. Extract it and put `apim` on your `PATH`.
 
 ```bash
 # macOS Apple Silicon example
@@ -42,6 +50,8 @@ git clone https://github.com/tututuhehehe/apim-cli.git
 cd apim-cli
 cargo install --path .
 ```
+
+Rust users can also run `cargo binstall apim` to fetch the prebuilt binary — the crate is configured for it, and it starts working once the crate is published to crates.io.
 
 ## Usage
 

@@ -12,6 +12,17 @@ keywords = ["api-key", "cli", "tui", "llm", "openai"]
 categories = ["command-line-utilities", "development-tools"]
 publish = false
 
+# cargo-binstall：直接下载 GitHub Release 里的预编译二进制，不现场编译。
+# 前置条件：crate 需先发布到 crates.io（binstall 靠 crates.io 元数据解析仓库）。
+[package.metadata.binstall]
+pkg-url = "{ repo }/releases/download/v{ version }/{ name }-v{ version }-{ target }.tar.gz"
+bin-dir = "{ bin }{ binary-ext }"
+pkg-fmt = "tgz"
+
+[package.metadata.binstall.overrides.'cfg(windows)']
+pkg-url = "{ repo }/releases/download/v{ version }/{ name }-v{ version }-{ target }.zip"
+pkg-fmt = "zip"
+
 [dependencies]
 anyhow = "1"
 arboard = "3"

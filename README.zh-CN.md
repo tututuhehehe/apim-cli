@@ -14,7 +14,15 @@
 
 ## 安装
 
-**预编译二进制（推荐）**：从 [Releases](https://github.com/tututuhehehe/apim-cli/releases) 下载对应平台压缩包（资产名 `apim-<tag>-<target>.tar.gz` / `.zip`，同目录附 `.sha256` 校验和），解压后把 `apim` 放进 `PATH`。
+**一行命令（macOS / Linux）**：自动识别平台、下载对应预编译二进制、校验 sha256 并安装：
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/tututuhehehe/apim-cli/main/install.sh | sh
+```
+
+`APIM_INSTALL_DIR` 指定安装目录（默认 `/usr/local/bin` 可写时用它，否则 `~/.local/bin`）；`APIM_VERSION` 指定版本（如 `v0.1.0`，默认最新 Release）。
+
+**手动下载**：从 [Releases](https://github.com/tututuhehehe/apim-cli/releases) 下载对应平台压缩包（资产名 `apim-<tag>-<target>.tar.gz` / `.zip`，同目录附 `.sha256` 校验和），解压后把 `apim` 放进 `PATH`。
 
 ```bash
 # 以 macOS Apple Silicon 为例
@@ -40,6 +48,8 @@ git clone https://github.com/tututuhehehe/apim-cli.git
 cd apim-cli
 cargo install --path .
 ```
+
+Rust 用户也可以 `cargo binstall apim` 直接拉预编译二进制（crate 已配好 binstall 元数据，发布到 crates.io 后即可用）。
 
 ## 使用
 
