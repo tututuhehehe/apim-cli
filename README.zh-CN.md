@@ -28,8 +28,6 @@ curl -fsSL https://raw.githubusercontent.com/tututuhehehe/apim-cli/main/install.
 npm install -g apim-cli   # 或直接跑：npx apim-cli
 ```
 
-> 尚未发布到 npm —— 包由 CI 组装发布；首次发布前请先用上面的一行命令或手动下载。
-
 **手动下载**：从 [Releases](https://github.com/tututuhehehe/apim-cli/releases) 下载对应平台压缩包（资产名 `apim-<tag>-<target>.tar.gz` / `.zip`，同目录附 `.sha256` 校验和），解压后把 `apim` 放进 `PATH`。
 
 ```bash

@@ -9,15 +9,32 @@ const { spawnSync } = require('node:child_process');
 const fs = require('node:fs');
 const path = require('node:path');
 
-const pkgName = `apim-cli-${process.platform}-${process.arch}`;
+// 平台 → 子包名。Windows 的子包叫 windows（不用 process.platform 的 win32），
+// 一是可读性，二是避开 npm 名称风控对某些模式的误判。
+const PLATFORM_PACKAGES = {
+  'darwin-arm64': 'apim-cli-darwin-arm64',
+  'darwin-x64': 'apim-cli-darwin-x64',
+  'linux-x64': 'apim-cli-linux-x64',
+  'linux-arm64': 'apim-cli-linux-arm64',
+  'win32-x64': 'apim-cli-windows-x64',
+};
+
+const platformKey = `${process.platform}-${process.arch}`;
+const pkgName = PLATFORM_PACKAGES[platformKey];
 
 let pkgDir;
-try {
-  // 通过子包的 package.json 定位其安装目录（不依赖 exports 字段）
-  pkgDir = path.dirname(require.resolve(`${pkgName}/package.json`));
-} catch {
+if (pkgName) {
+  try {
+    // 通过子包的 package.json 定位其安装目录（不依赖 exports 字段）
+    pkgDir = path.dirname(require.resolve(`${pkgName}/package.json`));
+  } catch {
+    pkgDir = undefined;
+  }
+}
+
+if (!pkgDir) {
   process.stderr.write(
-    `apim: no prebuilt binary available for ${process.platform}-${process.arch}.\n` +
+    `apim: no prebuilt binary available for ${platformKey}.\n` +
       `Install from source instead:  cargo install --path .\n` +
       `Or download manually:         https://github.com/tututuhehehe/apim-cli/releases\n`,
   );

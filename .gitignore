@@ -4,5 +4,7 @@
 .env
 .env.*
 secrets.toml
+# npm 凭据（防手滑提交令牌）
+.npmrc
 # pi 后台任务输出（本地运行产物，不进仓库）
 /.pi/

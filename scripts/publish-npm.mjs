@@ -34,7 +34,7 @@ const PLATFORMS = [
   { target: 'x86_64-apple-darwin', pkg: 'apim-cli-darwin-x64', os: 'darwin', arch: 'x64', ext: '' },
   { target: 'x86_64-unknown-linux-gnu', pkg: 'apim-cli-linux-x64', os: 'linux', arch: 'x64', ext: '' },
   { target: 'aarch64-unknown-linux-gnu', pkg: 'apim-cli-linux-arm64', os: 'linux', arch: 'arm64', ext: '' },
-  { target: 'x86_64-pc-windows-msvc', pkg: 'apim-cli-win32-x64', os: 'win32', arch: 'x64', ext: '.exe' },
+  { target: 'x86_64-pc-windows-msvc', pkg: 'apim-cli-windows-x64', os: 'win32', arch: 'x64', ext: '.exe' },
 ];
 
 const args = process.argv.slice(2);

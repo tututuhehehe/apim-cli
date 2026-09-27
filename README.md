@@ -30,8 +30,6 @@ curl -fsSL https://raw.githubusercontent.com/tututuhehehe/apim-cli/main/install.
 npm install -g apim-cli   # or run it directly: npx apim-cli
 ```
 
-> Not on npm yet — the wrapper is assembled and published from CI. Until the first publish, use the one-liner above or a manual download.
-
 **Manual download** — grab the archive for your platform from [Releases](https://github.com/tututuhehehe/apim-cli/releases). Assets are named `apim-<tag>-<target>.tar.gz` (`.zip` on Windows), each with a matching `.sha256` checksum. Extract it and put `apim` on your `PATH`.
 
 ```bash
