@@ -498,16 +498,22 @@ impl App {
     }
 
     /// 模型弹窗按 `c`：复制当前选中的模型名（过滤后视图里选中的那个）。
-    pub fn copy_selected_model(&mut self) {
+    /// 过滤后当前选中的模型名。`copy_selected_model` 与单测共用，
+    /// 让单测只验「选哪个」而不碰真实剪贴板（无显示环境会失败）。
+    pub fn selected_model_name(&self) -> Option<String> {
         let (items, filter, selected) = match &self.modal {
             Modal::Models {
                 status: ModelsStatus::Done { items, selected },
                 filter,
                 ..
             } => (items, filter, *selected),
-            _ => return,
+            _ => return None,
         };
-        let Some(name) = filter_models(items, filter).get(selected).cloned() else {
+        filter_models(items, filter).get(selected).cloned()
+    }
+
+    pub fn copy_selected_model(&mut self) {
+        let Some(name) = self.selected_model_name() else {
             return;
         };
         match clipboard::copy(&name) {
@@ -738,13 +744,12 @@ mod tests {
         );
         app.models_start_search();
         app.models_search_char('g');
-        app.copy_selected_model();
-        let toast = app
-            .toast
-            .as_ref()
-            .map(|(t, _)| t.clone())
-            .unwrap_or_default();
-        assert!(toast.contains("gpt-5"), "复制的是过滤后选中的模型: {toast}");
+        // 只断言「选中哪一个」，不碰真实剪贴板（CI / Linux 无显示环境会失败）
+        assert_eq!(
+            app.selected_model_name().as_deref(),
+            Some("gpt-5"),
+            "复制的是过滤后选中的模型"
+        );
     }
 
     #[test]
