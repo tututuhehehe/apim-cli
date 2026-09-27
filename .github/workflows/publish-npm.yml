@@ -1,0 +1,39 @@
+name: Publish to npm
+
+# 手动触发：目标版本对应的 Release 资产必须已存在（先跑完 Release 再跑这个）。
+# 首次发布必须本地 npm login 后手动跑 scripts/publish-npm.mjs <version> --publish，
+# 之后在 npmjs.com 为 6 个包配好 Trusted Publisher，即可用本 workflow 免 token 发布。
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: "版本号（如 0.1.0，不带 v；需已有对应 Release）"
+        required: true
+        type: string
+
+permissions:
+  contents: read
+  id-token: write # npm Trusted Publishing (OIDC) + provenance 签名
+
+jobs:
+  publish:
+    name: 组装并发布 npm 包
+    runs-on: ubuntu-latest
+    steps:
+      - name: 检出对应 tag（用该版本的组装脚本）
+        uses: actions/checkout@v4
+        with:
+          ref: v${{ inputs.version }}
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+        # 不设 registry-url：避免生成带 NODE_AUTH_TOKEN 占位的 .npmrc，让 npm 走 OIDC
+
+      - name: 升级 npm（Trusted Publishing 需 >= 11.5.1）
+        run: npm install -g npm@latest
+
+      - name: 组装并发布
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: node scripts/publish-npm.mjs "${{ inputs.version }}" --publish
