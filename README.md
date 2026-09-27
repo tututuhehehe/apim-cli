@@ -5,7 +5,8 @@
 ## 启动
 
 ```bash
-cd ~/Documents/VIBE/api管理
+git clone https://github.com/tututuhehehe/apim-cli.git
+cd apim-cli
 cargo run
 ```
 
@@ -223,3 +224,7 @@ TUI 里也可以配：厂商表单的「脚本路径」就是它；编辑时路�
 让 AI 代写：把 `docs/quota-script-prompt.md` 整体复制给任意 Agent，再附上厂商官方的查询方式（文档 / curl 示例），它会产出脚本 + recipe 并给验证命令——密钥只在验证时用环境变量传，不用贴给 AI。
 
 内置四家（DeepSeek/OpenAI/Moonshot/OpenRouter）的 recipe 编译在二进制里，但它们引用的脚本在 `~/.config/apim/scripts/`——本机已就位；换新机器时按 `docs/quota-script-prompt.md` 让 AI 重新生成，或从旧机器拷贝脚本目录。
+
+## License
+
+[MIT](LICENSE) © 2026 tututuhehehe
