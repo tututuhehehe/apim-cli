@@ -54,7 +54,9 @@ apim use <厂商.别名>                     # 输出 export OPENAI_API_KEY=... 
 
 ## 余额查询脚本（每个厂商一个，唯一的额度实现方式）
 
-**所有厂商——包括内置四家（deepseek/openai/moonshot/openrouter）——额度一律走脚本**，没有声明式配置。apim 带着密钥跑脚本，stdout 逐行进额度面板（首行高亮）。本机六个现成实例在 `~/.config/apim/scripts/`：GLM（两接口+日期计算）、DeepSeek/Moonshot/OpenAI/OpenRouter（单请求+ jq）、ikun（new-api 面板，访问令牌走 `APIM_VAR_ACCESS_TOKEN`）。
+**所有厂商——包括内置四家（deepseek/openai/moonshot/openrouter）——额度一律走脚本**，没有声明式配置。apim 带着密钥跑脚本，stdout 逐行进额度面板（首行高亮）。本机七个现成实例在 `~/.config/apim/scripts/`：GLM（两接口+日期计算）、DeepSeek/Moonshot/OpenAI/OpenRouter（单请求+ jq）、ikun（new-api 面板，访问令牌走 `APIM_VAR_ACCESS_TOKEN`）、opencode-go（官方 usage 端点 + percent 整百分比 + 日期计算）。
+
+> **写脚本需要的全部知识（env 注入表、输出契约、recipe 字段、完整流程）都在本 skill 里，不需要读 `src/`。** 执行器只做四件事：注入 env → 按 shebang 跑脚本 → 收 stdout/stderr → 按 exit code 判定，没有别的魔法。
 
 ### 绑定方式
 
@@ -90,18 +92,111 @@ balance:
   - HTTP 200 不等于成功（GLM/new-api 系坏 Key 也回 200）——校验 body 的 `success`/`code`/`status` 字段，失败 stderr + exit 1；
   - `sh` 的 `echo` 会解释反斜杠转义，含 `\"` 的 JSON 会被吃坏——用 `printf '%s' "$RESP" | jq`；
   - jq 数值可能是浮点，整数运算前取整；`bc` 做小数运算。
+  - 数值单位要先确认：有的接口 percent 是 0-100「整百分比」，有的返回 0-1 小数——别想当然乘 100 或除 100（CodexBar 就曾把整百分比 1 当成 0.01，显示成 100%）;
+  - macOS 没有 GNU date：ISO8601 毫秒时间先去毫秒（`sed -E 's/[.][0-9]+Z$/Z/'`），再 `date -ju -f "%Y-%m-%dT%H:%M:%SZ" "$ts" "+%s"` 转 epoch；epoch 转本地时间用 `date -r <epoch> "+%m-%d %H:%M"`；
+  - 坏 Key/鉴权失败可能回空 body 或 401，curl 照样 exit 0——能不能成功只看「有没有拿到期望字段」，不能只看 HTTP 码。
 
-### 新接一个厂商的标准流程
+### 新接一个厂商：写额度脚本的完整流程（无需读源代码）
+
+> `docs/quota-script-prompt.md` 是给「外部 AI 整体代写」用的提示词；本小节是 apim 自己动手的固定流程。四步：**查接口 → 映射 apim → 写脚本 + mock 测试 → 注册 + 真实验证**。
+
+**第 0 步 · 查接口：确定三样东西**
+找厂商官方文档里的「余额/额度/usage」API；没有官方文档时，搜第三方解析实现（cc-switch、CodexBar、pi 插件等常在 README/issue 里贴真实响应或解析代码），从那里抄精确 JSON 结构。必须确定：
+1. 请求 URL + 方法 + **鉴权方式**（Bearer / 裸 header / query？）；
+2. 返回 JSON 的**字段路径**（用 jq 能直接取到）；
+3. 字段的**单位与语义**：0-100 整百分比还是 0-1 小数？美元还是次数？空/缺省长什么样？
+4. **失败时的状态字段在哪**（HTTP 200 也可能藏错误：`success`/`code`/`status`/`error`）。
+
+**第 1 步 · 映射到 apim 接口**
+
+| 厂商概念 | apim 落点 |
+|---|---|
+| API 根地址 | recipe `base_url`（`{base_url}` 占位符自动展开） |
+| 鉴权方式 | `auth.kind`：`bearer`（`Authorization: Bearer <key>`）/ `header`（裸 key）/ `query`（`?api_key=<key>`） |
+| 探活端点（GET，2xx=活，留空=不探活） | `health`：传 `'{base_url}/<路径>'` |
+| 模型列表端点 | `models_url`；默认依次试 `{base_url}/models` → `{base_url}/v1/models`，OpenAI 兼容不用配 |
+| 控制面板主页 | `homepage`（TUI 选中厂商 Enter 打开） |
+| 额度/余额查询 | **只能脚本**：`balance.kind=script` + `command:`；额度不走声明式配置 |
+| API Key 注入 | 脚本从 `APIM_TOKEN` 读（绝不让用户手填） |
+| 额外凭据（面板访问令牌等） | recipe `vars:` 定义 → 脚本读 `APIM_VAR_<大写名>` |
+
+**第 2 步 · 写脚本**（骨架：`~/.config/apim/scripts/<id>-quota.sh`，写完 `chmod +x`）
+
+```sh
+#!/bin/sh
+# apim 额度脚本：<厂商>（<接口一句话>）
+set -u
+KEY="${APIM_TOKEN:-}"; BASE="${APIM_BASE_URL:-<官方默认>}"
+[ -n "$KEY" ] || { echo "APIM_TOKEN 未注入" >&2; exit 1; }
+
+RESP="$(curl -sS --connect-timeout 5 --max-time 12 \
+  -H "Authorization: Bearer $KEY" -H "Accept: application/json" \
+  "$BASE/<余额端点>")" || { echo "请求失败，请检查 Key 或网络" >&2; exit 1; }
+
+# ① 先验 body 状态字段（HTTP 200 ≠ 成功）；缺关键字段也走错误路
+printf '%s' "$RESP" | jq -e '.usage != null' >/dev/null 2>&1 || {
+  echo "接口异常：$(printf '%s' "$RESP" | jq -r '.error.message // .message // ""' | head -c 200)" >&2
+  exit 1
+}
+# ② 取数值：jq 值可能是浮点，先 %.0f 取整；确认过单位（0-100 整百分比就直接用，别乘 100）
+PCT="$(printf '%s' "$RESP" | jq -r '.usage.rolling.percent // 0')"; PCT="$(printf '%.0f' "$PCT")"
+# ③ macOS 日期工具没有 GNU date：ISO(毫秒) → epoch → 本地时间，都带 GNU fallback
+TS="$(printf '%s' "$RESP" | jq -r '.usage.rolling.resetsAt // ""' | sed -E 's/[.][0-9]+Z$/Z/')"
+EPOCH="$(date -ju -f "%Y-%m-%dT%H:%M:%SZ" "$TS" "+%s" 2>/dev/null || date -d "$TS" "+%s" 2>/dev/null || echo 0)"
+LOCAL="$(date -r "$EPOCH" "+%m-%d %H:%M" 2>/dev/null || date -d "@$EPOCH" "+%m-%d %H:%M" 2>/dev/null)"
+# ④ 输出：1~4 行，首行放最重要的数字（headline）
+echo "剩余 $((100 - PCT))% · 重置 $LOCAL"
+echo "5 小时窗口已用 ${PCT}%"
+```
+
+**第 3 步 · 本地 mock 测试（不碰真实 key、不碰真实网络）**
+用一次性 python http.server 模拟厂商响应，`APIM_BASE_URL` 指到 127.0.0.1 跑脚本，验三条路径：成功路径（照抄第 0 步确认的 JSON）→ stdout 符合预期且 exit 0；坏 Key 路径（body 带 error/异常 status）→ stderr 报错且 exit 1；网络失败路径（端口不存在的地址）→ stderr 报错且 exit 1。
+
+```python
+# /tmp/mock.py：按第 0 步确认的结构填厂商响应
+import json
+from http.server import BaseHTTPRequestHandler, HTTPServer
+class H(BaseHTTPRequestHandler):
+    def do_GET(self):
+        body = json.dumps({...厂商真实响应...}).encode()
+        self.send_response(200); self.send_header("Content-Type", "application/json")
+        self.send_header("Content-Length", str(len(body))); self.end_headers(); self.wfile.write(body)
+    def log_message(self, *a): pass
+HTTPServer(("127.0.0.1", 8799), H).serve_forever()
+```
 
 ```bash
-# 1. 按 docs/quota-script-prompt.md 写好脚本后，注册并绑定：
-apim provider add <id> --name <名> --base-url <https://...> --health <探活路径> \
+python3 /tmp/mock.py & SRV=$!; sleep 1
+APIM_TOKEN=sk-test APIM_BASE_URL=http://127.0.0.1:8799/v1 sh ~/.config/apim/scripts/<id>-quota.sh; echo exit=$?
+kill $SRV
+```
+
+mock 阶段能低成本验出「数值单位错、状态字段没校验、日期解析错」这类问题，**先 mock 过了再碰真实 key**。兜底 URL 要写进变量（`${APIM_BASE_URL:-...}`），不然 mock 时会把请求发到真实地址。
+
+**第 4 步 · 注册 + 真实验证**
+
+```bash
+# 脚本先写好再注册；--health 传路径自动拼 {base_url}；--homepage 可选
+apim provider add <id> --name <显示名> --base-url <https://...> \
+  --homepage <控制台URL> --health <探活路径> \
   --script ~/.config/apim/scripts/<id>-quota.sh
-# 2. 密钥由用户自己配（AI 不要经手 token）：
+# 密钥必须用户本人配（AI 绝不经手真实 token）：
 echo 'sk-...' | apim key add <id> main
-# 3. 验证（期望 balance.ok=true 且 lines 有额度行）：
+# 真实验证（期望 balance.ok=true 且 lines 有额度行）：
 apim status <id> --json
 ```
+
+**写脚本自查清单（对着过一遍再交）**
+- [ ] 每步确认过：URL、鉴权方式、字段路径、字段单位（整百分比还是 0-1、美元还是次数）
+- [ ] HTTP 200 也验了 body 状态字段；字段缺失走 stderr + exit 1（宁可报错不显示假数字）
+- [ ] `printf '%s' "$RESP" | jq` 解析（`sh` 的 `echo` 会吃 `\"` 转义）
+- [ ] 数值运算前 `printf '%.0f'` 取整；小数用 `bc`
+- [ ] 每个请求都带 `--connect-timeout`/`--max-time`（总时长受 recipe `timeout_secs` 约束，缺省 15s）
+- [ ] macOS 日期：解析用 `date -ju -f`、展示用 `date -r`，都给了 GNU fallback
+- [ ] 密钥只从 env 读，不 echo、不写文件、不进 argv
+- [ ] 输出 1~4 行、首行是数字 headline
+- [ ] mock 三条路径测过、`sh -n` 语法通过、`chmod +x`
+- [ ] 注册后 `apim status <id> --json` 用用户的 key 真实验证过
 
 ## 红线
 
