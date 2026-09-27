@@ -1,21 +1,25 @@
 # apim
 
-终端里管理模型厂商 API Key：增删改查、看状态、看额度、复制密钥。
+Manage model-provider API keys from the terminal: add, edit, delete, check health, check balance, copy.
+
+**English** | [简体中文](README.zh-CN.md)
 
 [![Release](https://github.com/tututuhehehe/apim-cli/actions/workflows/release.yml/badge.svg)](https://github.com/tututuhehehe/apim-cli/actions/workflows/release.yml)
 [![CI](https://github.com/tututuhehehe/apim-cli/actions/workflows/ci.yml/badge.svg)](https://github.com/tututuhehehe/apim-cli/actions/workflows/ci.yml)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 
 <p align="center">
-  <img src="docs/images/tui-main.png" alt="apim TUI 主界面：左侧厂商列表带实时额度与延迟，右侧密钥表，底部额度详情；底栏为按键提示" width="900">
+  <img src="docs/images/tui-main.png" alt="apim TUI: provider list with live balance and latency on the left, key table on the right, balance detail at the bottom" width="900">
 </p>
 
-## 安装
+> Note: the TUI and the `apim help` text are currently in Chinese. The CLI output and configuration formats are language-neutral. Localization contributions are welcome.
 
-**预编译二进制（推荐）**：从 [Releases](https://github.com/tututuhehehe/apim-cli/releases) 下载对应平台压缩包（资产名 `apim-<tag>-<target>.tar.gz` / `.zip`，同目录附 `.sha256` 校验和），解压后把 `apim` 放进 `PATH`。
+## Install
+
+**Prebuilt binary (recommended)** — grab the archive for your platform from [Releases](https://github.com/tututuhehehe/apim-cli/releases). Assets are named `apim-<tag>-<target>.tar.gz` (`.zip` on Windows), each with a matching `.sha256` checksum. Extract it and put `apim` on your `PATH`.
 
 ```bash
-# 以 macOS Apple Silicon 为例
+# macOS Apple Silicon example
 tag=v0.1.0
 base="https://github.com/tututuhehehe/apim-cli/releases/download/$tag"
 curl -fsSL -O "$base/apim-$tag-aarch64-apple-darwin.tar.gz"
@@ -23,15 +27,15 @@ tar -xzf "apim-$tag-aarch64-apple-darwin.tar.gz"
 sudo mv apim /usr/local/bin/
 ```
 
-| 平台 | 资产后缀 |
+| Platform | Asset suffix |
 |---|---|
 | macOS Apple Silicon | `aarch64-apple-darwin` |
 | macOS Intel | `x86_64-apple-darwin` |
 | Linux x64 | `x86_64-unknown-linux-gnu` |
 | Linux arm64 | `aarch64-unknown-linux-gnu` |
-| Windows x64 | `x86_64-pc-windows-msvc`（实验性，额度脚本依赖 `sh`） |
+| Windows x64 | `x86_64-pc-windows-msvc` (experimental; balance scripts require `sh`) |
 
-**从源码安装**：
+**From source**:
 
 ```bash
 git clone https://github.com/tututuhehehe/apim-cli.git
@@ -39,140 +43,140 @@ cd apim-cli
 cargo install --path .
 ```
 
-## 使用
+## Usage
 
 ```bash
-apim            # 无参数：进 TUI
-apim help       # CLI 用法
-apim --version  # 版本
+apim            # no arguments: launch the TUI
+apim help       # CLI usage
+apim --version  # version
 ```
 
-## 快捷键
+## Keybindings
 
-`a` / `e` / `d` / `c` 按当前焦点生效：焦点在左边厂商栏就是厂商操作，在右边密钥表就是密钥操作。
+`a` / `e` / `d` / `c` act on the focused pane: the provider list on the left, or the key table on the right.
 
-| 键 | 厂商栏（左） | 密钥表（右） |
+| Key | Provider list (left) | Key table (right) |
 |---|---|---|
-| `a` | 添加厂商 | 添加密钥 |
-| `e` | 编辑厂商（名称 / Base URL / 主页 / 探活 / 额度） | 编辑密钥（别名 / 分组 / token） |
-| `d` | 删除厂商（须先删光它下面的密钥） | 删除密钥 |
-| `c` | 复制 Base URL | 复制密钥 |
-| `y` | 复制厂商：整份 recipe 另存为新厂商（id 自动 `<id>-copy`，名称加「副本」），绑定的外部额度脚本复制成独立文件，改两边的脚本互不影响；`secrets.toml` 里的密钥不跟随 | — |
-| `i` | 厂商详情（鉴权 / 端点 / 额度脚本 / 来源 / vars，值不外显） | 密钥详情（`r` 显隐完整 token，`c` 复制） |
-| `Enter` | 用默认浏览器打开厂商主页（控制面板） | — |
-| `m` | — | 用**当前选中的这把 key** 拉取它的模型列表（模型可见性随 key/分组不同；弹窗内 `/` 聚焦搜索框实时过滤、`Esc` 退出搜索回到列表（过滤保留）、`j/k` 滚动、`c` 复制模型名、`Esc` 关闭弹窗） |
-| `j` / `k` | 上下移动 | 上下移动 |
-| `Tab` / `h` / `l` | 切换左右栏（h 左 = 厂商栏，l 右 = 密钥栏；已在边缘侧时不动） | 同左 |
-| `/` | 过滤厂商（匹配 id 或显示名） | 过滤密钥（匹配别名或分组） |
-| `r` | 刷新状态和额度 | 同左 |
-| `Ctrl+Z` | 撤销上一次写操作（本次打开面板后新增/修改/删除的厂商与密钥，含复制产生的文件）；可连续按逐步回退 | 同左 |
-| `q` / `Esc` | 退出 | 退出 |
+| `a` | Add provider | Add key |
+| `e` | Edit provider (name / base URL / homepage / health path / balance) | Edit key (alias / group / token) |
+| `d` | Delete provider (remove all its keys first) | Delete key |
+| `c` | Copy base URL | Copy key |
+| `y` | Duplicate the provider: copy the whole recipe into a new provider (id becomes `<id>-copy`, name gets a "副本" / copy suffix); an external balance script is copied to its own file so the two providers evolve independently. Keys in `secrets.toml` are not copied | — |
+| `i` | Provider details (auth / endpoints / balance script / origin / vars — values are hidden) | Key details (`r` toggles the full token, `c` copies) |
+| `Enter` | Open the provider homepage (console) in your default browser | — |
+| `m` | — | Fetch the model list with **the selected key** (visibility depends on the key/group; in the dialog `/` focuses the search box for live filtering, `Esc` leaves search back to the list (filter kept), `j`/`k` scroll, `c` copies a model name, `Esc` closes) |
+| `j` / `k` | Move up/down | Move up/down |
+| `Tab` / `h` / `l` | Switch panes (`h` = provider list, `l` = key table; no-op at the edge) | Same |
+| `/` | Filter providers (matches id or display name) | Filter keys (matches alias or group) |
+| `r` | Refresh health and balance | Same |
+| `Ctrl+Z` | Undo the last write (providers/keys added, edited or deleted since the app opened, including files created by duplication); press repeatedly to step back | Same |
+| `q` / `Esc` | Quit | Quit |
 
-按 `/` 打开搜索框，边输入边实时过滤（大小写不敏感，两个列表各自独立）：`Enter` 应用并关闭，`Esc` 取消并恢复进入前的值。过滤生效时底栏显示「筛选: xxx (n/m)」，`j`/`k` 只在过滤后的行间移动；此时无弹窗按 `Esc` 先清除过滤而不是退出（`q` 仍直接退出）。注意：过滤生效时改名/新增的条目若不匹配当前过滤词，会暂时从视图隐身（数据没丢），`Esc` 清除过滤即可见。
+Press `/` to open the search box; filtering is live and case-insensitive, and each list keeps its own filter. `Enter` applies and closes it, `Esc` cancels and restores the previous value. While a filter is active the status bar shows `筛选: xxx (n/m)` ("filter: xxx") and `j`/`k` move only within the filtered rows; with no dialog open, `Esc` clears the filter instead of quitting (`q` still quits immediately). Note: while a filter is active, an item you rename or add that does not match it is hidden from view (the data is safe) — press `Esc` to clear the filter and see it again.
 
-## 增删改查
+## CRUD
 
-**添加密钥（右侧按 `a`）**：填别名、分组（可空）、密钥，厂商用 `←`/`→` 切换。密钥可以直接 `⌘V` 粘贴。`Enter` 保存，立即写盘并自动检测。
+**Add a key (`a` in the right pane)**: fill in the alias, an optional group, and the key; switch providers with `←`/`→`. You can paste the key with `⌘V`. `Enter` saves, writes to disk immediately, and probes it.
 
-**添加厂商（左侧按 `a`）**：填 ID（小写字母/数字/-，密钥配置里 `provider` 引用它）、显示名称、Base URL，以及三个可选项：
+**Add a provider (`a` in the left pane)**: fill in the ID (lowercase letters / digits / `-`; keys reference it via `provider`), a display name, the base URL, and three optional fields:
 
-- 主页 URL：该厂商的控制面板地址，选中厂商按 `Enter` 用默认浏览器打开；留空 = 未配置（按 Enter 会提示）。**别把带 token 的一键登录链接贴进来**——主页会出现在列表和 `provider ls` 输出里
-- 探活路径：默认 `/models`，拼在 Base URL 后面；留空 = 不探活
-- 脚本路径：额度查询脚本（见下「自定义脚本额度」）；留空 = 不查额度
+- **Homepage URL** — the provider's console, opened in your default browser with `Enter` on the provider; empty means unset (`Enter` will tell you). **Do not paste a one-click login link that contains a token** — the homepage shows up in the list and in `provider ls` output.
+- **Health path** — defaults to `/models`, appended to the base URL; empty disables health checks.
+- **Script path** — the balance script (see [Custom balance scripts](#custom-balance-scripts-the-one-and-only-balance-mechanism)); empty disables balance queries.
 
-保存后生成 `~/.config/apim/recipes/<id>.yaml`，接着按 `a` 就能给它加密钥。脚本不用自己写：把 `docs/quota-script-prompt.md` 整体复制给任意 AI Agent，附上厂商的官方查询方式，它会按 apim 预留的接口契约写好并给验证命令。
+Saving creates `~/.config/apim/recipes/<id>.yaml`, after which `a` lets you add keys to it. You do not have to write the script yourself: paste `docs/quota-script-prompt.md` into any AI agent along with the provider's official query docs, and it will produce a script following apim's contract plus a verification command.
 
-**编辑（`e`）**：密钥表单带出当前值，改别名就是重命名。厂商表单编辑时 ID 锁定；探活路径/脚本路径没改就保存，不会动原 YAML 里手写的配置（内联脚本、`vars` 访问令牌等都原样保留）。清空脚本路径保存即取消脚本额度。**改了厂商配置保存后，该厂商的旧读数与在途探针会作废、立刻用新配置重探**（避免面板显示按旧配置算出的数字）；撤销厂商配置变更同样会重探。
+**Edit (`e`)**: the key form is pre-filled; changing the alias renames the key. In the provider form the ID is locked; if the health/script path is unchanged, saving leaves hand-written YAML untouched (inline scripts, `vars` access tokens, etc. are preserved). Clearing the script path removes the script balance. **After you save a changed provider config, that provider's cached readings and in-flight probes are invalidated and it is re-probed immediately with the new config** (so the panel never shows numbers computed from stale config); undoing a provider config change re-probes too.
 
-**删除（`d`）**：都弹确认框。厂商下面还有密钥时会拒绝，先删密钥。内置厂商（DeepSeek / OpenAI / Moonshot AI / OpenRouter）不可删除，但可以 `e` 编辑覆盖（会在用户目录生成同名 YAML）。
+**Delete (`d`)**: both ask for confirmation. A provider that still has keys is refused — delete the keys first. Built-in providers (DeepSeek / OpenAI / Moonshot AI / OpenRouter) cannot be deleted, but you can override them with `e` (this writes a YAML with the same id under your config dir).
 
-**复制（厂商栏 `y`）**：把选中厂商整份复制成新厂商——auth/vars/探活路径/额度绑定全带走（`vars` 里可能存的访问令牌也会一起复制），id 自动取 `<源id>-copy`（被占则 `-copy-2`…），名称加「副本」后缀。绑定了外部额度脚本的，脚本**文件本身复制一份**到 `~/.config/apim/scripts/`（命名跟随新 id，如 `glm-quota.sh` → `glm-copy-quota.sh`；同名已存在则顺延 `-2`、`-3`，绝不覆盖），新厂商指向新文件，之后改脚本互不影响；没绑脚本或内联 `run` 就没有文件要复制。`secrets.toml` 里的密钥**不**跟随（复制的是协议配置，不是凭据），复制完按 `a` 给新厂商配自己的 key。
+**Duplicate (provider list, `y`)**: copies the selected provider wholesale — auth / vars / health path / balance binding (including any access token stored in `vars`); the id becomes `<source>-copy` (or `-copy-2`, … if taken) and the name gets a "副本" (copy) suffix. If it has an external balance script, the **file itself** is copied into `~/.config/apim/scripts/` (named after the new id, e.g. `glm-quota.sh` → `glm-copy-quota.sh`; an existing name is bumped to `-2`, `-3`, never overwritten), and the new provider points at the copy — afterwards the two scripts are independent. No script, or an inline `run`, means no file to copy. Keys in `secrets.toml` are **not** copied (what is duplicated is the protocol config, not credentials) — press `a` to give the new provider its own key.
 
-**撤销（`Ctrl+Z`）**：本次打开面板后的写操作都进历史（新增/修改/删除厂商、密钥，以及复制厂商连带产生的 YAML / 脚本副本），在主界面按 `Ctrl+Z` 逐步回退最近一步——内存和磁盘一起回退，底部 toast 会说明撤销了哪一步（弹窗内不响应）。只读动作（探活、复制到剪贴板、打开主页、浏览/搜索）不进历史；历史是本次会话的，退出 TUI 即清空。
+**Undo (`Ctrl+Z`)**: every write since the app opened is recorded (provider/key add, edit and delete, plus YAML/script files created by duplication). Press `Ctrl+Z` on the main screen to step back one action at a time — memory and disk roll back together, and a toast at the bottom says what was undone (dialogs do not respond). Read-only actions (probing, copying to the clipboard, opening the homepage, browsing/searching) are not recorded; history is per-session and cleared when you quit the TUI.
 
-**查**：状态列是探活结果（`● 可用` / `● 失败` / `● 无额度`），右下角额度面板显示选中密钥的余额。按 `i` 打开详情检查器：厂商栏看 recipe 全貌（鉴权 / 端点 / 额度脚本 / 来源 / vars——变量值只显示 `••••`），密钥栏看完整信息，`r` 直接在弹窗里显隐完整 token（不用复制出剪贴板），`c` 复制。刷新节奏：**打开时所有厂商各刷一次，之后每 5 分钟自动全量刷新**（探活 + 额度一起）；切换厂商只读缓存、不触发请求；`r` 随时手动刷新当前厂商，刚保存的密钥会立即探测。
+**Inspect**: the status column shows the probe result (`● 可用` available / `● 失败` failed / `● 无额度` no balance), and the balance panel at the bottom right shows the selected key's balance. Press `i` for the details inspector: in the provider pane you see the whole recipe (auth / endpoints / balance script / origin / vars — variable values are shown only as `••••`); in the key pane you see everything, and `r` toggles the full token right there (no clipboard round-trip), while `c` copies. Refresh cadence: **every provider is probed once on open, then all of them are refreshed every 5 minutes** (health + balance together); switching providers reads the cache and triggers no request; `r` manually refreshes the current provider, and a newly saved key is probed immediately.
 
-表单内：
+Inside a form:
 
-| 键 | 作用 |
+| Key | Action |
 |---|---|
-| `Tab` / `↑` / `↓` | 下一项 / 上一项 |
-| `←` / `→` | 移动光标；在「厂商」行是切换厂商 |
-| `Enter` | 保存 |
-| `Esc` | 取消 |
+| `Tab` / `↑` / `↓` | Next / previous field |
+| `←` / `→` | Move the cursor; on the "provider" row, switch provider |
+| `Enter` | Save |
+| `Esc` | Cancel |
 
-必填项为空、ID 重复、Base URL 不以 `http(s)://` 开头等，底部红字提示，不会写盘。
+An empty required field, a duplicate ID, a base URL that does not start with `http(s)://`, and so on show a red message at the bottom and nothing is written.
 
-## CLI（AI / 脚本友好）
+## CLI (AI / script friendly)
 
-TUI 管人，CLI 管机器：`cargo install --path .` 之后所有操作都能走命令行（`apim help` 看全量用法）。数据同一份，CLI 改完 TUI 立即可见，反之亦然。
+The TUI is for humans, the CLI is for machines: after `cargo install --path .` every operation is available from the command line (`apim help` lists everything). They share the same data — a CLI change is immediately visible in the TUI and vice versa.
 
-| 命令 | 作用 |
+| Command | Description |
 |---|---|
-| `apim provider ls [--json]` | 列厂商（含额度绑定方式、密钥数） |
-| `apim provider add <id> --name <名> --base-url <URL> [--homepage <主页URL>\|none] [--health <路径>\|none] [--script <脚本路径>\|none]` | 建厂商 |
-| `apim provider set <id> [--name <名>] [--base-url <URL>] [--homepage <主页URL>\|none] [--health <路径>\|none] [--script <脚本路径>\|none]` | 改厂商（只动传了的字段） |
-| `apim provider rm <id> [--force]` | 删厂商（有密钥时拒绝，`--force` 连带删密钥；内置不可删） |
-| `apim provider copy <源id> [新id] [--name 名]` | 整份复制厂商（auth/vars/探活/额度全带走，`secrets.toml` 里的密钥不跟随）；外部额度脚本复制成独立文件（命名跟随新 id，同名已存在则顺延 `-2`）；新 id 缺省 `<源id>-copy`，被占自动顺延 |
-| `apim key ls [<provider>] [--json]` | 列密钥（token 掩码显示） |
-| `apim key add <provider> <别名> [--group <分组>]` | 加密钥；已存在则更新 token |
-| `apim key set <厂商.别名> [--alias <新别名>] [--group <分组>\|none]` | 改别名 / 分组 |
-| `apim key rm <厂商.别名>` | 删密钥 |
-| `apim status [<provider>] [--json]` | 真实探活 + 额度（跑绑定的脚本） |
-| `apim copy <厂商.别名> [--base-url]` | 复制密钥 / Base URL 到剪贴板 |
-| `apim use <厂商.别名>` | 输出 `export OPENAI_API_KEY=... OPENAI_BASE_URL=...`（`eval $(apim use x)` 用） |
+| `apim provider ls [--json]` | List providers (including balance binding mode and key count) |
+| `apim provider add <id> --name <name> --base-url <URL> [--homepage <URL>\|none] [--health <path>\|none] [--script <path>\|none]` | Create a provider |
+| `apim provider set <id> [--name <name>] [--base-url <URL>] [--homepage <URL>\|none] [--health <path>\|none] [--script <path>\|none]` | Update a provider (only the fields you pass) |
+| `apim provider rm <id> [--force]` | Delete a provider (refused if it has keys; `--force` deletes them too; built-ins cannot be deleted) |
+| `apim provider copy <src-id> [new-id] [--name <name>]` | Duplicate a provider (auth/vars/health/balance included; keys in `secrets.toml` are not); an external balance script is copied to its own file (named after the new id, existing names bumped to `-2`); the new id defaults to `<src-id>-copy` and auto-increments if taken |
+| `apim key ls [<provider>] [--json]` | List keys (tokens masked) |
+| `apim key add <provider> <alias> [--group <group>]` | Add a key; if it already exists, update its token |
+| `apim key set <provider.alias> [--alias <new-alias>] [--group <group>\|none]` | Change alias / group |
+| `apim key rm <provider.alias>` | Delete a key |
+| `apim status [<provider>] [--json]` | Real health check + balance (runs the bound script) |
+| `apim copy <provider.alias> [--base-url]` | Copy the key / base URL to the clipboard |
+| `apim use <provider.alias>` | Print `export OPENAI_API_KEY=... OPENAI_BASE_URL=...` (for `eval $(apim use x)`) |
 
-**密钥安全**：token 一律走 stdin，不进命令行参数（防 `ps` 和 shell history）：
+**Key safety**: tokens always come from stdin, never from command-line arguments (so they never leak into `ps` or your shell history):
 
 ```bash
-echo '你的key' | apim key add glm main
+echo 'your-key' | apim key add glm main
 ```
 
-### 余额查询脚本绑定
+### Binding a balance script
 
-一个厂商的额度查询 = 绑定一个脚本（recipe 的 `balance.kind: script` + `command:` 指向可执行文件）。三个入口，效果等价：
+A provider's balance query = one bound script (the recipe's `balance.kind: script` + a `command:` pointing at an executable). Three equivalent entry points:
 
-1. **TUI**：厂商表单的「脚本路径」字段；
-2. **CLI**：`apim provider add/set ... --script <路径>` 绑定，`--script none` 解绑（CLI set 是显式指令，直接整体替换，不做 TUI 那套「没改就保留」）；
-3. **直接写 YAML**：AI 代写路线，见 `docs/quota-script-prompt.md`。
+1. **TUI**: the "script path" field in the provider form.
+2. **CLI**: `apim provider add/set ... --script <path>` to bind, `--script none` to unbind (CLI `set` is an explicit instruction and replaces the whole thing; it does not do the TUI's "leave it alone if unchanged" dance).
+3. **Write the YAML directly**: the AI-authored route — see `docs/quota-script-prompt.md`.
 
-脚本建议放 `~/.config/apim/scripts/<厂商id>-quota.sh`（约定而非强制）。绑定后 `apim status <厂商>` 和 TUI 额度面板跑的是同一个脚本，结果一致；脚本的输入输出契约（env 注入、stdout 逐行、exit 非 0 报错）见 README 下文「自定义脚本额度」。
+Put scripts in `~/.config/apim/scripts/<provider-id>-quota.sh` (a convention, not a requirement). Once bound, `apim status <provider>` and the TUI balance panel run the same script with identical results; the script's I/O contract (environment injection, one panel line per stdout line, non-zero exit = error) is described under [Custom balance scripts](#custom-balance-scripts-the-one-and-only-balance-mechanism) below.
 
-### AI 接入一个新厂商的全流程
+### End-to-end: adding a new provider with AI
 
 ```bash
-# 1. 把 docs/quota-script-prompt.md 整体复制给 AI，附上厂商官方的查询方式
-#    → AI 产出 ~/.config/apim/scripts/<id>-quota.sh（并可代跑安装命令）
-# 2. AI 注册厂商并绑定脚本：
+# 1. Paste docs/quota-script-prompt.md into an AI, plus the provider's official query docs
+#    -> the AI produces ~/.config/apim/scripts/<id>-quota.sh (and can run the install commands)
+# 2. The AI registers the provider and binds the script:
 apim provider add glm --name "GLM Coding Plan" --base-url https://open.bigmodel.cn \
   --health /api/monitor/usage/quota/limit --script ~/.config/apim/scripts/glm-quota.sh
-# 3. 用户自己配密钥（key 不过 AI 的手）：
-echo '你的key' | apim key add glm main
-# 4. AI 自我验证：
+# 3. You configure the key yourself (it never passes through the AI):
+echo 'your-key' | apim key add glm main
+# 4. The AI verifies:
 apim status glm --json
 ```
 
-## 数据存哪
+## Where the data lives
 
-都在 `~/.config/apim/`，TUI 的增删改直接写这两个文件（权限 600），也可以手动改：
+Everything lives under `~/.config/apim/`. TUI edits write these two files directly (mode 600), and you can edit them by hand as well:
 
-- `config.toml`：别名、分组（不含 token）
-- `secrets.toml`：真正的 token，键名是 `"厂商.别名"`
+- `config.toml` — alias and group (no tokens)
+- `secrets.toml` — the actual tokens, keyed by `"provider.alias"`
 
-手动改的格式示例：
+Hand-edit example:
 
 ```toml
 # ~/.config/apim/config.toml
 [[keys]]
 provider = "deepseek"
 alias = "default"
-# group = "个人"   # 可选
+# group = "personal"   # optional
 ```
 
 ```toml
 # ~/.config/apim/secrets.toml
 [tokens]
-"deepseek.default" = "sk-你的密钥"
+"deepseek.default" = "sk-your-key"
 ```
 
 ```bash
@@ -180,39 +184,41 @@ mkdir -p ~/.config/apim
 chmod 600 ~/.config/apim/config.toml ~/.config/apim/secrets.toml
 ```
 
-## 加一个新厂商
+Set `APIM_CONFIG_DIR` to relocate the whole config directory (used by the tests).
 
-内置厂商开箱即用：**DeepSeek、OpenAI、Moonshot AI、OpenRouter** 已编译进二进制，不用写 recipe，在 TUI 左侧选中后按 `a` 直接加密钥即可（OpenAI 的余额接口仅部分账户有权限，无权限时额度面板报 HTTP 错误属预期）。同 id 放一份 YAML 到 `~/.config/apim/recipes/` 即可覆盖内置定义。
+## Adding a provider
 
-自定义厂商首选在 TUI 左侧按 `a`，表单保存即生成 `~/.config/apim/recipes/<id>.yaml`。
+Built-in providers work out of the box: **DeepSeek, OpenAI, Moonshot AI and OpenRouter** are compiled into the binary — no recipe needed. Select one in the left pane and press `a` to add a key. (OpenAI's balance endpoint is only available to some accounts; an HTTP error in the balance panel is expected otherwise.) Dropping a YAML with the same id into `~/.config/apim/recipes/` overrides the built-in definition.
 
-复杂厂商（自定义鉴权头、多级 JSON 解析）可以直接写 YAML 放进同一目录，可参考 `recipes/deepseek.yaml`：
+For a custom provider the easiest path is `a` in the left pane; saving the form generates `~/.config/apim/recipes/<id>.yaml`.
+
+For complex providers (custom auth headers, multi-level JSON parsing) you can write the YAML directly into the same directory — see `recipes/deepseek.yaml`:
 
 ```bash
 mkdir -p ~/.config/apim/recipes
 cp recipes/deepseek.yaml ~/.config/apim/recipes/my-relay.yaml
 ```
 
-TUI 表单生成的 YAML 和手写的完全等价；编辑时表单只覆盖它认识的字段，手写的 headers、解析规则会保留。
+YAML generated by the TUI form and hand-written YAML are equivalent; on edit the form only overwrites the fields it knows about, so hand-written headers and parsing rules survive.
 
-### new-api 系中转站（额度要访问令牌的）
+### new-api style relays (balance needs an access token)
 
-多数 new-api 面板的 `/v1/dashboard/billing/subscription` 要么返回假数字，要么不认 API Key。真实余额在 `/api/user/self`，但它只认**访问令牌**（个人设置里生成的那串，不是 sk- Key）。写一个脚本（`~/.config/apim/scripts/<id>-quota.sh`）：
+On most new-api panels `/v1/dashboard/billing/subscription` either returns fake numbers or rejects the API key. The real balance is at `/api/user/self`, but it only accepts an **access token** (the one generated in personal settings, not the `sk-` key). Write a script (`~/.config/apim/scripts/<id>-quota.sh`):
 
 ```sh
 #!/bin/sh
-# 访问令牌放 recipe 的 vars: {access_token: ...}，apim 注入为 APIM_VAR_ACCESS_TOKEN
+# Put the access token in the recipe's vars: {access_token: ...}; apim injects APIM_VAR_ACCESS_TOKEN
 RESP="$(curl -sS --max-time 10 \
   -H "Authorization: Bearer ${APIM_VAR_ACCESS_TOKEN:?}" \
   "${APIM_BASE_URL}/api/user/self")"
-printf '%s' "$RESP" | jq -r '"剩余 $\(.data.quota / 500000 | floor)  （已用 $\(.data.used_quota / 500000 | floor)）"'
+printf '%s' "$RESP" | jq -r '"remaining $\(.data.quota / 500000 | floor)  (used $\(.data.used_quota / 500000 | floor))"'
 ```
 
-recipe 里绑定并放访问令牌：
+Bind it and store the access token in the recipe:
 
 ```yaml
 vars:
-  access_token: 你的访问令牌
+  access_token: your-access-token
 health:
   url: '{base_url}/v1/models'
 balance:
@@ -220,40 +226,40 @@ balance:
   command: ~/.config/apim/scripts/<id>-quota.sh
 ```
 
-探活仍用每条密钥自己的 sk- Key；额度用 `vars` 里的访问令牌（额度是账户级的，同账户多条 Key 显示一样）。文件含令牌，保持 600 权限，别分享。
+Health checks still use each key's own `sk-` key; the balance uses the access token in `vars` (balance is account-level, so all keys of the same account show the same value). The file contains a token — keep it at mode 600 and do not share it.
 
-### 模型列表端点（`m` 键）
+### Model-list endpoint (`m`)
 
-密钥表里选中某条 key 按 `m`，用**这把 key** 拉取它可见的模型列表（模型可见性随 key/分组不同）。端点自动按序尝试：recipe 显式 `models_url` → 探活路径（以 `/models` 结尾时）→ `{base_url}/models` → `{base_url}/v1/models`，404 自动换下一个（其余错误直接返回，保留真实原因）。绝大多数 OpenAI 兼容厂商无需配置；GLM 这类非标路径的在 recipe 里加一行：
+With a key selected in the key table, press `m` to fetch the model list visible to **that key** (visibility depends on the key/group). Endpoints are tried in order: an explicit `models_url` in the recipe → the health path (when it ends in `/models`) → `{base_url}/models` → `{base_url}/v1/models`, falling through on 404 (other errors are returned as-is, preserving the real cause). Almost every OpenAI-compatible provider needs no configuration; for non-standard paths like GLM, add one line to the recipe:
 
 ```yaml
 models_url: '{base_url}/api/paas/v4/models'
 ```
 
-### 自定义脚本额度（所有厂商统一走这条路）
+### Custom balance scripts (the one and only balance mechanism)
 
-**额度查询一律是脚本**：apim 带着密钥跑一个脚本，把 stdout 逐行显示在额度面板（首行高亮）。脚本想怎么查、怎么算都行——单请求的规整接口（DeepSeek/Moonshot/OpenRouter…）几行 shell + jq 搞定，要发多个请求、算日期的（GLM Coding Plan）也装得下。
+**Every balance query is a script**: apim runs a script with the key and shows its stdout line by line in the balance panel (the first line is highlighted). How the script queries and computes is entirely up to you — a single request against a well-behaved API (DeepSeek / Moonshot / OpenRouter …) is a few lines of shell + jq, while multi-request, date-aware ones (GLM Coding Plan) fit just as well.
 
 ```yaml
 balance:
   kind: script
-  command: ~/.config/apim/scripts/glm-quota.sh   # 外部可执行文件（尊重 shebang）
-  # run: |                                        # 或内联脚本，经 shell -c 执行
-  #   echo "剩余 45/100"
-  timeout_secs: 15                                # 缺省 15
+  command: ~/.config/apim/scripts/glm-quota.sh   # external executable (shebang respected)
+  # run: |                                        # or an inline script run via shell -c
+  #   echo "remaining 45/100"
+  timeout_secs: 15                                # default 15
 ```
 
-契约：
+Contract:
 
-- apim 注入环境变量：`APIM_TOKEN`（密钥）、`APIM_BASE_URL`、`APIM_ALIAS`、`APIM_PROVIDER`，以及 `vars` 里的每项 `APIM_VAR_<大写名>`。密钥只走 env，不进命令行参数（`ps` 看不到）。
-- exit 0：stdout 每行一条进面板，首行高亮；exit 非 0 / 超时：stderr（截断）显示为红色错误。
-- 脚本可用本机任何工具（curl、jq、python……），等于在配置里写「这个厂商的额度怎么查」。GLM 的完整实例：`~/.config/apim/scripts/glm-quota.sh` + `~/.config/apim/recipes/glm.yaml`。
+- apim injects the environment variables `APIM_TOKEN` (the key), `APIM_BASE_URL`, `APIM_ALIAS`, `APIM_PROVIDER`, plus `APIM_VAR_<UPPERNAME>` for each entry in the recipe's `vars`. The key travels only via the environment, never as a command-line argument (invisible to `ps`).
+- exit 0: each stdout line becomes a panel line, the first highlighted; non-zero exit / timeout: stderr (truncated) is shown as a red error.
+- The script may use anything on your machine (curl, jq, python, …) — it is essentially "how to query this provider's balance", expressed as config. Full GLM example: `~/.config/apim/scripts/glm-quota.sh` + `~/.config/apim/recipes/glm.yaml`.
 
-TUI 里也可以配：厂商表单的「脚本路径」就是它；编辑时路径没改就原样保留手写的 `run:`/`shell:`/`timeout_secs`，清空即取消脚本额度。
+You can configure it in the TUI too: it is the "script path" field in the provider form; if the path is unchanged on edit, hand-written `run:` / `shell:` / `timeout_secs` are preserved, and clearing it removes the script balance.
 
-让 AI 代写：把 `docs/quota-script-prompt.md` 整体复制给任意 Agent，再附上厂商官方的查询方式（文档 / curl 示例），它会产出脚本 + recipe 并给验证命令——密钥只在验证时用环境变量传，不用贴给 AI。
+Let an AI write it: paste `docs/quota-script-prompt.md` into any agent along with the provider's official query docs (documentation / curl examples); it will produce the script + recipe and a verification command — the key is only passed through an environment variable during verification, never handed to the AI.
 
-内置四家（DeepSeek/OpenAI/Moonshot/OpenRouter）的 recipe 编译在二进制里，但它们引用的脚本在 `~/.config/apim/scripts/`——本机已就位；换新机器时按 `docs/quota-script-prompt.md` 让 AI 重新生成，或从旧机器拷贝脚本目录。
+The recipes of the four built-ins (DeepSeek / OpenAI / Moonshot / OpenRouter) are compiled into the binary, but the scripts they reference live in `~/.config/apim/scripts/` and are **not** bundled with the binary. On a fresh machine, have an AI regenerate them following `docs/quota-script-prompt.md`, or copy the scripts directory from another machine.
 
 ## License
 
