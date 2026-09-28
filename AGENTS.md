@@ -87,14 +87,16 @@ recipes/              内置 recipe ×4（deepseek/openai/moonshot/openrouter，
 7. **README 默认英文**（`README.md`），中文版在 `README.zh-CN.md`，两版内容保持同步：改一版必须同步另一版，顶部语言切换链接别删。
 8. 提交信息中文，一行主题 + 要点列表；功能一次一提交。
 9. **发版走 `docs/RELEASING.md`**：版本号单一来源是 `Cargo.toml`；打 `v*` tag 触发 5 平台构建；npm/Homebrew 按手册各自更新；不要手改 Release 资产。
+10. **开发跑本地代码一律 `cargo run -- <args>`，别 `cargo install --path .`**：本机 `apim` 是 npm 装的正试版（`/opt/homebrew/bin/apim`），PATH 里 `~/.cargo/bin` 排在它之后 —— `cargo install` 装出的二进制**不会被 `apim` 命中**，只会变成一个过期副本让人误判“改了没生效”。
 
 ## 验证命令速查
 
 ```bash
-cargo run                              # 进 TUI
+cargo run                              # 进 TUI（跑当前代码）
 cargo run -- --snapshot                # 真实接口拉数据渲染成文本（不进 TUI）
 cargo run -- --snapshot-inspector      # 详情弹窗快照：假状态不拉接口；=provider 出厂商详情
 cargo test                             # 单测（recipe/表单/CLI 沙盒等）
-cargo install --path .                 # 装进 PATH
-apim provider ls --json                # CLI 冒烟（AI 接入流程见 docs/quota-script-prompt.md）
+apim provider ls --json                # CLI 冒烟（跑已发布版；本地代码用 cargo run -- provider ls）
 ```
+
+> 开发期不要 `cargo install --path .`（见约定 10）。
