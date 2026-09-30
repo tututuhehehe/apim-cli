@@ -4,6 +4,7 @@
 pub(crate) mod keys;
 pub(crate) mod provider;
 pub(crate) mod query;
+pub(crate) mod update;
 
 use std::collections::HashMap;
 use std::path::PathBuf;
@@ -104,6 +105,8 @@ pub(crate) async fn run(argv: &[String]) -> Result<()> {
         Some("status") => query::status(&ctx, rest).await,
         Some("copy") => query::copy(&ctx, rest),
         Some("use") => query::use_env(&ctx, rest),
+        // update 不需要配置目录，但共用同一个分发入口（认渠道 → 走同一条渠道更新）
+        Some("update") | Some("upgrade") => update::run(&Args::parse(rest)?).await,
         _ => {
             print_help();
             bail!("未知命令，见上方用法");
@@ -130,9 +133,11 @@ pub(crate) fn print_help() {
          \x20 apim status [<provider>] [--json]      # 真实探活+额度（跑绑定脚本）\n\
          \x20 apim copy <厂商.别名> [--base-url]     # 复制密钥 / Base URL\n\
          \x20 apim use <厂商.别名>                   # 输出 export OPENAI_API_KEY=... （shell eval 用）\n\
+         自维护：\n\
+         \x20 apim update [--check] [--force] [--json]   # 认安装渠道（npm/Homebrew/install.sh）后从原渠道更新\n\
          \n\
          apim --version                            # 打印版本\n\
-         别名：apim tui = 无参数；apim keys = apim key；provider list/remove = ls/rm。"
+         别名：apim tui = 无参数；apim keys = apim key；provider list/remove = ls/rm；upgrade = update。"
     );
 }
 

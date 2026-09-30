@@ -140,6 +140,7 @@ TUI 管人，CLI 管机器：`cargo install --path .` 之后所有操作都能�
 | `apim status [<provider>] [--json]` | 真实探活 + 额度（跑绑定的脚本） |
 | `apim copy <厂商.别名> [--base-url]` | 复制密钥 / Base URL 到剪贴板 |
 | `apim use <厂商.别名>` | 输出 `export OPENAI_API_KEY=... OPENAI_BASE_URL=...`（`eval $(apim use x)` 用） |
+| `apim update [--check] [--force] [--json]` | 自动识别当前是从哪条渠道装的（**npm / Homebrew / install.sh**），走同一条渠道更新。`--check` 只报当前/最新版本不动手；`--force` 版本相同时也重装一遍 |
 
 **密钥安全**：token 一律走 stdin，不进命令行参数（防 `ps` 和 shell history）：
 

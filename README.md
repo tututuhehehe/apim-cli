@@ -142,6 +142,7 @@ The TUI is for humans, the CLI is for machines: after `cargo install --path .` e
 | `apim status [<provider>] [--json]` | Real health check + balance (runs the bound script) |
 | `apim copy <provider.alias> [--base-url]` | Copy the key / base URL to the clipboard |
 | `apim use <provider.alias>` | Print `export OPENAI_API_KEY=... OPENAI_BASE_URL=...` (for `eval $(apim use x)`) |
+| `apim update [--check] [--force] [--json]` | Detects which channel installed this apim (**npm / Homebrew / install.sh**) and updates through the same one. `--check` only reports current-vs-latest; `--force` reinstalls even when versions match |
 
 **Key safety**: tokens always come from stdin, never from command-line arguments (so they never leak into `ps` or your shell history):
 

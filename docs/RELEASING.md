@@ -132,3 +132,5 @@ brew test tututuhehehe/tap/apim
 | 源码 | `cargo install --path .` | 否 |
 
 > `cargo install apim` / `cargo binstall apim` 需要 crate 发布到 crates.io（`Cargo.toml` 的 `publish = false` 要先删）。binstall 元数据已配好，发布后即可用。
+
+> `apim update` 只认**三条**自动更新渠道：install.sh（裸二进制，重跑官方脚本 + 钉住原安装目录）、npm（`npm install -g apim-cli@latest`）、Homebrew（`brew upgrade apim`）。cargo 渠道需要 crate 上 crates.io，所以暂不自动更新；`target/` 下的本地开发构建一律不碰（免得把开发二进制覆盖成 Release 版）。新增渠道时同步改 `src/cli/update.rs` 的 `Channel`。

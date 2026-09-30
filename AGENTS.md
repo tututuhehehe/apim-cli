@@ -111,6 +111,8 @@ recipes/              内置 recipe ×4（deepseek/openai/moonshot/openrouter，
     - 模型条目照官方字段**手写迷你条目**（GLM / DeepSeek 官方 Codex 文档 + cc-switch 实测模板）：`shell_type: shell_command`、`apply_patch_tool_type: freeform`、中性 `base_instructions`、`input_modalities` fail-open 给 `[text, image]`、上下文窗口用 codex 给未知模型的默认值 272000。**不要克隆 `codex debug models --bundled` 里的 GPT 条目** —— 那会带进 `code_mode_only`、`use_responses_lite`、`max_context_window: 872000` 和 62KB harness 提示词（v1 就是这么错的一版，目录 64KB/模型）。导入完用 `codex debug models` 反向校验勾选的模型都在（校验是硬前提，没装 codex 直接报错）。
     - 厂商 id 撞上保留名（`openai`/`ollama`/`lmstudio`/`amazon-bedrock*`）时加 `apim-` 前缀。
 
+12. **`apim update` 只认三条渠道**（install.sh / npm / Homebrew，见 `docs/RELEASING.md` 的速查表）：`src/cli/update.rs` 按可执行文件路径认渠道（npm 看 `node_modules/apim-cli`、brew 看 `Cellar/apim`，其余当 install.sh 装的裸二进制），裸二进制那条**复用官方 install.sh** 并钉住 `APIM_INSTALL_DIR` 保证原地更新。**`target/` 下的本地开发构建一律不更新**（否则会拿 Release 覆盖开发二进制）。加渠道要同时改 `Channel`、测试和 RELEASING 的表。
+
 ## 验证命令速查
 
 ```bash
@@ -122,6 +124,7 @@ cargo run -- --snapshot-import-models  # 一键导入面板快照：第二步勾
 cargo run -- --snapshot-import-default # 一键导入面板快照：第三步选默认模型
 cargo test                             # 单测（recipe/表单/CLI 沙盒/codex 适配等）
 cargo test -- codex_real_end_to_end --ignored --nocapture   # 需本机装 codex：真机端到端（生成目录 + 让 codex 校验）
+cargo run -- update --check                # 认安装渠道 + 报当前/最新（不动手）
 apim provider ls --json                # CLI 冒烟（跑已发布版；本地代码用 cargo run -- provider ls）
 ```
 
