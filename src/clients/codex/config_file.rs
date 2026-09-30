@@ -5,6 +5,9 @@ use std::path::{Path, PathBuf};
 
 use toml_edit::{DocumentMut, Item, Table, Value, value};
 
+/// 写进 `model_catalog_json` 上方的一行注释：模型不在本文件里，直接告诉用户去哪找。
+const CATALOG_HINT: &str = "勾选的模型写在这个文件里（codex 只认独立文件，不在 config.toml 内）";
+
 /// 一次导入要写进 config.toml 的内容。
 pub struct ProviderWrite<'a> {
     /// `[model_providers.<key>]` 的表名（保留 id 已加前缀）。
@@ -15,6 +18,8 @@ pub struct ProviderWrite<'a> {
     /// 生成的模型目录文件名（相对 CODEX_HOME）。
     pub catalog_file: &'a str,
     pub model: &'a str,
+    /// 默认思考强度，写进 `model_reasoning_effort`。
+    pub reasoning_effort: &'a str,
 }
 
 /// 读配置；文件不存在 → 空文档（等价于「全新安装的 codex」）。
@@ -34,7 +39,8 @@ pub fn read(path: &Path) -> Result<DocumentMut, String> {
 pub fn apply(doc: &mut DocumentMut, write: &ProviderWrite) -> Result<(), String> {
     set_string(doc, "model", write.model);
     set_string(doc, "model_provider", write.key);
-    set_string(doc, "model_catalog_json", write.catalog_file);
+    set_string(doc, "model_reasoning_effort", write.reasoning_effort);
+    set_string_with_hint(doc, "model_catalog_json", write.catalog_file, CATALOG_HINT);
 
     if doc.get("model_providers").is_none() {
         // 隐式表：自己不产生 `[model_providers]` 头，只带出下面的子表
@@ -66,11 +72,24 @@ fn provider_table(write: &ProviderWrite) -> Table {
 
 /// 顶层字符串键：已存在则只换值（保留键上的注释与行尾注释），不存在则新建。
 fn set_string(doc: &mut DocumentMut, key: &str, text: &str) {
-    let mut new = Value::from(text);
+    set_string_with_hint(doc, key, text, "");
+}
+
+/// 同上，但新建这个键时在它前面写一行注释（`hint` 为空则不写）。
+/// 注释必须挂在「键」的 decor 上：挂到 value 的 decor 上会把值挤到下一行（非法 TOML）。
+fn set_string_with_hint(doc: &mut DocumentMut, key: &str, text: &str, hint: &str) {
     if let Some(old) = doc.get(key).and_then(Item::as_value) {
+        let mut new = Value::from(text);
         *new.decor_mut() = old.decor().clone();
+        doc[key] = Item::Value(new);
+        return;
     }
-    doc[key] = Item::Value(new);
+    doc[key] = Item::Value(Value::from(text));
+    if !hint.is_empty()
+        && let Some(mut entry) = doc.key_mut(key)
+    {
+        entry.leaf_decor_mut().set_prefix(format!("\n# {hint}\n"));
+    }
 }
 
 /// 原子写入：先把现有内容备份成 `<config.toml>.apim.bak`，再 tmp + rename。

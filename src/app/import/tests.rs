@@ -4,6 +4,7 @@ use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 
 use super::*;
 use crate::app::tests::test_app;
+use crate::clients::DEFAULT_EFFORT;
 use crate::probe::ModelEntry;
 
 fn entry(id: &str, responses: Option<bool>) -> ModelEntry {
@@ -245,6 +246,7 @@ fn outcome(key_id: &str, result: Result<ImportReport, String>) -> ImportOutcome 
         result,
         state: None,
         state_error: None,
+        effort: DEFAULT_EFFORT.into(),
     }
 }
 
@@ -261,13 +263,14 @@ async fn successful_import_toasts_marks_key_and_closes_panel() {
         provider_key: "alpha".into(),
         models: vec!["gpt-6-sol".into()],
         default_model: "gpt-6-sol".into(),
+        reasoning_effort: DEFAULT_EFFORT.into(),
     });
     app.import_result(result);
 
     assert!(matches!(app.modal, Modal::None), "成功后应关面板");
     assert_eq!(
         app.toast_text(),
-        Some("已导入 Codex：alpha.a1 · 1 个模型 · 默认 gpt-6-sol")
+        Some("已导入 Codex：alpha.a1 · 1 个模型 · 默认 gpt-6-sol · 强度 high · 重启 codex 生效")
     );
     assert!(app.is_codex_active("alpha.a1"), "★ 应打在这把密钥上");
     assert!(!app.is_codex_active("alpha.a2"));

@@ -112,7 +112,7 @@ fn built_catalog_overrides_ids_and_clears_openai_only_fields() {
     let bundled = fake_bundled();
     let template = catalog::pick_template(&bundled).unwrap();
     let models = vec!["deepseek-v4".to_string(), "glm-5".to_string()];
-    let built = catalog::build(template, &models, "glm-5").unwrap();
+    let built = catalog::build(template, &models, "glm-5", "high").unwrap();
 
     let entries = built["models"].as_array().unwrap();
     assert_eq!(entries.len(), 2);
@@ -179,7 +179,7 @@ fn legacy_base_instructions_are_promoted_when_template_messages_missing() {
         "supported_in_api": true,
         "base_instructions": "LEGACY-PROMPT"
     });
-    let built = catalog::build(&template, &["m1".to_string()], "m1").unwrap();
+    let built = catalog::build(&template, &["m1".to_string()], "m1", "high").unwrap();
     assert_eq!(
         built["models"][0]["model_messages"]["instructions_template"],
         "LEGACY-PROMPT"
@@ -188,7 +188,7 @@ fn legacy_base_instructions_are_promoted_when_template_messages_missing() {
 
 #[test]
 fn build_rejects_empty_model_list() {
-    let built = catalog::build(&fake_bundled()["models"][0], &[], "m");
+    let built = catalog::build(&fake_bundled()["models"][0], &[], "m", "high");
     assert!(built.is_err());
 }
 
@@ -226,6 +226,7 @@ screen_reader_detection_done = true
             api_key: "sk-placeholder",
             catalog_file: CATALOG_FILE,
             model: "gpt-6-sol",
+            reasoning_effort: "high",
         },
     )
     .unwrap();
@@ -243,9 +244,12 @@ screen_reader_detection_done = true
     assert!(text.contains("https://old.example/v1"));
     assert!(text.contains("[projects.\"/tmp/demo\"]"));
     assert!(text.contains("screen_reader_detection_done = true"));
-    // 新内容写进去了
+    // 新内容写进去了（model_reasoning_effort 被改成本次导入选的思考强度）
     assert!(text.contains("model_provider = \"ikun\""));
+    assert!(text.contains("model_reasoning_effort = \"high\""));
     assert!(text.contains("model_catalog_json = \"apim-models.json\""));
+    // 新建 model_catalog_json 时带一行「模型在哪个文件」的注释，且不能把值挤到下一行
+    assert!(text.contains("# 勾选的模型写在这个文件里"), "{text}");
     assert!(text.contains("[model_providers.ikun]"));
     assert!(text.contains("wire_api = \"responses\""));
     assert!(text.contains("experimental_bearer_token = \"sk-placeholder\""));
@@ -281,6 +285,7 @@ fn config_write_creates_file_from_scratch() {
             api_key: "sk-placeholder",
             catalog_file: CATALOG_FILE,
             model: "m1",
+            reasoning_effort: "high",
         },
     )
     .unwrap();
@@ -345,6 +350,7 @@ fn import_end_to_end_writes_config_catalog_and_verifies() {
         alias: "codex".into(),
         models: vec!["gpt-6-sol".into(), "glm-5".into()],
         default_model: "glm-5".into(),
+        reasoning_effort: "high".into(),
     };
     let report = import_in(&home, &request, Some(&bin)).unwrap();
 
@@ -408,6 +414,7 @@ fn import_fails_when_codex_does_not_recognize_a_model() {
         alias: "codex".into(),
         models: vec!["gpt-6-sol".into()],
         default_model: "gpt-6-sol".into(),
+        reasoning_effort: "high".into(),
     };
     let err = import_in(&home, &request, Some(&bin)).unwrap_err();
     assert!(err.contains("未识别"), "{err}");
@@ -424,6 +431,7 @@ fn import_without_codex_binary_reports_actionable_error() {
         alias: "codex".into(),
         models: vec!["m1".into()],
         default_model: "m1".into(),
+        reasoning_effort: "high".into(),
     };
     let err = import_in(&dir, &request, None).unwrap_err();
     assert!(err.contains("APIM_CODEX_BIN"), "{err}");
@@ -443,6 +451,7 @@ fn state_roundtrip_and_key_id() {
         provider_key: "ikun".into(),
         models: vec!["a".into(), "b".into()],
         default_model: "a".into(),
+        reasoning_effort: "max".into(),
     };
     store::save(&dir, &state).unwrap();
     assert_eq!(store::load(&dir), Some(state.clone()));
@@ -489,6 +498,7 @@ fn codex_real_end_to_end() {
         alias: "codex".into(),
         models: vec!["gpt-6-sol".into(), "deepseek-v4".into()],
         default_model: "gpt-6-sol".into(),
+        reasoning_effort: "high".into(),
     };
     let report = import_in(&home, &request, Some(&bin)).expect("真机导入应成功");
     assert!(report.verified, "codex 应能解析新配置与生成目录");

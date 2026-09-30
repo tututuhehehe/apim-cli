@@ -175,23 +175,28 @@ apim status glm --json
 
 ## One-click import into Codex
 
-Select a key in the key table and press `x` to write "this key + its provider + the models you tick" into your Codex config — no more hand-editing `~/.codex/config.toml`. The panel has two steps: **pick a client** (Codex only for now) → **tick models** (`space` toggles, `d` sets the default, `a` toggles all, `f` reveals models the provider does not advertise as Responses-capable, `/` searches) → `⏎` imports.
+Select a key in the key table and press `x` to write "this key + its provider + the models you tick" into your Codex config — no more hand-editing `~/.codex/config.toml`. The panel has two steps: **pick a client** (Codex only for now) → **tick models** (`space` toggles, `d` sets the default model, `e` cycles the default reasoning effort, `a` toggles all, `f` reveals models the provider does not advertise as Responses-capable, `/` searches) → `⏎` imports. The panel shows `默认模型 / 思考强度` live while you tick.
 
 Before reporting success it makes **codex itself parse the new config** (`codex debug models`) and checks that every ticked model is there; on failure the reason is shown right in the panel.
 
-What gets written:
+> **Restart codex after importing (close every open Codex window / restart the app-server daemon) — only then does `/model` list the new models.** Codex's long-lived daemon loads the model catalog once at startup and caches it, so a config written later is invisible to the picker — the same config works in `codex exec` while `/model` still shows the old list. That is exactly this symptom.
+
+### What gets written where
+
+**The models are *not* in `config.toml`** — that is Codex's own design (GLM's and DeepSeek's official Codex integration docs do it the same way): models live in a **separate JSON file** named by `model_catalog_json`, and `config.toml` only carries the pointer (apim also leaves a comment above it saying so).
 
 | Location | Content |
 |---|---|
-| `~/.codex/config.toml` top level | `model_provider` = provider id, `model` = default model, `model_catalog_json = "apim-models.json"` |
+| `~/.codex/config.toml` top level | `model_provider` = provider id, `model` = default model, `model_reasoning_effort` = default reasoning effort, `model_catalog_json = "apim-models.json"` |
 | `~/.codex/config.toml` → `[model_providers.<provider-id>]` | `name` / `base_url` (`/v1` appended when missing) / `wire_api = "responses"` / `experimental_bearer_token` |
-| `~/.codex/apim-models.json` | A model catalog so Codex's `/model` picker lists the models you ticked, each with the `medium/high/xhigh/max` reasoning levels |
-| `~/.config/apim/codex.toml` | apim's record of "what is currently imported", used for the ★ marker on the key row |
+| `~/.codex/apim-models.json` | Metadata for the ticked models: each carries the `medium/high/xhigh/max` reasoning levels plus the default one. This is what `/model` reads |
+| `~/.config/apim/codex.toml` | apim's record of "what is currently imported" (key, models, effort), used for the ★ marker on the key row |
 
 Deliberate choices:
 
 - **Switch the active provider, never rewrite the file.** Codex happily keeps several `[model_providers.*]` blocks at once but only activates the one named by `model_provider`. Importing therefore leaves the previous provider block intact (change `model_provider` back to switch), and your comments, `[projects.*]` and `[tui]` are preserved.
 - **The key goes into `experimental_bearer_token`.** `~/.codex/config.toml` is already mode 600. If you rotate the key in apim, press `x` again to sync.
+- **The reasoning effort goes into top-level `model_reasoning_effort`** (the `e` key cycles medium/high/xhigh/max). The same four levels are declared per model in the catalog, so codex's own `/model` can still override them per model.
 - **Every import is backed up**: the previous content is saved as `~/.codex/config.toml.apim.bak`; copy it back to roll back.
 - **The catalog is cloned from your own codex** (`codex debug models --bundled`), so it always matches the codex version you have installed — apim itself needs no update.
 - **Responses protocol only**: Codex 0.134+ removed `wire_api = "chat"`, so the relay must serve `/v1/responses` or you get a hard 400. The panel lists only models the provider advertises as Responses-capable (new-api relays expose `supported_endpoint_types` in `/v1/models`); press `f` to force the full list.

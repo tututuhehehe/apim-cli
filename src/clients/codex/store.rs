@@ -24,6 +24,8 @@ pub struct CodexState {
     pub models: Vec<String>,
     /// 默认模型（codex 顶层 `model`）。
     pub default_model: String,
+    /// 默认思考强度（codex 顶层 `model_reasoning_effort`）。
+    pub reasoning_effort: String,
 }
 
 impl CodexState {

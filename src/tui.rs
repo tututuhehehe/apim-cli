@@ -253,6 +253,7 @@ pub(crate) async fn run_snapshot_import() -> Result<()> {
         provider_key: "ikun".into(),
         models: vec!["gpt-6-sol".into()],
         default_model: "gpt-6-sol".into(),
+        reasoning_effort: crate::clients::DEFAULT_EFFORT.into(),
     });
     app.modal = Modal::Import(ImportFlow::new(snapshot_key_id(&app)));
     render_snapshot(&app).await

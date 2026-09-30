@@ -200,9 +200,11 @@ apim status <id> --json
 
 ## 一键导入到 Codex（TUI `x` 键，暂无 CLI）
 
-密钥表里选中一把密钥按 `x`：把「这把密钥 + 它的厂商 + 勾选的模型」写进 Codex 配置（`~/.codex/config.toml`）。面板两步：选客户端（目前只有 Codex）→ 勾选模型（`空格` 勾选、`d` 默认、`a` 全选、`f` 显示全部、`/` 搜索、`⏎` 导入）。导入后会跑 `codex debug models` 让 codex 自己解析一遍新配置来确认成功，密钥行上会打 ★ 标出当前导入的那把。
+密钥表里选中一把密钥按 `x`：把「这把密钥 + 它的厂商 + 勾选的模型」写进 Codex 配置（`~/.codex/config.toml`）。面板两步：选客户端（目前只有 Codex）→ 勾选模型（`空格` 勾选、`d` 默认模型、`e` 换思考强度、`a` 全选、`f` 显示全部、`/` 搜索、`⏎` 导入）。导入后会跑 `codex debug models` 让 codex 自己解析一遍新配置来确认成功，密钥行上会打 ★ 标出当前导入的那把。
 
-写盘内容：顶层 `model_provider`/`model`/`model_catalog_json="apim-models.json"`，`[model_providers.<厂商id>]`（`base_url` 自动补 `/v1`、`wire_api = "responses"`、`experimental_bearer_token` = 密钥），以及 `~/.codex/apim-models.json`（勾选模型的目录，每模型给 medium/high/xhigh/max 四档思考等级）。apim 侧记在 `~/.config/apim/codex.toml`。
+**模型不在 `config.toml` 里**（Codex 的机制，GLM / DeepSeek 官方 Codex 文档也是这个写法）：顶层只写 `model_provider` / `model` / `model_reasoning_effort` / `model_catalog_json="apim-models.json"`，模型元数据（包含每模型的 medium/high/xhigh/max 四档思考等级）在 `~/.codex/apim-models.json`。apim 侧记在 `~/.config/apim/codex.toml`。
+
+**导入完必须重启 codex（关掉所有 Codex 窗口 / 重启 app-server daemon），否则 `/model` 里不会出现新模型** —— codex 的常驻 daemon 启动时只加载一次模型目录。判断方法：`ps aux | grep "codex app-server"` 看 daemon 启动时间是否早于导入时间。
 
 几个容易踩的：
 

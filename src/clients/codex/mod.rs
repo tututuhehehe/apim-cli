@@ -23,6 +23,7 @@ mod catalog;
 mod config_file;
 mod store;
 
+pub use catalog::{DEFAULT_EFFORT, EFFORTS};
 pub use store::CodexState;
 
 use std::path::{Path, PathBuf};
@@ -60,6 +61,8 @@ pub struct ImportRequest {
     pub models: Vec<String>,
     /// 默认模型，必须是 `models` 之一。
     pub default_model: String,
+    /// 默认思考强度（`EFFORTS` 之一），写进顶层 `model_reasoning_effort`。
+    pub reasoning_effort: String,
 }
 
 impl ImportRequest {
@@ -97,8 +100,13 @@ pub fn import_in(
 ) -> Result<ImportReport, String> {
     let key = provider_key(&request.provider_id);
     let base_url = normalize_base_url(&request.base_url);
+    let effort = if EFFORTS.contains(&request.reasoning_effort.as_str()) {
+        request.reasoning_effort.as_str()
+    } else {
+        DEFAULT_EFFORT
+    };
     let template = catalog::load_template(codex_bin)?;
-    let entries = catalog::build(&template, &request.models, &request.default_model)
+    let entries = catalog::build(&template, &request.models, &request.default_model, effort)
         .map_err(|err| format!("生成模型目录失败：{err}"))?;
 
     std::fs::create_dir_all(home).map_err(|err| format!("创建 {} 失败：{err}", home.display()))?;
@@ -116,6 +124,7 @@ pub fn import_in(
             api_key: &request.api_key,
             catalog_file: CATALOG_FILE,
             model: &request.default_model,
+            reasoning_effort: effort,
         },
     )?;
     let backup_path = config_file::write(&config_path, &doc.to_string())?;
@@ -153,6 +162,7 @@ pub fn remember(
         provider_key: report.provider_key.clone(),
         models: report.models.clone(),
         default_model: report.model.clone(),
+        reasoning_effort: request.reasoning_effort.clone(),
     };
     let error = store::save(config_dir, &state).err();
     (state, error)

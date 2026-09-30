@@ -22,15 +22,23 @@ use std::process::Command;
 use serde_json::{Map, Value, json};
 
 /// 勾选模型一律给这四档思考等级（不按模型差异化）。
-const REASONING_LEVELS: &[(&str, &str)] = &[
-    ("medium", "中等推理"),
-    ("high", "深度推理"),
-    ("xhigh", "极高推理"),
-    ("max", "最高推理"),
-];
+/// `model_reasoning_effort` 也只用这四个值，面板按 `e` 循环切换。
+pub const EFFORTS: [&str; 4] = ["medium", "high", "xhigh", "max"];
 
-/// 默认思考等级；codex 顶层 `model_reasoning_effort` 缺省时用它。
-const DEFAULT_REASONING_LEVEL: &str = "high";
+/// 默认思考强度；codex 顶层 `model_reasoning_effort` 与目录条目的
+/// `default_reasoning_level` 都用它。
+pub const DEFAULT_EFFORT: &str = "high";
+
+/// 每档思考强度的中文说明（写进目录条目给 codex 的选择器显示）。
+fn effort_description(effort: &str) -> &'static str {
+    match effort {
+        "medium" => "中等推理",
+        "high" => "深度推理",
+        "xhigh" => "极高推理",
+        "max" => "最高推理",
+        _ => "",
+    }
+}
 
 /// `model_messages` 里没有 `#[serde(default)]` 的必填键：缺失会让整个目录解析失败，
 /// 生成条目时必须补成显式 null。
@@ -157,20 +165,31 @@ fn instructions_of(entry: &Value) -> String {
         .to_string()
 }
 
-/// 由模板 + 勾选的模型生成整份目录。默认模型排在最前。
-pub fn build(template: &Value, models: &[String], default_model: &str) -> Result<Value, String> {
+/// 由模板 + 勾选的模型生成整份目录。默认模型排在最前，默认思考强度
+/// 写进每个条目的 `default_reasoning_level`。
+pub fn build(
+    template: &Value,
+    models: &[String],
+    default_model: &str,
+    default_effort: &str,
+) -> Result<Value, String> {
     if models.is_empty() {
         return Err("至少勾选一个模型".to_string());
     }
+    let effort = if EFFORTS.contains(&default_effort) {
+        default_effort
+    } else {
+        DEFAULT_EFFORT
+    };
     let base = template
         .as_object()
         .ok_or_else(|| "模板条目不是 JSON 对象".to_string())?
         .clone();
     let instructions = instructions_of(template);
 
-    let levels: Vec<Value> = REASONING_LEVELS
+    let levels: Vec<Value> = EFFORTS
         .iter()
-        .map(|(effort, description)| json!({ "effort": effort, "description": description }))
+        .map(|effort| json!({ "effort": effort, "description": effort_description(effort) }))
         .collect();
 
     // 默认模型排第一，其余按勾选顺序（priority 决定 codex 选择器里的排序）
@@ -195,10 +214,7 @@ pub fn build(template: &Value, models: &[String], default_model: &str) -> Result
         entry.insert("priority".into(), json!(index as i64 + 1));
         entry.insert("visibility".into(), json!("list"));
         entry.insert("supported_in_api".into(), json!(true));
-        entry.insert(
-            "default_reasoning_level".into(),
-            json!(DEFAULT_REASONING_LEVEL),
-        );
+        entry.insert("default_reasoning_level".into(), json!(effort));
         entry.insert(
             "supported_reasoning_levels".into(),
             Value::Array(levels.clone()),

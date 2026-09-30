@@ -108,7 +108,7 @@ fn flow_note(app: &App, flow: &ImportFlow) -> String {
 fn draw_model_picker(frame: &mut Frame, flow: &ImportFlow, area: Rect) {
     let visible = flow.visible();
     let rows = visible.len().clamp(1, VISIBLE_ROWS) as u16;
-    let rect = centered(78, rows + 5, area);
+    let rect = centered(78, rows + 6, area);
     frame.render_widget(Clear, rect);
     let block = pane_block(format!(" 一键导入 · {} · 勾选模型 ", flow.key_id), true);
     let inner = block.inner(rect);
@@ -119,6 +119,7 @@ fn draw_model_picker(frame: &mut Frame, flow: &ImportFlow, area: Rect) {
         .constraints([
             Constraint::Length(1), // 搜索框
             Constraint::Min(1),    // 列表
+            Constraint::Length(1), // 默认模型 + 思考强度
             Constraint::Length(1), // 统计
             Constraint::Length(1), // 快捷键
         ])
@@ -159,14 +160,32 @@ fn draw_model_picker(frame: &mut Frame, flow: &ImportFlow, area: Rect) {
         frame.render_widget(Paragraph::new(lines), chunks[1]);
     }
 
-    frame.render_widget(Paragraph::new(count_line(flow)), chunks[2]);
+    frame.render_widget(Paragraph::new(default_line(flow)), chunks[2]);
+    frame.render_widget(Paragraph::new(count_line(flow)), chunks[3]);
     frame.render_widget(
         Paragraph::new(Line::from(Span::styled(
-            " 空格 勾选  d 默认  a 全选  f 显示全部  / 搜索  ⏎ 导入  Esc 取消 ",
+            " 空格勾选  d 默认  e 强度  a 全选  f 全部  / 搜索  ⏎ 导入  Esc 取消 ",
             Style::new().fg(theme::MUTED),
         ))),
-        chunks[3],
+        chunks[4],
     );
+}
+
+/// 面板上那行「会写进 config.toml 的东西」：默认模型 + 思考强度。
+fn default_line(flow: &ImportFlow) -> Line<'static> {
+    Line::from(vec![
+        Span::styled(" 默认模型：", Style::new().fg(theme::MUTED)),
+        Span::styled(
+            flow.default_model().unwrap_or("—").to_string(),
+            Style::new().fg(theme::OK).add_modifier(Modifier::BOLD),
+        ),
+        Span::styled("    思考强度：", Style::new().fg(theme::MUTED)),
+        Span::styled(
+            flow.effort().to_string(),
+            Style::new().fg(theme::GOLD).add_modifier(Modifier::BOLD),
+        ),
+        Span::styled("（d/e 可改）", Style::new().fg(theme::MUTED)),
+    ])
 }
 
 fn model_line(flow: &ImportFlow, position: usize, index: usize) -> Line<'static> {

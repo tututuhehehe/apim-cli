@@ -103,7 +103,9 @@ recipes/              内置 recipe ×4（deepseek/openai/moonshot/openrouter，
 
 11. **一键导入到 Codex（`x` 键）的硬约束**（都来自 codex 源码 + 真机实测，别凭感觉改）：
     - Codex 允许 `config.toml` 里同时定义多个 `[model_providers.*]`，但同一时刻只有顶层 `model_provider` 指向的那个激活 → apim **只切换激活项，旧 provider 块一律保留**（用户手写的注释 / `[projects]` / `[tui]` 也不能丢），不做整体重写。
-    - 改写 `~/.codex/config.toml` **必须用 `toml_edit`**（`toml` 序列化会丢注释），写前备份成 `config.toml.apim.bak`，再 tmp + rename。
+    - **模型不在 `config.toml` 里**：写在 `model_catalog_json` 指向的独立 JSON（`~/.codex/apim-models.json`），config.toml 只有指针（GLM / DeepSeek 官方 Codex 文档也是这个写法）。**思考强度是顶层 `model_reasoning_effort`**，不写就等于没有。
+    - **导入后必须重启 codex 才在 `/model` 生效**：codex 的常驻 app-server daemon 会在启动时加载一次模型目录并缓存（实测：daemon 启动于导入之前时，`codex exec` 已能降上新模型，但 `/model` 还是旧的内置 GPT 表）；用干净 `CODEX_HOME` 起一个新 daemon 验证过能正常列出导入的模型。
+    - 改写 `~/.codex/config.toml` **必须用 `toml_edit`**（`toml` 序列化会丢注释），写前备份成 `config.toml.apim.bak`，再 tmp + rename。注意加注释要挂在 **key 的 decor**（`leaf_decor_mut`）上，挂到 value 的 decor 会把值挤到下一行、产出非法 TOML。
     - `wire_api` 只接受 `"responses"`（0.134+ 删了 `"chat"`，写了会硬报错）→ 中转站得提供 `/v1/responses`；面板默认只列厂商声明支持 Responses 的模型。
     - `model_catalog_json` 相对路径按 `CODEX_HOME` 解析；它是**整表替换**（不是合并）；条目**必须**有 `base_instructions` 或 `model_messages.instructions_template`，两样都缺会让 codex 解析整个目录失败。
     - 模型目录一律从**本机 codex**（`codex debug models --bundled`）克隆条目改标识字段，不内嵌模板文本（避免跟 codex 版本漂移）；导入完用 `codex debug models` 反向校验勾选的模型都在。
