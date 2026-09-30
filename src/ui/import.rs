@@ -163,7 +163,7 @@ fn draw_model_picker(frame: &mut Frame, flow: &ImportFlow, area: Rect) {
     frame.render_widget(Paragraph::new(count_line(flow)), chunks[2]);
     frame.render_widget(
         Paragraph::new(Line::from(Span::styled(
-            " 空格 勾选  a 全选  f 全部  / 搜索  ⏎ 下一步（选默认模型）  Esc 取消 ",
+            " 空格 勾选  a 全选/清空  / 搜索  ⏎ 下一步（选默认模型）  Esc 取消 ",
             Style::new().fg(theme::MUTED),
         ))),
         chunks[3],
@@ -275,8 +275,9 @@ fn model_line(flow: &ImportFlow, position: usize, index: usize) -> Line<'static>
         Span::styled(item.name.clone(), name_style),
     ];
     if unsupported {
+        // 只是厂商标注，实测会漏报，所以照旧可勾选
         spans.push(Span::styled(
-            "   · 厂商标注不支持 responses",
+            "   · 厂商标注不支持 responses（仍可勾选）",
             Style::new().fg(theme::MUTED),
         ));
     }
@@ -285,10 +286,10 @@ fn model_line(flow: &ImportFlow, position: usize, index: usize) -> Line<'static>
 
 fn count_line(flow: &ImportFlow) -> Line<'static> {
     let mut text = format!(" 已勾选 {}/{}", flow.checked_count(), flow.items.len());
-    let hidden = flow.hidden_count();
-    if hidden > 0 && !flow.show_all {
+    let declared = flow.declared_unsupported_count();
+    if declared > 0 {
         text.push_str(&format!(
-            "   · {hidden} 个不支持 responses 的已隐藏（f 显示）"
+            "   · {declared} 个厂商标注不支持 responses（只是提示，不影响勾选）"
         ));
     }
     Line::from(Span::styled(text, Style::new().fg(theme::MUTED)))

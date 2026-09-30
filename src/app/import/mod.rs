@@ -52,8 +52,6 @@ pub struct ImportFlow {
     pub default_cursor: usize,
     pub filter: String,
     pub searching: bool,
-    /// 是否连厂商明确声明不支持 Responses 的模型也列出来。
-    pub show_all: bool,
     /// Failed 步骤的失败原因。
     pub error: Option<String>,
 }
@@ -70,7 +68,6 @@ impl ImportFlow {
             default_cursor: 0,
             filter: String::new(),
             searching: false,
-            show_all: false,
             error: None,
         }
     }
@@ -84,13 +81,17 @@ impl ImportFlow {
             .collect()
     }
 
-    /// 可见条目在 `items` 里的下标：先按端点能力筛，再按搜索关键字筛。
+    /// 可见条目在 `items` 里的下标：只按搜索关键字筛。
+    ///
+    /// **不按厂商声明的端点能力隐藏任何模型**：`supported_endpoint_types` 是 new-api 后台的
+    /// 端点映射配置，不是真实能力探测 —— 实测 ikun 把 `gpt-6-sol` 标成只有 `openai`，
+    /// 但它在 Codex 里（走 /responses）完全能用。拿它当硬过滤会把能用的模型藏起来，
+    /// 所以只把声明当作行尾提示，不参与筛选。
     pub fn visible(&self) -> Vec<usize> {
         let needle = self.filter.trim().to_lowercase();
         self.items
             .iter()
             .enumerate()
-            .filter(|(_, item)| self.show_all || item.responses != Some(false))
             .filter(|(_, item)| needle.is_empty() || item.name.to_lowercase().contains(&needle))
             .map(|(index, _)| index)
             .collect()
@@ -100,8 +101,8 @@ impl ImportFlow {
         self.items.iter().filter(|item| item.checked).count()
     }
 
-    /// 被「只显示 responses 可用」挡掉的模型数。
-    pub fn hidden_count(&self) -> usize {
+    /// 厂商在 /models 里声明「不支持 responses」的模型数（只是提示，不隐藏）。
+    pub fn declared_unsupported_count(&self) -> usize {
         self.items
             .iter()
             .filter(|item| item.responses == Some(false))
@@ -209,7 +210,6 @@ impl App {
             flow.default_cursor = 0;
             flow.filter.clear();
             flow.searching = false;
-            flow.show_all = false;
             flow.error = None;
         }
         let client = self.client.clone();
@@ -328,16 +328,6 @@ impl App {
         if let Some(flow) = self.import_flow_mut() {
             flow.step = ImportStep::Models;
         }
-    }
-
-    /// `f`：显示/隐藏厂商明确声明不支持 Responses 的模型。
-    pub fn import_toggle_show_all(&mut self) {
-        let Some(flow) = self.import_flow_mut() else {
-            return;
-        };
-        flow.show_all = !flow.show_all;
-        let count = flow.visible().len();
-        flow.cursor = flow.cursor.min(count.saturating_sub(1));
     }
 
     pub fn import_start_search(&mut self) {
@@ -545,7 +535,6 @@ pub(crate) fn handle_import_key(app: &mut App, key: KeyEvent) -> bool {
             KeyCode::Char('k') | KeyCode::Up => app.import_move(-1),
             KeyCode::Char(' ') => app.import_toggle(),
             KeyCode::Char('a') => app.import_toggle_all(),
-            KeyCode::Char('f') => app.import_toggle_show_all(),
             KeyCode::Char('/') => app.import_start_search(),
             KeyCode::Enter => app.import_confirm_models(),
             KeyCode::Esc | KeyCode::Char('q') => app.cancel_modal(),

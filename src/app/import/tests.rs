@@ -87,7 +87,7 @@ fn open_without_keys_toasts_instead_of_opening() {
 // ---- 第一步：选客户端 → 拉模型 ----------------------------------------
 
 #[tokio::test]
-async fn choosing_agent_fetches_models_then_prechecks_first_usable_one() {
+async fn choosing_agent_fetches_models_and_leaves_selection_empty() {
     let (mut app, _rx, _rx_task) = test_app(&[("alpha", &["a1"])]);
     app.focus = Focus::Keys;
     app.open_import();
@@ -102,9 +102,13 @@ async fn choosing_agent_fetches_models_then_prechecks_first_usable_one() {
     assert!(!flow.loading);
     assert_eq!(flow.step, ImportStep::Models);
     // 不预勾任何模型：勾哪些、哪个当默认都由用户在面板里定
-    assert_eq!(visible_names(&app), ["gpt-6-sol", "deepseek-v4"]);
+    // 也不隐藏任何模型：厂商标注只当提示（实测会漏报）
+    assert_eq!(
+        visible_names(&app),
+        ["gpt-6-sol", "chat-only", "deepseek-v4"]
+    );
     assert!(checked_names(&app).is_empty());
-    assert_eq!(flow.hidden_count(), 1);
+    assert_eq!(flow.declared_unsupported_count(), 1);
 }
 
 #[tokio::test]
@@ -153,7 +157,7 @@ fn picker_app() -> App {
 }
 
 #[test]
-fn toggle_all_and_show_all() {
+fn toggle_all_keeps_every_model_visible() {
     let mut app = picker_app();
 
     // 光标在第 0 行：空格勾上
@@ -162,19 +166,22 @@ fn toggle_all_and_show_all() {
 
     // a：可见的全勾；再按一次全取消
     app.import_toggle_all();
-    assert_eq!(checked_names(&app), ["gpt-6-sol", "deepseek-v4"]);
+    assert_eq!(
+        checked_names(&app),
+        ["gpt-6-sol", "chat-only", "deepseek-v4"]
+    );
     app.import_toggle_all();
     assert!(
         checked_names(&app).is_empty(),
         "可见的已全勾，再按应变全取消"
     );
 
-    // f：把明确不支持 responses 的也显示出来（顺序按 items 下标）
-    app.import_toggle_show_all();
+    // 厂商标注「不支持 responses」的模型**不会**被隐藏（实测标注会漏报，隐藏会藏掉能用的模型）
     assert_eq!(
         visible_names(&app),
         ["gpt-6-sol", "chat-only", "deepseek-v4"]
     );
+    assert_eq!(flow(&app).declared_unsupported_count(), 1);
 }
 
 #[test]
@@ -183,7 +190,7 @@ fn cursor_moves_stay_inside_visible_window() {
     app.import_move(-1);
     assert_eq!(flow(&app).cursor, 0, "顶部再往上不动");
     app.import_move(100);
-    assert_eq!(flow(&app).cursor, 1, "钳到最后一个可见条目");
+    assert_eq!(flow(&app).cursor, 2, "钳到最后一个可见条目");
 }
 
 #[test]
@@ -224,7 +231,10 @@ async fn single_checked_model_skips_the_default_panel() {
 async fn multiple_checked_models_ask_which_is_the_default() {
     let mut app = picker_app();
     app.import_toggle_all();
-    assert_eq!(checked_names(&app), ["gpt-6-sol", "deepseek-v4"]);
+    assert_eq!(
+        checked_names(&app),
+        ["gpt-6-sol", "chat-only", "deepseek-v4"]
+    );
     app.import_confirm_models();
     // 先停在「选默认模型」，光标默认第一个勾选的
     assert_eq!(flow(&app).step, ImportStep::DefaultModel);
@@ -234,7 +244,7 @@ async fn multiple_checked_models_ask_which_is_the_default() {
     app.import_move_default(1);
     assert_eq!(flow(&app).default_cursor, 1);
     app.import_move_default(99);
-    assert_eq!(flow(&app).default_cursor, 1, "钳到最后一个已勾选模型");
+    assert_eq!(flow(&app).default_cursor, 2, "钳到最后一个已勾选模型");
     app.import_default_back();
     assert_eq!(flow(&app).step, ImportStep::Models);
 
@@ -331,13 +341,7 @@ fn keys_route_through_the_panel() {
     handle_import_key(&mut app, key(KeyCode::Char(' ')));
     assert_eq!(checked_names(&app), ["gpt-6-sol"]);
     handle_import_key(&mut app, key(KeyCode::Char('a')));
-    assert_eq!(checked_names(&app).len(), 2);
-
-    // f 显示全部
-    handle_import_key(&mut app, key(KeyCode::Char('f')));
-    assert!(flow(&app).show_all);
-    handle_import_key(&mut app, key(KeyCode::Char('f')));
-    assert!(!flow(&app).show_all);
+    assert_eq!(checked_names(&app).len(), 3, "a 会把可见的全部勾上");
 
     // / 进搜索，输入字符进过滤，Esc 退出搜索但不关面板
     handle_import_key(&mut app, key(KeyCode::Char('/')));

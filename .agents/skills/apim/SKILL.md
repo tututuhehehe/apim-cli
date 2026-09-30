@@ -209,7 +209,7 @@ apim status <id> --json
 几个容易踩的：
 
 - Codex **可以同时定义多个** `[model_providers.*]`，但同一时刻只有 `model_provider` 指向的那个生效 → apim 只切激活项，旧 provider 块保留（想要多套并存就用官方的 `codex --profile <name>` + `~/.codex/<name>.config.toml`）。
-- **`wire_api = "chat"` 已被 codex 删除**（0.134+ 硬报错）。中转站必须提供 `/v1/responses`；new-api 系的 `/v1/models` 会带 `supported_endpoint_types`，面板据此筛出能走 Responses 的模型。
+- **`wire_api = "chat"` 已被 codex 删除**（0.134+ 硬报错）。中转站必须提供 `/v1/responses`；new-api 系的 `/v1/models` 会带 `supported_endpoint_types`，但**那只是后台端点映射、会漏报**（实测 ikun 把 `gpt-6-sol` 标成只有 `openai`，实际能用），所以面板只把它当行尾提示、**不隐藏任何模型**。
 - 模型条目是照 codex 官方字段手写的**迷你条目**（GLM/DeepSeek 官方文档 + cc-switch 实测模板，~1.5KB/模型，带 `supports_reasoning_summaries` 与 `supports_parallel_tool_calls` 以兼容老版 codex）；导入完用 `codex debug models` 反向校验。
 - 厂商 id 撞保留名（`openai`/`ollama`/`lmstudio`/`amazon-bedrock*`）时写成 `apim-openai`。
 - 验证：`cargo run -- --snapshot-import` / `--snapshot-import-models` 看渲染；`cargo test -- codex_real_end_to_end --ignored --nocapture` 跑真机端到端（需本机装 codex）。
