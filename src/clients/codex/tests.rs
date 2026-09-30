@@ -77,19 +77,31 @@ fn built_catalog_matches_official_minimal_shape() {
     assert_eq!(entries[0]["shell_type"], "shell_command");
     assert_eq!(entries[0]["apply_patch_tool_type"], "freeform");
     // 必须有：两者都缺会让 codex 解析整个目录失败
-    assert_eq!(entries[0]["base_instructions"], "");
+    // base_instructions 是 codex 的必填字段，不能缺也不能给空串
+    assert!(
+        entries[0]["base_instructions"]
+            .as_str()
+            .is_some_and(|s| !s.is_empty()),
+        "base_instructions 不能为空"
+    );
+    // 跨 codex 版本的两个必填字段名（cc-switch 记录过踩坑）
+    assert_eq!(entries[0]["supports_reasoning_summaries"], true);
+    assert_eq!(entries[0]["supports_reasoning_summary_parameter"], true);
+    assert_eq!(entries[0]["supports_parallel_tool_calls"], true);
     // 不夹带 GPT 模板的专属字段（上一版就是被这些坑了）
     for key in [
         "model_messages",
         "tool_mode",
         "use_responses_lite",
-        "supports_search_tool",
         "node_repl_auto_review_required",
-        "supports_image_detail_original",
     ] {
         assert!(entries[0].get(key).is_none(), "{key} 不该出现在条目里");
     }
-    assert_eq!(entries[0]["input_modalities"], json!(["text"]));
+    // fail-open：与 DeepSeek 官方目录 / cc-switch 模板一致，免得粘图片被拦
+    assert_eq!(entries[0]["input_modalities"], json!(["text", "image"]));
+    assert_eq!(entries[0]["supports_search_tool"], false);
+    // 严格网关会 400 的全分辨率图片能力显式关掉
+    assert_eq!(entries[0]["supports_image_detail_original"], false);
     assert_eq!(entries[0]["context_window"], 272000);
     assert_eq!(entries[0]["max_context_window"], 272000);
     // OpenAI 专属的迁移/加速档提示显式清空
@@ -460,4 +472,35 @@ fn codex_real_end_to_end() {
             "应新增 ikun 的 provider 块\n{written}"
         );
     }
+}
+
+// ---- 重启 codex 守护进程的进程匹配 --------------------------------------
+
+/// 匹配必须严格：只杀真正的 codex app-server，不能误杀用户会话或无关进程。
+#[cfg(unix)]
+#[test]
+fn codex_server_matching_is_strict() {
+    // 真 daemon（daemon + pid-update-loop 两个形态）
+    assert!(is_codex_server(
+        " 87965 /Users/x/.codex/packages/app-server-daemon/releases/0.159.2-aarch64-apple-darwin/bin/codex app-server --listen unix:// --managed-daemon"
+    ));
+    assert!(is_codex_server(
+        " 87990 /Users/x/.codex/packages/app-server-daemon/releases/0.159.2-aarch64-apple-darwin/bin/codex app-server daemon pid-update-loop"
+    ));
+    // 用户的 codex 会话：没有 app-server 子命令 → 不杀
+    assert!(!is_codex_server(" 86760 node /opt/homebrew/bin/codex"));
+    assert!(!is_codex_server(
+        " 86761 /opt/homebrew/lib/node_modules/@openai/codex/vendor/codex"
+    ));
+    // 命令行里恰好含这两个词的无关进程（apim 自己的测试/ps|grep）→ 绝不能杀
+    assert!(!is_codex_server(
+        " 92087 /opt/homebrew/bin/bash -c echo \"codex app-server\" | grep foo"
+    ));
+    assert!(!is_codex_server(
+        " 92091 awk /codex/ && /app-server/ {print}"
+    ));
+    // code-mode host 是另一个二进制名 → 不在范围内
+    assert!(!is_codex_server(
+        " 8272 /Users/x/.codex/packages/app-server-daemon/releases/0.159.2-aarch64-apple-darwin/bin/codex-code-mode-host"
+    ));
 }

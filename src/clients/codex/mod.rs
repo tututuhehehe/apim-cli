@@ -171,6 +171,80 @@ pub fn current_state(config_dir: &Path) -> Option<CodexState> {
     store::load(config_dir)
 }
 
+/// 重启 codex 的 app-server 守护进程。
+///
+/// **为什么必须重启**：codex 的模型目录（`model_catalog_json`）只在 app-server 启动那一刻
+/// 读一次，之后一直缓存 —— 实测：导入后新开的 codex 会话仍然列出旧目录（`codex exec` 却能
+/// 用新模型），因为 TUI/桌面端都挂在同一个常驻 daemon 上。cc-switch 遇到同一件事，也只是
+/// 提示用户重启 Codex（v3.16.1 release notes）。
+///
+/// 这里直接把在跑的 `codex app-server` 杀掉（codex 下次启动会自动起新的）。
+/// 返回杀掉的进程数；0 = 当时没有 daemon 在跑。不想让它动进程就设 `APIM_NO_RESTART_CODEX=1`。
+/// 重启 codex 的 app-server 守护进程。
+pub fn restart_daemon() -> Result<usize, String> {
+    if std::env::var_os("APIM_NO_RESTART_CODEX").is_some() {
+        return Ok(0);
+    }
+    let mut killed = 0;
+    // 杀两轮：`daemon pid-update-loop` 会把主 daemon 拉回来，第一轮之后可能有新的
+    for _ in 0..2 {
+        let pids = codex_server_pids()?;
+        if pids.is_empty() {
+            break;
+        }
+        for pid in pids {
+            let _ = std::process::Command::new("kill")
+                .arg("-TERM")
+                .arg(pid.to_string())
+                .status();
+            killed += 1;
+        }
+        std::thread::sleep(std::time::Duration::from_millis(400));
+    }
+    Ok(killed)
+}
+
+/// 找在跑的 codex app-server 相关进程（含 `daemon pid-update-loop`）。
+/// 只认「可执行文件叫 codex + 带 `app-server` 子命令」，不碰用户自己的 codex 会话，
+/// 也不会误匹配命令行里恰好含这两个词的无关进程（如 `ps | grep codex`）。
+#[cfg(unix)]
+fn codex_server_pids() -> Result<Vec<u32>, String> {
+    let output = std::process::Command::new("ps")
+        .args(["-eo", "pid=,command="])
+        .output()
+        .map_err(|err| format!("执行 ps 失败：{err}"))?;
+    let me = std::process::id();
+    let pids = String::from_utf8_lossy(&output.stdout)
+        .lines()
+        .filter(|line| is_codex_server(line))
+        .filter_map(|line| line.split_whitespace().next()?.parse::<u32>().ok())
+        .filter(|pid| *pid != me)
+        .collect();
+    Ok(pids)
+}
+
+#[cfg(not(unix))]
+fn codex_server_pids() -> Result<Vec<u32>, String> {
+    // 不去动 Windows 上的用户进程；导入后会把「需重启 codex」写进提示
+    Ok(Vec::new())
+}
+
+/// 一行 `ps -eo pid=,command=` 输出是不是 codex 的 app-server（守护）进程。
+/// 可执行文件名必须正好是 `codex`，且参数里要有 `app-server` 子命令。
+#[cfg(unix)]
+pub(crate) fn is_codex_server(line: &str) -> bool {
+    let mut tokens = line.split_whitespace();
+    let _pid = tokens.next();
+    let Some(binary) = tokens.next() else {
+        return false;
+    };
+    let name = binary.rsplit('/').next().unwrap_or(binary);
+    if name != "codex" && name != "codex.exe" {
+        return false;
+    }
+    tokens.any(|token| token == "app-server")
+}
+
 /// `~/.codex`（尊重 `CODEX_HOME`）。
 pub fn codex_home() -> PathBuf {
     if let Some(dir) = std::env::var_os("CODEX_HOME") {

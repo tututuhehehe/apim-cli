@@ -564,6 +564,7 @@ mod tests {
             next_auto_refresh: Instant::now(),
             config_dir: crate::app::tests::test_config_dir("inspector"),
             codex: None,
+            restart_codex_daemon: false,
             undo_stack: std::collections::VecDeque::new(),
         }
     }

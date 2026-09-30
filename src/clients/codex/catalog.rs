@@ -38,6 +38,12 @@ const CONTEXT_WINDOW: i64 = 272_000;
 /// 避免 codex 声明第三方网关不认的工具类型。
 const SHELL_TYPE: &str = "shell_command";
 
+/// 给模型的系统提示词。codex 把 `base_instructions` 当**必填字段**（缺少直接拒整份文件），
+/// 但也不该把 62KB 的 GPT harness 塞给第三方模型，所以只给一句中性的 Codex 身份说明
+/// （cc-switch 的第三方网关模板也是这个做法）。
+const BASE_INSTRUCTIONS: &str = "You are Codex, a coding agent working in the user's terminal. \
+     You and the user share the same workspace; work with them to achieve their goals.";
+
 /// 每档思考强度的中文说明（codex 的 `/model` 选择器会显示）。
 fn effort_description(effort: &str) -> &'static str {
     match effort {
@@ -111,7 +117,11 @@ pub fn build(
     Ok(json!({ "models": entries }))
 }
 
-/// 一个模型的目录条目。字段集对齐 GLM 官方文档 + codex 的 `model_info_from_slug`。
+/// 一个模型的目录条目。字段集 = GLM / DeepSeek 官方文档 + cc-switch 跨版本实测过的
+/// 最小模板，兼顾 codex 各版本的必填字段：
+/// - `supports_reasoning_summaries`：codex ≥0.144.5 缺它会拒整份目录（cc-switch v3.18.0 记录）
+/// - `supports_parallel_tool_calls`：codex 0.144.5~0.148.0-alpha.15 当必填（cc-switch v3.20.2 记录）
+/// - `base_instructions`：必填，不能缺也不能给空串
 fn model_entry(slug: &str, effort: &str, priority: i64) -> Value {
     let levels: Vec<Value> = EFFORTS
         .iter()
@@ -121,6 +131,7 @@ fn model_entry(slug: &str, effort: &str, priority: i64) -> Value {
         "slug": slug,
         "display_name": slug,
         "description": format!("apim 导入的模型（{slug}）"),
+        "base_instructions": BASE_INSTRUCTIONS,
         "default_reasoning_level": effort,
         "supported_reasoning_levels": levels,
         "shell_type": SHELL_TYPE,
@@ -128,18 +139,26 @@ fn model_entry(slug: &str, effort: &str, priority: i64) -> Value {
         "visibility": "list",
         "supported_in_api": true,
         "priority": priority,
-        // 必须有：两者都缺会让 codex 解析整个目录失败
-        "base_instructions": "",
+        // 同一件事的两个字段名：老版本（0.144.5~0.148）认复数名且缺了拒整份文件，
+        // 新版认 `_parameter`。两个都给，跨版本都安全。
+        "supports_reasoning_summaries": true,
         "supports_reasoning_summary_parameter": true,
         "default_reasoning_summary": "none",
         "support_verbosity": false,
+        // 老版本当必填字段；值只影响 codex 会不会并行发工具调用
+        "supports_parallel_tool_calls": true,
         "apply_patch_tool_type": "freeform",
         "web_search_tool_type": "text",
+        // 中转站不一定实现了 codex 的 hosted search，关掉更安全
+        "supports_search_tool": false,
+        "supports_image_detail_original": false,
         "truncation_policy": { "mode": "bytes", "limit": 10_000 },
         "context_window": CONTEXT_WINDOW,
         "max_context_window": CONTEXT_WINDOW,
         "effective_context_window_percent": 95,
-        "input_modalities": ["text"],
+        // fail-open（与 DeepSeek 官方目录、cc-switch 模板一致）：不声称图文，
+        // 免得粘图片时被 codex 直接拦下
+        "input_modalities": ["text", "image"],
         "experimental_supported_tools": [],
         // 下面几个是 OpenAI 专属的迁移/加速档提示，显式清空，别让 codex 弹升级提示
         "availability_nux": null,

@@ -204,13 +204,13 @@ apim status <id> --json
 
 **模型不在 `config.toml` 里**（Codex 的机制，GLM / DeepSeek 官方 Codex 文档也是这个写法）：顶层只写 `model_provider` / `model` / `model_reasoning_effort` / `model_catalog_json="apim-models.json"`，模型元数据（包含每模型的 medium/high/xhigh/max 四档思考等级）在 `~/.codex/apim-models.json`。apim 侧记在 `~/.config/apim/codex.toml`。
 
-**导入完必须重启 codex（关掉所有 Codex 窗口 / 重启 app-server daemon），否则 `/model` 里不会出现新模型** —— codex 的常驻 daemon 启动时只加载一次模型目录。判断方法：`ps aux | grep "codex app-server"` 看 daemon 启动时间是否早于导入时间。
+**导入完 apim 会自动重启 codex 的 app-server 守护进程**（`APIM_NO_RESTART_CODEX=1` 可关）：codex 只在 daemon 启动时读一次模型目录，不重启时 `codex exec` 已能用新模型、但 `/model` 里还是旧表。判断方法：`ps -o pid,lstart,command -p $(pgrep -f "app-server" | tr '\n' ',')` 看 daemon 启动时间是否早于导入时间。
 
 几个容易踩的：
 
 - Codex **可以同时定义多个** `[model_providers.*]`，但同一时刻只有 `model_provider` 指向的那个生效 → apim 只切激活项，旧 provider 块保留（想要多套并存就用官方的 `codex --profile <name>` + `~/.codex/<name>.config.toml`）。
 - **`wire_api = "chat"` 已被 codex 删除**（0.134+ 硬报错）。中转站必须提供 `/v1/responses`；new-api 系的 `/v1/models` 会带 `supported_endpoint_types`，面板据此筛出能走 Responses 的模型。
-- 模型条目是照 codex 官方字段手写的**迷你条目**（GLM/DeepSeek 官方文档同款，~1KB/模型）；导入完用 `codex debug models` 反向校验。
+- 模型条目是照 codex 官方字段手写的**迷你条目**（GLM/DeepSeek 官方文档 + cc-switch 实测模板，~1.5KB/模型，带 `supports_reasoning_summaries` 与 `supports_parallel_tool_calls` 以兼容老版 codex）；导入完用 `codex debug models` 反向校验。
 - 厂商 id 撞保留名（`openai`/`ollama`/`lmstudio`/`amazon-bedrock*`）时写成 `apim-openai`。
 - 验证：`cargo run -- --snapshot-import` / `--snapshot-import-models` 看渲染；`cargo test -- codex_real_end_to_end --ignored --nocapture` 跑真机端到端（需本机装 codex）。
 

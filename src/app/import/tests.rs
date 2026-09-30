@@ -246,6 +246,7 @@ fn outcome(key_id: &str, result: Result<ImportReport, String>) -> ImportOutcome 
         state: None,
         state_error: None,
         effort: DEFAULT_EFFORT.into(),
+        restarted: 0,
     }
 }
 
@@ -269,7 +270,9 @@ async fn successful_import_toasts_marks_key_and_closes_panel() {
     assert!(matches!(app.modal, Modal::None), "成功后应关面板");
     assert_eq!(
         app.toast_text(),
-        Some("已导入 Codex：alpha.a1 · 1 个模型 · 默认 gpt-6-sol · 强度 high · 重启 codex 生效")
+        Some(
+            "已导入 Codex：alpha.a1 · 1 个模型 · 默认 gpt-6-sol · 强度 high · 重启 codex 后 /model 才会列出新模型"
+        )
     );
     assert!(app.is_codex_active("alpha.a1"), "★ 应打在这把密钥上");
     assert!(!app.is_codex_active("alpha.a2"));

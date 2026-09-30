@@ -135,6 +135,8 @@ pub struct ImportOutcome {
     pub state_error: Option<String>,
     /// 本次写入的默认思考强度（成功提示里显示）。
     pub effort: String,
+    /// 重启掉的 codex 守护进程数（0 = 当时没在跑，或已被 APIM_NO_RESTART_CODEX 禁用）。
+    pub restarted: usize,
 }
 
 impl App {
@@ -410,6 +412,7 @@ impl App {
         let effort = request.reasoning_effort.clone();
         let fallback_effort = effort.clone();
         let config_dir = self.config_dir.clone();
+        let restart_daemon = self.restart_codex_daemon;
         let tx = self.tx_task.clone();
         tokio::spawn(async move {
             let outcome = tokio::task::spawn_blocking(move || {
@@ -422,12 +425,19 @@ impl App {
                     }
                     Err(_) => (None, None),
                 };
+                // 写成功才重启：codex 只会在 daemon 启动时读一次模型目录
+                let restarted = if result.is_ok() && restart_daemon {
+                    crate::clients::codex::restart_daemon().unwrap_or(0)
+                } else {
+                    0
+                };
                 ImportOutcome {
                     key_id: request_key_id,
                     result,
                     state,
                     state_error,
                     effort,
+                    restarted,
                 }
             })
             .await
@@ -437,6 +447,7 @@ impl App {
                 state: None,
                 state_error: None,
                 effort: fallback_effort,
+                restarted: 0,
             });
             let _ = tx.send(TaskMsg::Import(Box::new(outcome)));
         });
@@ -463,8 +474,15 @@ impl App {
                 if let Some(backup) = &report.backup_path {
                     note.push_str(&format!(" · 旧配置备份为 {}", file_name(backup)));
                 }
-                // codex 的常驻 daemon 会缓存模型目录：不重启就看不到新模型（已实测）
-                note.push_str(" · 重启 codex 生效");
+                // codex 的模型目录只在 app-server 启动时读一次，必须重启才能让 /model 刷新
+                if outcome.restarted > 0 {
+                    note.push_str(&format!(
+                        " · 已重启 codex 守护进程({} 个)，重开 codex 即可看到新模型",
+                        outcome.restarted
+                    ));
+                } else {
+                    note.push_str(" · 重启 codex 后 /model 才会列出新模型");
+                }
                 if let Some(error) = outcome.state_error {
                     note.push_str(&format!("（状态未记录：{error}）"));
                 }

@@ -177,7 +177,9 @@ apim status glm --json
 
 导入完成前它会**让 codex 自己解析一遍新配置**（`codex debug models`）确认勾选的模型都在，然后给一条成功提示；不成功会当场把原因显示在面板里。
 
-> **导入后必须重启 codex（关掉所有已开的 Codex 窗口 / 重启 app-server 守护进程），`/model` 里才会出现新模型。** Codex 的常驻 daemon 会在启动时加载一次模型目录并缓存，不重启就一直是旧列表 —— 同一份配置用 `codex exec` 能降上模型，但 `/model` 里看不到，就是因为这个。
+> **codex 只在守护进程启动时读一次模型目录，导入后必须重启 codex 才能让 `/model` 刷新。** apim 导入成功后会**自动重启 codex 的 app-server 守护进程**（杀掉在跑的，codex 下次启动自动起新的），toast 里会告知；不想让它动进程就设 `APIM_NO_RESTART_CODEX=1`，那时手动 `pkill -f "codex app-server"` 即可。
+>
+> 为什么非要重启：TUI 和桌面端都挂在同一个常驻 daemon 上，而不重启时 **`codex exec` 已经能用新模型、`/model` 里却还是旧列表** —— 这是最容易误判成「没导入成功」的现象（cc-switch 官方指南也写了同一件事）。
 
 ### 写到哪
 
@@ -196,7 +198,7 @@ apim status glm --json
 - **密钥直接写进 `experimental_bearer_token`**。`~/.codex/config.toml` 本来就是 600 权限。在 apim 里轮换这把 key 后，记得重新按一次 `x` 同步。
 - **思考强度写顶层 `model_reasoning_effort`**（面板按 `e` 在 medium/high/xhigh/max 里切）。这四个档同时声明在目录里每个模型上，codex 里用 `/model` 还能按模型改。
 - **每次导入前备份**：改写前把现有内容存成 `~/.codex/config.toml.apim.bak`，想回退直接拿它覆盖回去。
-- **模型条目是照 codex 官方字段手写的迷你条目**（GLM / DeepSeek 官方 Codex 接入文档同款）：`base_instructions: ""`、`shell_type: "shell_command"`、`apply_patch_tool_type: "freeform"`、`input_modalities: ["text"]`，所以每个模型只要 **~1KB**，也**不会**把 GPT 专属的东西（图片输入、`code_mode_only`、`use_responses_lite`、872k 上下文窗口、62KB 的 GPT harness 提示词）塞给第三方模型。上下文窗口用 codex 自己给未知模型的默认值 272000，想按模型写真实值直接改 `apim-models.json`。
+- **模型条目是照 codex 官方字段手写的迷你条目**（GLM / DeepSeek 官方 Codex 接入文档 + cc-switch 跨版本实测的最小模板）：`shell_type: "shell_command"`、`apply_patch_tool_type: "freeform"`、一句中性的 `base_instructions`（codex 把它当必填字段），并带 `supports_reasoning_summaries` 与 `supports_parallel_tool_calls` 两个**老版 codex 会当必填**的字段。所以每个模型只要 **~1.5KB**，也**不会**把 GPT 专属的东西（`code_mode_only`、`use_responses_lite`、872k 上下文窗口、62KB 的 GPT harness）塞给第三方模型。上下文窗口用 codex 给未知模型的默认值 272000，想按模型写真实值直接改 `apim-models.json`。
 - **校验用你本机的 codex**：写完让它自己解析一遍新配置（`codex debug models`），勾选的模型都在才算导入成功。
 - **只支持 Responses 协议**：Codex 0.134+ 已经删掉 `wire_api = "chat"`，中转站必须提供 `/v1/responses`，否则一律 400。面板默认只列厂商声明支持 Responses 的模型（new-api 系中转的 `/v1/models` 会带 `supported_endpoint_types`），按 `f` 可以强制显示全部。
 - 厂商 id 撞上 Codex 保留名（`openai` / `ollama` / `lmstudio` / `amazon-bedrock*`）时会自动加前缀写成 `apim-openai`。

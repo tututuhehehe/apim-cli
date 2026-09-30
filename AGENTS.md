@@ -104,11 +104,11 @@ recipes/              内置 recipe ×4（deepseek/openai/moonshot/openrouter，
 11. **一键导入到 Codex（`x` 键）的硬约束**（都来自 codex 源码 + 真机实测，别凭感觉改）：
     - Codex 允许 `config.toml` 里同时定义多个 `[model_providers.*]`，但同一时刻只有顶层 `model_provider` 指向的那个激活 → apim **只切换激活项，旧 provider 块一律保留**（用户手写的注释 / `[projects]` / `[tui]` 也不能丢），不做整体重写。
     - **模型不在 `config.toml` 里**：写在 `model_catalog_json` 指向的独立 JSON（`~/.codex/apim-models.json`），config.toml 只有指针（GLM / DeepSeek 官方 Codex 文档也是这个写法）。**思考强度是顶层 `model_reasoning_effort`**，不写就等于没有。
-    - **导入后必须重启 codex 才在 `/model` 生效**：codex 的常驻 app-server daemon 会在启动时加载一次模型目录并缓存（实测：daemon 启动于导入之前时，`codex exec` 已能降上新模型，但 `/model` 还是旧的内置 GPT 表）；用干净 `CODEX_HOME` 起一个新 daemon 验证过能正常列出导入的模型。
+    - **导入后必须让 codex 重启才能生效**：codex 的模型目录（`model_catalog_json`）只在 app-server daemon 启动时读一次，之后一直缓存（TUI 和桌面端都挂同一个 daemon）。实测现象：不重启时 `codex exec` 已能用新模型、但 `/model` 里还是旧的内置 GPT 表。cc-switch 的 v3.16.1 release notes 也只是提示用户重启；apim 做得更直接：导入成功后杀在跑的 `codex app-server`（`APIM_NO_RESTART_CODEX=1` 可关）。找进程必须**严格匹配**「可执行文件名正好是 codex + 参数里有 `app-server`」，只按命令行 contains 会把 `ps | grep codex app-server` 这种无关进程也杀掉（已加单测守）。
     - 改写 `~/.codex/config.toml` **必须用 `toml_edit`**（`toml` 序列化会丢注释），写前备份成 `config.toml.apim.bak`，再 tmp + rename。注意加注释要挂在 **key 的 decor**（`leaf_decor_mut`）上，挂到 value 的 decor 会把值挤到下一行、产出非法 TOML。
     - `wire_api` 只接受 `"responses"`（0.134+ 删了 `"chat"`，写了会硬报错）→ 中转站得提供 `/v1/responses`；面板默认只列厂商声明支持 Responses 的模型。
-    - `model_catalog_json` 相对路径按 `CODEX_HOME` 解析；它是**整表替换**（不是合并）；条目**必须**有 `base_instructions` 或 `model_messages.instructions_template`，两样都缺会让 codex 解析整个目录失败。
-    - 模型条目照 codex 官方字段**手写迷你条目**（GLM / DeepSeek 官方 Codex 文档同款）：`base_instructions: ""`、`shell_type: shell_command`、`apply_patch_tool_type: freeform`、`input_modalities: [text]`、上下文窗口用 codex 给未知模型的默认值 272000。**不要克隆 `codex debug models --bundled` 里的 GPT 条目** —— 那会带进 `[text,image]`、`code_mode_only`、`use_responses_lite`、`max_context_window: 872000` 和 62KB harness 提示词（v1 就是这么错的一版，目录 64KB/模型）。导入完用 `codex debug models` 反向校验勾选的模型都在。
+    - `model_catalog_json` 相对路径按 `CODEX_HOME` 解析；它是**整表替换**（不是合并）；条目必须带 `base_instructions`（不能缺也不能给空串）；`supports_reasoning_summaries`（codex ≥0.144.5）与 `supports_parallel_tool_calls`（0.144.5~0.148.0-alpha.15）也被部分版本当必填 —— 两个字段名都给最安全（cc-switch v3.18.0 / v3.20.2 release notes 记了这两个坑）。
+    - 模型条目照官方字段**手写迷你条目**（GLM / DeepSeek 官方 Codex 文档 + cc-switch 实测模板）：`shell_type: shell_command`、`apply_patch_tool_type: freeform`、中性 `base_instructions`、`input_modalities` fail-open 给 `[text, image]`、上下文窗口用 codex 给未知模型的默认值 272000。**不要克隆 `codex debug models --bundled` 里的 GPT 条目** —— 那会带进 `code_mode_only`、`use_responses_lite`、`max_context_window: 872000` 和 62KB harness 提示词（v1 就是这么错的一版，目录 64KB/模型）。导入完用 `codex debug models` 反向校验勾选的模型都在（校验是硬前提，没装 codex 直接报错）。
     - 厂商 id 撞上保留名（`openai`/`ollama`/`lmstudio`/`amazon-bedrock*`）时加 `apim-` 前缀。
 
 ## 验证命令速查

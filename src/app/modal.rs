@@ -588,6 +588,7 @@ mod tests {
             next_auto_refresh: Instant::now() + std::time::Duration::from_secs(300),
             config_dir: crate::app::tests::test_config_dir("modal"),
             codex: None,
+            restart_codex_daemon: false,
             undo_stack: std::collections::VecDeque::new(),
         };
         app.rebuild_provider_list();

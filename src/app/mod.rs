@@ -96,6 +96,9 @@ pub struct App {
     pub(crate) config_dir: PathBuf,
     /// apim 上一次一键导入到 codex 的记录（★ 标记与面板提示）。
     pub codex: Option<CodexState>,
+    /// 导入成功后是否自动重启 codex 守护进程（codex 只在 daemon 启动时读一次模型目录）。
+    /// 测试里一律关掉，免得 `cargo test` 去杀用户机器上正在跑的 codex。
+    pub(crate) restart_codex_daemon: bool,
     /// 本次打开面板后的写操作历史（Ctrl+Z 逐步回退），只存可逆的写操作。
     pub(crate) undo_stack: VecDeque<UndoAction>,
 }
@@ -129,6 +132,7 @@ impl App {
             next_auto_refresh: Instant::now() + AUTO_REFRESH_INTERVAL,
             config_dir,
             codex,
+            restart_codex_daemon: true,
             undo_stack: VecDeque::new(),
         };
         app.rebuild_provider_list();
@@ -589,6 +593,7 @@ pub(crate) mod tests {
             next_auto_refresh: Instant::now() + AUTO_REFRESH_INTERVAL,
             config_dir: test_config_dir("app"),
             codex: None,
+            restart_codex_daemon: false,
             undo_stack: VecDeque::new(),
         };
         app.rebuild_provider_list();

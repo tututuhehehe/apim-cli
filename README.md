@@ -179,7 +179,9 @@ Select a key in the key table and press `x` to write "this key + its provider + 
 
 Before reporting success it makes **codex itself parse the new config** (`codex debug models`) and checks that every ticked model is there; on failure the reason is shown right in the panel.
 
-> **Restart codex after importing (close every open Codex window / restart the app-server daemon) — only then does `/model` list the new models.** Codex's long-lived daemon loads the model catalog once at startup and caches it, so a config written later is invisible to the picker — the same config works in `codex exec` while `/model` still shows the old list. That is exactly this symptom.
+> **Codex reads the model catalog once, when its daemon starts, so `/model` only refreshes after a restart.** apim **restarts the codex app-server daemon for you** after a successful import (it kills the running one; codex spawns a fresh one on next launch) and says so in the toast. Set `APIM_NO_RESTART_CODEX=1` to disable that, then run `pkill -f "codex app-server"` yourself.
+>
+> Why this matters: the TUI and the desktop app both attach to the same long-lived daemon, and without a restart **`codex exec` already uses the new model while `/model` still lists the old ones** — the most confusing way for this to look like "the import didn't work" (cc-switch's own guide documents the same thing).
 
 ### What gets written where
 
@@ -198,7 +200,7 @@ Deliberate choices:
 - **The key goes into `experimental_bearer_token`.** `~/.codex/config.toml` is already mode 600. If you rotate the key in apim, press `x` again to sync.
 - **The reasoning effort goes into top-level `model_reasoning_effort`** (the `e` key cycles medium/high/xhigh/max). The same four levels are declared per model in the catalog, so codex's own `/model` can still override them per model.
 - **Every import is backed up**: the previous content is saved as `~/.codex/config.toml.apim.bak`; copy it back to roll back.
-- **The model entries are minimal, hand-written entries using codex's official fields** (same shape as GLM's and DeepSeek's official Codex integration docs): `base_instructions: ""`, `shell_type: "shell_command"`, `apply_patch_tool_type: "freeform"`, `input_modalities: ["text"]`. Each model costs ~1KB, and nothing GPT-only (image input, `code_mode_only`, `use_responses_lite`, an 872k context window, the 62KB GPT harness prompt) leaks onto a third-party model. The context window uses codex's own unknown-model default of 272000 — edit `apim-models.json` to set a real per-model value.
+- **The model entries are minimal, hand-written entries using codex's official fields** (GLM's and DeepSeek's official Codex integration docs, plus cc-switch's cross-version-tested minimal template): `shell_type: "shell_command"`, `apply_patch_tool_type: "freeform"`, one neutral `base_instructions` sentence (codex treats it as a required field), and both `supports_reasoning_summaries` and `supports_parallel_tool_calls` — fields **older codex versions treat as required**. Each model costs ~1.5KB, and nothing GPT-only (`code_mode_only`, `use_responses_lite`, an 872k context window, the 62KB GPT harness prompt) leaks onto a third-party model. The context window uses codex's own unknown-model default of 272000 — edit `apim-models.json` to set a real per-model value.
 - **Verification uses your installed codex**: after writing, apim makes codex parse the new config (`codex debug models`) and only reports success when every ticked model is there.
 - **Responses protocol only**: Codex 0.134+ removed `wire_api = "chat"`, so the relay must serve `/v1/responses` or you get a hard 400. The panel lists only models the provider advertises as Responses-capable (new-api relays expose `supported_endpoint_types` in `/v1/models`); press `f` to force the full list.
 - Provider ids that collide with Codex reserved names (`openai` / `ollama` / `lmstudio` / `amazon-bedrock*`) get an `apim-` prefix, e.g. `apim-openai`.
