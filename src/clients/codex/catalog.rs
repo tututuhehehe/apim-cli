@@ -86,21 +86,14 @@ pub fn locate_codex() -> Option<PathBuf> {
     .find(|path| path.is_file())
 }
 
-/// 由勾选的模型生成整份目录。默认模型排第一（`priority` 决定 codex 选择器里的排序），
-/// 默认思考强度写进每个条目的 `default_reasoning_level`。
-pub fn build(
-    models: &[String],
-    default_model: &str,
-    default_effort: &str,
-) -> Result<Value, String> {
+/// 由勾选的模型生成整份目录。默认模型排第一（`priority` 决定 codex 选择器里的排序）。
+///
+/// 每个条目都带全四档思考等级（`medium/high/xhigh/max`），默认档固定为 [`DEFAULT_EFFORT`] ——
+/// apim 面板不让人逐个选：想换档就在 codex 里用 `/model` 选，或直接改 `apim-models.json`。
+pub fn build(models: &[String], default_model: &str) -> Result<Value, String> {
     if models.is_empty() {
         return Err("至少勾选一个模型".to_string());
     }
-    let effort = if EFFORTS.contains(&default_effort) {
-        default_effort
-    } else {
-        DEFAULT_EFFORT
-    };
     let mut ordered: Vec<&String> = models.iter().collect();
     if let Some(position) = ordered
         .iter()
@@ -112,7 +105,7 @@ pub fn build(
     let entries: Vec<Value> = ordered
         .iter()
         .enumerate()
-        .map(|(index, slug)| model_entry(slug, effort, index as i64 + 1))
+        .map(|(index, slug)| model_entry(slug, DEFAULT_EFFORT, index as i64 + 1))
         .collect();
     Ok(json!({ "models": entries }))
 }

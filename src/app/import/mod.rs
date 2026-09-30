@@ -8,7 +8,7 @@ use std::time::Instant;
 use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 
 use super::{App, Focus, Modal, TaskMsg};
-use crate::clients::{Agent, CodexState, EFFORTS, ImportReport, ImportRequest};
+use crate::clients::{Agent, CodexState, ImportReport, ImportRequest};
 use crate::probe::{self, ModelEntry};
 
 /// 面板当前停在哪一步。
@@ -47,8 +47,6 @@ pub struct ImportFlow {
     pub cursor: usize,
     /// 默认模型（codex 顶层 `model`）在 items 里的下标。
     pub default: Option<usize>,
-    /// 默认思考强度在 [`EFFORTS`] 里的下标（`e` 循环切换）。
-    pub effort: usize,
     pub filter: String,
     pub searching: bool,
     /// 是否连厂商明确声明不支持 Responses 的模型也列出来。
@@ -67,17 +65,11 @@ impl ImportFlow {
             items: Vec::new(),
             cursor: 0,
             default: None,
-            effort: default_effort_index(),
             filter: String::new(),
             searching: false,
             show_all: false,
             error: None,
         }
-    }
-
-    /// 当前选定的思考强度。
-    pub fn effort(&self) -> &'static str {
-        EFFORTS[self.effort.min(EFFORTS.len() - 1)]
     }
 
     /// 已勾选模型里当前标为默认的那个（面板上要显示出来）。
@@ -133,8 +125,6 @@ pub struct ImportOutcome {
     pub state: Option<CodexState>,
     /// 状态文件写失败时的说明（导入本身是成功的）。
     pub state_error: Option<String>,
-    /// 本次写入的默认思考强度（成功提示里显示）。
-    pub effort: String,
     /// 重启掉的 codex 守护进程数（0 = 当时没在跑，或已被 APIM_NO_RESTART_CODEX 禁用）。
     pub restarted: usize,
 }
@@ -305,13 +295,6 @@ impl App {
         }
     }
 
-    /// `e`：循环切换默认思考强度（medium → high → xhigh → max）。
-    pub fn import_cycle_effort(&mut self) {
-        if let Some(flow) = self.import_flow_mut() {
-            flow.effort = (flow.effort + 1) % EFFORTS.len();
-        }
-    }
-
     /// `f`：显示/隐藏厂商明确声明不支持 Responses 的模型。
     pub fn import_toggle_show_all(&mut self) {
         let Some(flow) = self.import_flow_mut() else {
@@ -377,7 +360,6 @@ impl App {
             .map(|item| item.name.clone())
             .filter(|name| models.contains(name))
             .unwrap_or_else(|| models[0].clone());
-        let effort = flow.effort();
 
         let Some(key) = self.keys.iter().find(|key| key.id() == key_id).cloned() else {
             self.toast = Some(("这把密钥已不存在".into(), Instant::now()));
@@ -405,12 +387,9 @@ impl App {
             alias: key.alias.clone(),
             models,
             default_model,
-            reasoning_effort: effort.to_string(),
         };
         let request_key_id = request.key_id();
         let fallback_key_id = request_key_id.clone();
-        let effort = request.reasoning_effort.clone();
-        let fallback_effort = effort.clone();
         let config_dir = self.config_dir.clone();
         let restart_daemon = self.restart_codex_daemon;
         let tx = self.tx_task.clone();
@@ -436,7 +415,6 @@ impl App {
                     result,
                     state,
                     state_error,
-                    effort,
                     restarted,
                 }
             })
@@ -446,7 +424,6 @@ impl App {
                 result: Err(format!("导入任务异常终止：{err}")),
                 state: None,
                 state_error: None,
-                effort: fallback_effort,
                 restarted: 0,
             });
             let _ = tx.send(TaskMsg::Import(Box::new(outcome)));
@@ -469,7 +446,7 @@ impl App {
                     outcome.key_id,
                     report.models.len(),
                     report.model,
-                    outcome.effort
+                    report.reasoning_effort
                 );
                 if let Some(backup) = &report.backup_path {
                     note.push_str(&format!(" · 旧配置备份为 {}", file_name(backup)));
@@ -513,14 +490,6 @@ fn file_name(path: &std::path::Path) -> String {
         .to_string()
 }
 
-/// 默认思考强度在 `EFFORTS` 里的下标。
-fn default_effort_index() -> usize {
-    EFFORTS
-        .iter()
-        .position(|effort| *effort == crate::clients::DEFAULT_EFFORT)
-        .unwrap_or(0)
-}
-
 /// 把下标按 delta 移动并钳进 `[0, count)`；count 为 0 时回到 0。
 fn clamp_index(current: usize, delta: isize, count: usize) -> usize {
     if count == 0 {
@@ -559,7 +528,6 @@ pub(crate) fn handle_import_key(app: &mut App, key: KeyEvent) -> bool {
             KeyCode::Char(' ') => app.import_toggle(),
             KeyCode::Char('a') => app.import_toggle_all(),
             KeyCode::Char('d') => app.import_set_default(),
-            KeyCode::Char('e') => app.import_cycle_effort(),
             KeyCode::Char('f') => app.import_toggle_show_all(),
             KeyCode::Char('/') => app.import_start_search(),
             KeyCode::Enter => app.import_apply(),

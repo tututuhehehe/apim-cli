@@ -53,7 +53,7 @@ fn base_url_gets_v1_suffix_when_missing() {
 #[test]
 fn built_catalog_matches_official_minimal_shape() {
     let models = vec!["deepseek-flash".to_string(), "deepseek-chat".to_string()];
-    let built = catalog::build(&models, "deepseek-chat", "xhigh").unwrap();
+    let built = catalog::build(&models, "deepseek-chat").unwrap();
     let entries = built["models"].as_array().unwrap();
     assert_eq!(entries.len(), 2);
     // 默认模型排第一（priority 决定 codex 选择器里的排序）
@@ -65,7 +65,7 @@ fn built_catalog_matches_official_minimal_shape() {
     assert_eq!(entries[0]["visibility"], "list");
     assert_eq!(entries[0]["supported_in_api"], true);
     // 思考强度：四档固定，默认档跟着选
-    assert_eq!(entries[0]["default_reasoning_level"], "xhigh");
+    assert_eq!(entries[0]["default_reasoning_level"], "high");
     let efforts: Vec<&str> = entries[0]["supported_reasoning_levels"]
         .as_array()
         .unwrap()
@@ -114,14 +114,8 @@ fn built_catalog_matches_official_minimal_shape() {
 }
 
 #[test]
-fn build_falls_back_to_default_effort_for_unknown_value() {
-    let built = catalog::build(&["m".to_string()], "m", "ultra").unwrap();
-    assert_eq!(built["models"][0]["default_reasoning_level"], "high");
-}
-
-#[test]
 fn build_rejects_empty_model_list() {
-    let built = catalog::build(&[], "m", "high");
+    let built = catalog::build(&[], "m");
     assert!(built.is_err());
 }
 
@@ -275,7 +269,6 @@ fn import_end_to_end_writes_config_catalog_and_verifies() {
         alias: "codex".into(),
         models: vec!["gpt-6-sol".into(), "glm-5".into()],
         default_model: "glm-5".into(),
-        reasoning_effort: "high".into(),
     };
     let report = import_in(&home, &request, Some(&bin)).unwrap();
 
@@ -335,7 +328,6 @@ fn import_fails_when_codex_does_not_recognize_a_model() {
         alias: "codex".into(),
         models: vec!["gpt-6-sol".into()],
         default_model: "gpt-6-sol".into(),
-        reasoning_effort: "high".into(),
     };
     let err = import_in(&home, &request, Some(&bin)).unwrap_err();
     assert!(err.contains("未识别"), "{err}");
@@ -352,7 +344,6 @@ fn import_without_codex_binary_reports_actionable_error() {
         alias: "codex".into(),
         models: vec!["m1".into()],
         default_model: "m1".into(),
-        reasoning_effort: "high".into(),
     };
     let err = import_in(&dir, &request, None).unwrap_err();
     assert!(err.contains("APIM_CODEX_BIN"), "{err}");
@@ -372,7 +363,7 @@ fn state_roundtrip_and_key_id() {
         provider_key: "ikun".into(),
         models: vec!["a".into(), "b".into()],
         default_model: "a".into(),
-        reasoning_effort: "max".into(),
+        reasoning_effort: "high".into(),
     };
     store::save(&dir, &state).unwrap();
     assert_eq!(store::load(&dir), Some(state.clone()));
@@ -419,7 +410,6 @@ fn codex_real_end_to_end() {
         alias: "codex".into(),
         models: vec!["deepseek-flash".into(), "deepseek-chat".into()],
         default_model: "deepseek-flash".into(),
-        reasoning_effort: "high".into(),
     };
     let report = import_in(&home, &request, Some(&bin)).expect("真机导入应成功");
 

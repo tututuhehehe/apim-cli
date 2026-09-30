@@ -5,7 +5,7 @@
 
 pub mod codex;
 
-pub use codex::{CodexState, DEFAULT_EFFORT, EFFORTS, ImportReport, ImportRequest};
+pub use codex::{CodexState, DEFAULT_EFFORT, ImportReport, ImportRequest};
 
 /// 一键导入的目标客户端。
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

@@ -23,7 +23,7 @@ mod catalog;
 mod config_file;
 mod store;
 
-pub use catalog::{DEFAULT_EFFORT, EFFORTS};
+pub use catalog::DEFAULT_EFFORT;
 pub use store::CodexState;
 
 use std::path::{Path, PathBuf};
@@ -61,8 +61,6 @@ pub struct ImportRequest {
     pub models: Vec<String>,
     /// 默认模型，必须是 `models` 之一。
     pub default_model: String,
-    /// 默认思考强度（`EFFORTS` 之一），写进顶层 `model_reasoning_effort`。
-    pub reasoning_effort: String,
 }
 
 impl ImportRequest {
@@ -80,6 +78,8 @@ pub struct ImportReport {
     /// 默认模型（codex 顶层 `model`）。
     pub model: String,
     pub models: Vec<String>,
+    /// 写进顶层 `model_reasoning_effort` 的思考强度（固定值，见 [`DEFAULT_EFFORT`]）。
+    pub reasoning_effort: String,
     /// 写入前的备份文件；原本没有 config.toml 时为 None。
     pub backup_path: Option<PathBuf>,
 }
@@ -107,12 +107,9 @@ pub fn import_in(
     };
     let key = provider_key(&request.provider_id);
     let base_url = normalize_base_url(&request.base_url);
-    let effort = if EFFORTS.contains(&request.reasoning_effort.as_str()) {
-        request.reasoning_effort.as_str()
-    } else {
-        DEFAULT_EFFORT
-    };
-    let entries = catalog::build(&request.models, &request.default_model, effort)
+    // 思考强度不让人选：每个模型都声明全四档，默认档固定，想改就在 codex 里用 /model
+    let effort = DEFAULT_EFFORT;
+    let entries = catalog::build(&request.models, &request.default_model)
         .map_err(|err| format!("生成模型目录失败：{err}"))?;
 
     std::fs::create_dir_all(home).map_err(|err| format!("创建 {} 失败：{err}", home.display()))?;
@@ -142,6 +139,7 @@ pub fn import_in(
         provider_key: key,
         model: request.default_model.clone(),
         models: request.models.clone(),
+        reasoning_effort: effort.to_string(),
         backup_path,
     })
 }
@@ -160,7 +158,7 @@ pub fn remember(
         provider_key: report.provider_key.clone(),
         models: report.models.clone(),
         default_model: report.model.clone(),
-        reasoning_effort: request.reasoning_effort.clone(),
+        reasoning_effort: report.reasoning_effort.clone(),
     };
     let error = store::save(config_dir, &state).err();
     (state, error)

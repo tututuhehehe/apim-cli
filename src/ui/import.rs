@@ -164,7 +164,7 @@ fn draw_model_picker(frame: &mut Frame, flow: &ImportFlow, area: Rect) {
     frame.render_widget(Paragraph::new(count_line(flow)), chunks[3]);
     frame.render_widget(
         Paragraph::new(Line::from(Span::styled(
-            " 空格勾选  d 默认  e 强度  a 全选  f 全部  / 搜索  ⏎ 导入  Esc 取消 ",
+            " 空格勾选  d 默认模型  a 全选  f 全部  / 搜索  ⏎ 导入  Esc 取消 ",
             Style::new().fg(theme::MUTED),
         ))),
         chunks[4],
@@ -181,10 +181,13 @@ fn default_line(flow: &ImportFlow) -> Line<'static> {
         ),
         Span::styled("    思考强度：", Style::new().fg(theme::MUTED)),
         Span::styled(
-            flow.effort().to_string(),
+            crate::clients::DEFAULT_EFFORT.to_string(),
             Style::new().fg(theme::GOLD).add_modifier(Modifier::BOLD),
         ),
-        Span::styled("（d/e 可改）", Style::new().fg(theme::MUTED)),
+        Span::styled(
+            "（模型在 codex 里可选 4 档）",
+            Style::new().fg(theme::MUTED),
+        ),
     ])
 }
 

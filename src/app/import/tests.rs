@@ -235,6 +235,7 @@ fn report(models: &[&str], model: &str) -> ImportReport {
         provider_key: "alpha".into(),
         model: model.into(),
         models: models.iter().map(|name| (*name).to_string()).collect(),
+        reasoning_effort: DEFAULT_EFFORT.into(),
         backup_path: None,
     }
 }
@@ -245,7 +246,6 @@ fn outcome(key_id: &str, result: Result<ImportReport, String>) -> ImportOutcome 
         result,
         state: None,
         state_error: None,
-        effort: DEFAULT_EFFORT.into(),
         restarted: 0,
     }
 }

@@ -175,7 +175,7 @@ apim status glm --json
 
 ## One-click import into Codex
 
-Select a key in the key table and press `x` to write "this key + its provider + the models you tick" into your Codex config — no more hand-editing `~/.codex/config.toml`. The panel has two steps: **pick a client** (Codex only for now) → **tick models** (`space` toggles, `d` sets the default model, `e` cycles the default reasoning effort, `a` toggles all, `f` reveals models the provider does not advertise as Responses-capable, `/` searches) → `⏎` imports. The panel shows `默认模型 / 思考强度` live while you tick.
+Select a key in the key table and press `x` to write "this key + its provider + the models you tick" into your Codex config — no more hand-editing `~/.codex/config.toml`. The panel has two steps: **pick a client** (Codex only for now) → **tick models** (`space` toggles, `d` sets the default model, `a` toggles all, `f` reveals models the provider does not advertise as Responses-capable, `/` searches) → `⏎` imports. The panel shows `默认模型 / 思考强度` live while you tick.
 
 Before reporting success it makes **codex itself parse the new config** (`codex debug models`) and checks that every ticked model is there; on failure the reason is shown right in the panel.
 
@@ -198,7 +198,7 @@ Deliberate choices:
 
 - **Switch the active provider, never rewrite the file.** Codex happily keeps several `[model_providers.*]` blocks at once but only activates the one named by `model_provider`. Importing therefore leaves the previous provider block intact (change `model_provider` back to switch), and your comments, `[projects.*]` and `[tui]` are preserved.
 - **The key goes into `experimental_bearer_token`.** `~/.codex/config.toml` is already mode 600. If you rotate the key in apim, press `x` again to sync.
-- **The reasoning effort goes into top-level `model_reasoning_effort`** (the `e` key cycles medium/high/xhigh/max). The same four levels are declared per model in the catalog, so codex's own `/model` can still override them per model.
+- **You never pick a reasoning effort**: every model in the catalog declares all four levels (`medium/high/xhigh/max`) and top-level `model_reasoning_effort` is always written as `high`. Change it per model via codex's own `/model`, or edit `apim-models.json` / `config.toml` by hand.
 - **Every import is backed up**: the previous content is saved as `~/.codex/config.toml.apim.bak`; copy it back to roll back.
 - **The model entries are minimal, hand-written entries using codex's official fields** (GLM's and DeepSeek's official Codex integration docs, plus cc-switch's cross-version-tested minimal template): `shell_type: "shell_command"`, `apply_patch_tool_type: "freeform"`, one neutral `base_instructions` sentence (codex treats it as a required field), and both `supports_reasoning_summaries` and `supports_parallel_tool_calls` — fields **older codex versions treat as required**. Each model costs ~1.5KB, and nothing GPT-only (`code_mode_only`, `use_responses_lite`, an 872k context window, the 62KB GPT harness prompt) leaks onto a third-party model. The context window uses codex's own unknown-model default of 272000 — edit `apim-models.json` to set a real per-model value.
 - **Verification uses your installed codex**: after writing, apim makes codex parse the new config (`codex debug models`) and only reports success when every ticked model is there.
