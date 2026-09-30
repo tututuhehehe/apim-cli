@@ -463,9 +463,6 @@ impl App {
                 if let Some(backup) = &report.backup_path {
                     note.push_str(&format!(" · 旧配置备份为 {}", file_name(backup)));
                 }
-                if !report.verified {
-                    note.push_str("（未跑 codex 校验）");
-                }
                 // codex 的常驻 daemon 会缓存模型目录：不重启就看不到新模型（已实测）
                 note.push_str(" · 重启 codex 生效");
                 if let Some(error) = outcome.state_error {

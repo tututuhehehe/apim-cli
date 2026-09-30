@@ -235,7 +235,6 @@ fn report(models: &[&str], model: &str) -> ImportReport {
         provider_key: "alpha".into(),
         model: model.into(),
         models: models.iter().map(|name| (*name).to_string()).collect(),
-        verified: true,
         backup_path: None,
     }
 }

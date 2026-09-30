@@ -210,7 +210,7 @@ apim status <id> --json
 
 - Codex **可以同时定义多个** `[model_providers.*]`，但同一时刻只有 `model_provider` 指向的那个生效 → apim 只切激活项，旧 provider 块保留（想要多套并存就用官方的 `codex --profile <name>` + `~/.codex/<name>.config.toml`）。
 - **`wire_api = "chat"` 已被 codex 删除**（0.134+ 硬报错）。中转站必须提供 `/v1/responses`；new-api 系的 `/v1/models` 会带 `supported_endpoint_types`，面板据此筛出能走 Responses 的模型。
-- 改写用 `toml_edit` 保注释保顺序，写前备份成 `~/.codex/config.toml.apim.bak`；模型目录从**本机 codex** 克隆（不内嵌模板，避免版本漂移）。
+- 模型条目是照 codex 官方字段手写的**迷你条目**（GLM/DeepSeek 官方文档同款，~1KB/模型）；导入完用 `codex debug models` 反向校验。
 - 厂商 id 撞保留名（`openai`/`ollama`/`lmstudio`/`amazon-bedrock*`）时写成 `apim-openai`。
 - 验证：`cargo run -- --snapshot-import` / `--snapshot-import-models` 看渲染；`cargo test -- codex_real_end_to_end --ignored --nocapture` 跑真机端到端（需本机装 codex）。
 

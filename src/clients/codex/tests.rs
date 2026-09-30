@@ -49,81 +49,23 @@ fn base_url_gets_v1_suffix_when_missing() {
     );
 }
 
-/// 合成一份「codex 内置模型表」：两条模板，priority 小的应被选中。
-fn fake_bundled() -> Value {
-    json!({
-        "models": [
-            {
-                "slug": "tpl-slow",
-                "display_name": "Slow",
-                "priority": 9,
-                "visibility": "list",
-                "supported_in_api": true,
-                "apply_patch_tool_type": "freeform",
-                "shell_type": "unified_exec",
-                "service_tiers": [{"id": "priority"}],
-                "upgrade": {"model": "next"},
-                "availability_nux": {"message": "hello"},
-                "experimental_supported_tools": ["clock"],
-                "base_instructions": "TEMPLATE-PROMPT",
-                "model_messages": {
-                    "instructions_template": "TEMPLATE-PROMPT",
-                    "instructions_variables": null,
-                    "approvals": null,
-                    "collaboration_modes": null,
-                    "auto_review": null,
-                    "permissions": null,
-                    "multi_agent": null
-                }
-            },
-            {
-                "slug": "tpl-flagship",
-                "display_name": "Flagship",
-                "priority": 1,
-                "visibility": "list",
-                "supported_in_api": true,
-                "apply_patch_tool_type": "freeform",
-                "shell_type": "unified_exec",
-                "base_instructions": "FLAGSHIP-PROMPT",
-                "model_messages": { "instructions_template": "FLAGSHIP-PROMPT" }
-            },
-            {
-                "slug": "tpl-hidden",
-                "display_name": "Hidden",
-                "priority": 0,
-                "visibility": "hide",
-                "supported_in_api": true,
-                "base_instructions": "HIDDEN-PROMPT",
-                "model_messages": { "instructions_template": "HIDDEN-PROMPT" }
-            }
-        ]
-    })
-}
-
+/// 生成目录：照官方文档手写的迷你条目（不再克隆 codex 内置的 GPT 模板）。
 #[test]
-fn template_prefers_lowest_priority_visible_entry() {
-    let bundled = fake_bundled();
-    let template = catalog::pick_template(&bundled).unwrap();
-    assert_eq!(template["slug"], "tpl-flagship");
-}
-
-#[test]
-fn built_catalog_overrides_ids_and_clears_openai_only_fields() {
-    let bundled = fake_bundled();
-    let template = catalog::pick_template(&bundled).unwrap();
-    let models = vec!["deepseek-v4".to_string(), "glm-5".to_string()];
-    let built = catalog::build(template, &models, "glm-5", "high").unwrap();
-
+fn built_catalog_matches_official_minimal_shape() {
+    let models = vec!["deepseek-flash".to_string(), "deepseek-chat".to_string()];
+    let built = catalog::build(&models, "deepseek-chat", "xhigh").unwrap();
     let entries = built["models"].as_array().unwrap();
     assert_eq!(entries.len(), 2);
-    // 默认模型排第一
-    assert_eq!(entries[0]["slug"], "glm-5");
-    assert_eq!(entries[1]["slug"], "deepseek-v4");
+    // 默认模型排第一（priority 决定 codex 选择器里的排序）
+    assert_eq!(entries[0]["slug"], "deepseek-chat");
+    assert_eq!(entries[1]["slug"], "deepseek-flash");
     assert_eq!(entries[0]["priority"], 1);
+    assert_eq!(entries[0]["display_name"], "deepseek-chat");
+    // /model 只看 visibility=list；supported_in_api 决定会不会被 auth 过滤掉
     assert_eq!(entries[0]["visibility"], "list");
     assert_eq!(entries[0]["supported_in_api"], true);
-    assert_eq!(entries[0]["default_reasoning_level"], "high");
-    // 四档思考等级，顺序固定
+    // 思考强度：四档固定，默认档跟着选
+    assert_eq!(entries[0]["default_reasoning_level"], "xhigh");
     let efforts: Vec<&str> = entries[0]["supported_reasoning_levels"]
         .as_array()
         .unwrap()
@@ -131,64 +73,43 @@ fn built_catalog_overrides_ids_and_clears_openai_only_fields() {
         .map(|level| level["effort"].as_str().unwrap())
         .collect();
     assert_eq!(efforts, ["medium", "high", "xhigh", "max"]);
-    // 模板里的 instructions 原样带过来（codex 认这个字段而不是旧的 base_instructions）
-    assert_eq!(
-        entries[0]["model_messages"]["instructions_template"],
-        "FLAGSHIP-PROMPT"
-    );
-    assert!(entries[0].get("base_instructions").is_none());
-    // model_messages 的必填键一个都不能缺（缺失会让 codex 解析整个目录失败）
-    for key in [
-        "instructions_template",
-        "instructions_variables",
-        "approvals",
-        "collaboration_modes",
-        "auto_review",
-        "permissions",
-        "multi_agent",
-    ] {
-        assert!(
-            entries[0]["model_messages"].get(key).is_some(),
-            "model_messages 缺键 {key}"
-        );
-    }
-    // 模板自带的 OpenAI 专属迁移/加速档信息全部清掉
-    for key in [
-        "upgrade",
-        "availability_nux",
-        "service_tiers",
-        "experimental_supported_tools",
-    ] {
-        assert!(
-            entries[0].get(key).is_none() || entries[0][key] == json!([]),
-            "{key} 没清干净"
-        );
-    }
-    // 工具形态跟着模板走（instructions 与实际声明的工具必须一致）
+    // 工具形态用官方文档的写法
+    assert_eq!(entries[0]["shell_type"], "shell_command");
     assert_eq!(entries[0]["apply_patch_tool_type"], "freeform");
-    assert_eq!(entries[0]["shell_type"], "unified_exec");
+    // 必须有：两者都缺会让 codex 解析整个目录失败
+    assert_eq!(entries[0]["base_instructions"], "");
+    // 不夹带 GPT 模板的专属字段（上一版就是被这些坑了）
+    for key in [
+        "model_messages",
+        "tool_mode",
+        "use_responses_lite",
+        "supports_search_tool",
+        "node_repl_auto_review_required",
+        "supports_image_detail_original",
+    ] {
+        assert!(entries[0].get(key).is_none(), "{key} 不该出现在条目里");
+    }
+    assert_eq!(entries[0]["input_modalities"], json!(["text"]));
+    assert_eq!(entries[0]["context_window"], 272000);
+    assert_eq!(entries[0]["max_context_window"], 272000);
+    // OpenAI 专属的迁移/加速档提示显式清空
+    assert_eq!(entries[0]["upgrade"], Value::Null);
+    assert_eq!(entries[0]["availability_nux"], Value::Null);
+    assert_eq!(entries[0]["service_tiers"], json!([]));
+    // 体积：官方迷你条目应该在 1KB 量级（克隆 GPT 模板时是 64KB/模型）
+    let size = serde_json::to_string(&built).unwrap().len();
+    assert!(size < 4000, "目录应该很小，实际 {size} 字节");
 }
 
 #[test]
-fn legacy_base_instructions_are_promoted_when_template_messages_missing() {
-    let template = json!({
-        "slug": "tpl",
-        "display_name": "Tpl",
-        "priority": 1,
-        "visibility": "list",
-        "supported_in_api": true,
-        "base_instructions": "LEGACY-PROMPT"
-    });
-    let built = catalog::build(&template, &["m1".to_string()], "m1", "high").unwrap();
-    assert_eq!(
-        built["models"][0]["model_messages"]["instructions_template"],
-        "LEGACY-PROMPT"
-    );
+fn build_falls_back_to_default_effort_for_unknown_value() {
+    let built = catalog::build(&["m".to_string()], "m", "ultra").unwrap();
+    assert_eq!(built["models"][0]["default_reasoning_level"], "high");
 }
 
 #[test]
 fn build_rejects_empty_model_list() {
-    let built = catalog::build(&fake_bundled()["models"][0], &[], "m", "high");
+    let built = catalog::build(&[], "m", "high");
     assert!(built.is_err());
 }
 
@@ -302,25 +223,18 @@ fn config_write_creates_file_from_scratch() {
 
 // ---- 端到端（假 codex）-------------------------------------------------
 
-/// 造一个假 codex：`debug models --bundled` 吐模板，`debug models` 吐当前
-/// CODEX_HOME 下的目录，用真实子进程跑通「生成 → 校验」整条链路。
+/// 造一个假 codex：`debug models` 回吐当前 `CODEX_HOME` 下的目录
+/// （apim 用它做「导入是否成功」的端到端校验）。
 #[cfg(unix)]
-fn fake_codex(dir: &Path, bundled: &Value) -> PathBuf {
+fn fake_codex(dir: &Path) -> PathBuf {
     use std::os::unix::fs::PermissionsExt;
-    let bundled_path = dir.join("bundled.json");
-    fs::write(&bundled_path, serde_json::to_string(bundled).unwrap()).unwrap();
     let bin = dir.join("codex");
     fs::write(
         &bin,
         format!(
             "#!/bin/sh\n\
-             if [ \"$1\" = \"debug\" ] && [ \"$2\" = \"models\" ]; then\n\
-             \x20 if [ \"$3\" = \"--bundled\" ]; then cat '{bundled}'; exit 0; fi\n\
-             \x20 cat \"$CODEX_HOME/{catalog}\"; exit 0\n\
-             fi\n\
+             if [ \"$1\" = \"debug\" ] && [ \"$2\" = \"models\" ]; then cat \"$CODEX_HOME/{CATALOG_FILE}\"; exit 0; fi\n\
              exit 1\n",
-            bundled = bundled_path.display(),
-            catalog = CATALOG_FILE,
         ),
     )
     .unwrap();
@@ -339,8 +253,7 @@ fn import_end_to_end_writes_config_catalog_and_verifies() {
         "model = \"gpt-6-sol\"\nmodel_provider = \"old\"\n\n[model_providers.old]\nname = \"old\"\nbase_url = \"https://old.example/v1\"\n",
     )
     .unwrap();
-    let bundled = fake_bundled();
-    let bin = fake_codex(&dir, &bundled);
+    let bin = fake_codex(&dir);
 
     let request = ImportRequest {
         provider_id: "ikun".into(),
@@ -354,7 +267,6 @@ fn import_end_to_end_writes_config_catalog_and_verifies() {
     };
     let report = import_in(&home, &request, Some(&bin)).unwrap();
 
-    assert!(report.verified);
     assert_eq!(report.provider_key, "ikun");
     assert_eq!(report.model, "glm-5");
     assert_eq!(
@@ -391,15 +303,12 @@ fn import_fails_when_codex_does_not_recognize_a_model() {
     let dir = temp_dir("import-verify-fail");
     let home = dir.join("codex-home");
     fs::create_dir_all(&home).unwrap();
-    // 假 codex 的 verify 分支永远吐空目录 → 校验必须失败
+    // 假 codex 的 `debug models` 永远吐空目录 → 校验必须失败
     let bin = dir.join("codex");
     fs::write(
         &bin,
         "#!/bin/sh\n\
-         if [ \"$1\" = \"debug\" ] && [ \"$2\" = \"models\" ]; then\n\
-         \x20 if [ \"$3\" = \"--bundled\" ]; then echo '{\"models\":[{\"slug\":\"tpl\",\"priority\":1,\"visibility\":\"list\",\"supported_in_api\":true,\"base_instructions\":\"P\",\"model_messages\":{\"instructions_template\":\"P\"}}]}'; exit 0; fi\n\
-         \x20 echo '{\"models\":[]}'; exit 0\n\
-         fi\n\
+         if [ \"$1\" = \"debug\" ] && [ \"$2\" = \"models\" ]; then echo '{\"models\":[]}'; exit 0; fi\n\
          exit 1\n",
     )
     .unwrap();
@@ -496,12 +405,11 @@ fn codex_real_end_to_end() {
         base_url: "https://api.ikuncode.cc".into(),
         api_key: "sk-placeholder-not-a-real-key".into(),
         alias: "codex".into(),
-        models: vec!["gpt-6-sol".into(), "deepseek-v4".into()],
-        default_model: "gpt-6-sol".into(),
+        models: vec!["deepseek-flash".into(), "deepseek-chat".into()],
+        default_model: "deepseek-flash".into(),
         reasoning_effort: "high".into(),
     };
     let report = import_in(&home, &request, Some(&bin)).expect("真机导入应成功");
-    assert!(report.verified, "codex 应能解析新配置与生成目录");
 
     let written = fs::read_to_string(home.join("config.toml")).unwrap();
     let catalog = fs::read_to_string(home.join(CATALOG_FILE)).unwrap();

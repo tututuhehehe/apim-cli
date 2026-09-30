@@ -23,7 +23,7 @@ src/
 │   └── codex/         Codex 适配
 │       ├── mod.rs     ImportRequest/ImportReport、保留 id 加前缀、base_url 补 /v1、写入编排
 │       ├── config_file.rs  ~/.codex/config.toml 读改写（toml_edit 保注释保顺序）+ 备份 + 原子写
-│       ├── catalog.rs 模型目录：`codex debug models --bundled` 取模板 → 克隆条目 → 端到端校验
+│       ├── catalog.rs 模型目录：手写官方迷你条目（~1KB/模型）+ `codex debug models` 端到端校验
 │       ├── store.rs   ~/.config/apim/codex.toml（★ 标记用的「当前导入项」）
 │       └── tests.rs   沙盒测试 + 真机 opt-in 测试（`--ignored codex_real_end_to_end`）
 ├── cli/               CLI 子命令（AI/脚本的机器接口，与 TUI 共用底层）
@@ -108,7 +108,7 @@ recipes/              内置 recipe ×4（deepseek/openai/moonshot/openrouter，
     - 改写 `~/.codex/config.toml` **必须用 `toml_edit`**（`toml` 序列化会丢注释），写前备份成 `config.toml.apim.bak`，再 tmp + rename。注意加注释要挂在 **key 的 decor**（`leaf_decor_mut`）上，挂到 value 的 decor 会把值挤到下一行、产出非法 TOML。
     - `wire_api` 只接受 `"responses"`（0.134+ 删了 `"chat"`，写了会硬报错）→ 中转站得提供 `/v1/responses`；面板默认只列厂商声明支持 Responses 的模型。
     - `model_catalog_json` 相对路径按 `CODEX_HOME` 解析；它是**整表替换**（不是合并）；条目**必须**有 `base_instructions` 或 `model_messages.instructions_template`，两样都缺会让 codex 解析整个目录失败。
-    - 模型目录一律从**本机 codex**（`codex debug models --bundled`）克隆条目改标识字段，不内嵌模板文本（避免跟 codex 版本漂移）；导入完用 `codex debug models` 反向校验勾选的模型都在。
+    - 模型条目照 codex 官方字段**手写迷你条目**（GLM / DeepSeek 官方 Codex 文档同款）：`base_instructions: ""`、`shell_type: shell_command`、`apply_patch_tool_type: freeform`、`input_modalities: [text]`、上下文窗口用 codex 给未知模型的默认值 272000。**不要克隆 `codex debug models --bundled` 里的 GPT 条目** —— 那会带进 `[text,image]`、`code_mode_only`、`use_responses_lite`、`max_context_window: 872000` 和 62KB harness 提示词（v1 就是这么错的一版，目录 64KB/模型）。导入完用 `codex debug models` 反向校验勾选的模型都在。
     - 厂商 id 撞上保留名（`openai`/`ollama`/`lmstudio`/`amazon-bedrock*`）时加 `apim-` 前缀。
 
 ## 验证命令速查

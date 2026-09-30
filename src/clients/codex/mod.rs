@@ -80,8 +80,6 @@ pub struct ImportReport {
     /// 默认模型（codex 顶层 `model`）。
     pub model: String,
     pub models: Vec<String>,
-    /// 是否跑通了 `codex debug models` 的端到端校验。
-    pub verified: bool,
     /// 写入前的备份文件；原本没有 config.toml 时为 None。
     pub backup_path: Option<PathBuf>,
 }
@@ -93,11 +91,20 @@ pub fn import(request: &ImportRequest) -> Result<ImportReport, String> {
 }
 
 /// 可注入 codex 目录（`CODEX_HOME` 由调用方给），测试用。
+///
+/// 模型目录内容不依赖 codex（条目是照官方文档手写的迷你条目），但**校验必须用 codex**：
+/// 写完要真的让它解析一遍这份配置 + 目录，这才算“导入成功”。
 pub fn import_in(
     home: &Path,
     request: &ImportRequest,
     codex_bin: Option<&Path>,
 ) -> Result<ImportReport, String> {
+    let Some(bin) = codex_bin else {
+        return Err(
+            "未找到 codex 可执行文件；导入后要用它校验配置（安装 codex，或用 APIM_CODEX_BIN 指定路径）"
+                .to_string(),
+        );
+    };
     let key = provider_key(&request.provider_id);
     let base_url = normalize_base_url(&request.base_url);
     let effort = if EFFORTS.contains(&request.reasoning_effort.as_str()) {
@@ -105,8 +112,7 @@ pub fn import_in(
     } else {
         DEFAULT_EFFORT
     };
-    let template = catalog::load_template(codex_bin)?;
-    let entries = catalog::build(&template, &request.models, &request.default_model, effort)
+    let entries = catalog::build(&request.models, &request.default_model, effort)
         .map_err(|err| format!("生成模型目录失败：{err}"))?;
 
     std::fs::create_dir_all(home).map_err(|err| format!("创建 {} 失败：{err}", home.display()))?;
@@ -130,20 +136,12 @@ pub fn import_in(
     let backup_path = config_file::write(&config_path, &doc.to_string())?;
 
     // 端到端校验：让 codex 自己解析这份配置 + 目录，勾选的模型必须都在。
-    // 没有 codex 可执行文件时跳过（前面的模板加载已经会先失败，这里只是兜底）。
-    let verified = match codex_bin {
-        Some(bin) => {
-            catalog::verify(bin, home, &request.models)?;
-            true
-        }
-        None => false,
-    };
+    catalog::verify(bin, home, &request.models)?;
 
     Ok(ImportReport {
         provider_key: key,
         model: request.default_model.clone(),
         models: request.models.clone(),
-        verified,
         backup_path,
     })
 }

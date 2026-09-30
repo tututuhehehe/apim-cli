@@ -196,7 +196,8 @@ apim status glm --json
 - **密钥直接写进 `experimental_bearer_token`**。`~/.codex/config.toml` 本来就是 600 权限。在 apim 里轮换这把 key 后，记得重新按一次 `x` 同步。
 - **思考强度写顶层 `model_reasoning_effort`**（面板按 `e` 在 medium/high/xhigh/max 里切）。这四个档同时声明在目录里每个模型上，codex 里用 `/model` 还能按模型改。
 - **每次导入前备份**：改写前把现有内容存成 `~/.codex/config.toml.apim.bak`，想回退直接拿它覆盖回去。
-- **模型目录从你本机的 codex 克隆**（`codex debug models --bundled`），所以永远和你装的 codex 版本一致，apim 自身不需要跟着升级。
+- **模型条目是照 codex 官方字段手写的迷你条目**（GLM / DeepSeek 官方 Codex 接入文档同款）：`base_instructions: ""`、`shell_type: "shell_command"`、`apply_patch_tool_type: "freeform"`、`input_modalities: ["text"]`，所以每个模型只要 **~1KB**，也**不会**把 GPT 专属的东西（图片输入、`code_mode_only`、`use_responses_lite`、872k 上下文窗口、62KB 的 GPT harness 提示词）塞给第三方模型。上下文窗口用 codex 自己给未知模型的默认值 272000，想按模型写真实值直接改 `apim-models.json`。
+- **校验用你本机的 codex**：写完让它自己解析一遍新配置（`codex debug models`），勾选的模型都在才算导入成功。
 - **只支持 Responses 协议**：Codex 0.134+ 已经删掉 `wire_api = "chat"`，中转站必须提供 `/v1/responses`，否则一律 400。面板默认只列厂商声明支持 Responses 的模型（new-api 系中转的 `/v1/models` 会带 `supported_endpoint_types`），按 `f` 可以强制显示全部。
 - 厂商 id 撞上 Codex 保留名（`openai` / `ollama` / `lmstudio` / `amazon-bedrock*`）时会自动加前缀写成 `apim-openai`。
 - 这份目录是**整表替换**（实测：只放一个模型进去，`codex debug models` 就只输出那一个），所以在用自定义 provider 时 `/model` 里只会出现你勾选的模型，内置 OpenAI 模型不再列出。想拿回内置表，把 `~/.codex/config.toml` 里的 `model_catalog_json` 一行删掉即可。
