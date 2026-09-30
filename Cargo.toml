@@ -35,6 +35,8 @@ serde_json = "1"
 serde_yaml = "0.9"
 tokio = { version = "1", features = ["macros", "process", "rt-multi-thread", "sync", "time"] }
 toml = "0.8"
+# codex 的 config.toml 要保注释保顺序地改写，toml 做不到（序列化会丢注释）
+toml_edit = "0.22"
 unicode-width = "0.2"
 
 [lints.rust]

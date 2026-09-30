@@ -10,7 +10,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::recipe::Recipe;
 
-pub(crate) use store::{save_keys_to, tmp_path};
+pub(crate) use store::{save_keys_to, tmp_path, write_private};
 
 mod store;
 

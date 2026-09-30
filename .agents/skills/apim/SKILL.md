@@ -198,6 +198,20 @@ apim status <id> --json
 - [ ] mock 三条路径测过、`sh -n` 语法通过、`chmod +x`
 - [ ] 注册后 `apim status <id> --json` 用用户的 key 真实验证过
 
+## 一键导入到 Codex（TUI `x` 键，暂无 CLI）
+
+密钥表里选中一把密钥按 `x`：把「这把密钥 + 它的厂商 + 勾选的模型」写进 Codex 配置（`~/.codex/config.toml`）。面板两步：选客户端（目前只有 Codex）→ 勾选模型（`空格` 勾选、`d` 默认、`a` 全选、`f` 显示全部、`/` 搜索、`⏎` 导入）。导入后会跑 `codex debug models` 让 codex 自己解析一遍新配置来确认成功，密钥行上会打 ★ 标出当前导入的那把。
+
+写盘内容：顶层 `model_provider`/`model`/`model_catalog_json="apim-models.json"`，`[model_providers.<厂商id>]`（`base_url` 自动补 `/v1`、`wire_api = "responses"`、`experimental_bearer_token` = 密钥），以及 `~/.codex/apim-models.json`（勾选模型的目录，每模型给 medium/high/xhigh/max 四档思考等级）。apim 侧记在 `~/.config/apim/codex.toml`。
+
+几个容易踩的：
+
+- Codex **可以同时定义多个** `[model_providers.*]`，但同一时刻只有 `model_provider` 指向的那个生效 → apim 只切激活项，旧 provider 块保留（想要多套并存就用官方的 `codex --profile <name>` + `~/.codex/<name>.config.toml`）。
+- **`wire_api = "chat"` 已被 codex 删除**（0.134+ 硬报错）。中转站必须提供 `/v1/responses`；new-api 系的 `/v1/models` 会带 `supported_endpoint_types`，面板据此筛出能走 Responses 的模型。
+- 改写用 `toml_edit` 保注释保顺序，写前备份成 `~/.codex/config.toml.apim.bak`；模型目录从**本机 codex** 克隆（不内嵌模板，避免版本漂移）。
+- 厂商 id 撞保留名（`openai`/`ollama`/`lmstudio`/`amazon-bedrock*`）时写成 `apim-openai`。
+- 验证：`cargo run -- --snapshot-import` / `--snapshot-import-models` 看渲染；`cargo test -- codex_real_end_to_end --ignored --nocapture` 跑真机端到端（需本机装 codex）。
+
 ## 红线
 
 - **密钥永不进仓库/argv/日志/文档**，一律 stdin 或 env；示例用 `sk-...` 占位。

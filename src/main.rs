@@ -1,6 +1,7 @@
 mod app;
 mod browser;
 mod cli;
+mod clients;
 mod clipboard;
 mod config;
 mod form;
@@ -20,6 +21,8 @@ async fn main() -> Result<()> {
             "--snapshot-form" => tui::run_snapshot_key_form().await,
             "--snapshot-provider-form" => tui::run_snapshot_provider_form().await,
             "--snapshot-inspector" => tui::run_snapshot_inspector().await,
+            "--snapshot-import" => tui::run_snapshot_import().await,
+            "--snapshot-import-models" => tui::run_snapshot_import_models().await,
             "--snapshot" => tui::run_snapshot().await,
             other => {
                 eprintln!("未知参数 {other}");

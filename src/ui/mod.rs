@@ -4,6 +4,7 @@ mod balance;
 mod confirm;
 mod form_modal;
 mod header;
+mod import;
 mod inspector;
 mod keys;
 mod models;
@@ -71,6 +72,7 @@ pub fn draw(frame: &mut Frame, app: &App) {
             models::draw_models(frame, name, status, filter, *searching, area);
         }
         Modal::Search { target, edit, .. } => search::draw_search(frame, *target, edit, area),
+        Modal::Import(flow) => import::draw_import(frame, app, flow, area),
         Modal::None => {}
     }
 }

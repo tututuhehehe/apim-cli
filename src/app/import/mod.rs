@@ -1,0 +1,519 @@
+//! 「一键导入到客户端」面板：选客户端 → 勾选模型 → 写入 → 校验 → 反馈。
+//!
+//! 面板状态存在 `Modal::Import(ImportFlow)` 里，本文件管状态迁移与按键，`ui/import.rs`
+//! 只管渲染，真正改写 codex 配置的逻辑在 `crate::clients::codex`。
+
+use std::time::Instant;
+
+use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
+
+use super::{App, Focus, Modal, TaskMsg};
+use crate::clients::{Agent, CodexState, ImportReport, ImportRequest};
+use crate::probe::{self, ModelEntry};
+
+/// 面板当前停在哪一步。
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ImportStep {
+    /// 第一步：选目标客户端。
+    Agent,
+    /// 第二步：勾选模型。
+    Models,
+    /// 正在写入 + 校验（不可交互，避免半截状态）。
+    Working,
+    /// 失败，显示原因（Esc/Enter 关闭）。
+    Failed,
+}
+
+/// 面板里的一个模型条目。
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ModelPick {
+    pub name: String,
+    /// 厂商声明的端点能力（None = 没给信息）。
+    pub responses: Option<bool>,
+    pub checked: bool,
+}
+
+/// 一键导入面板的完整状态（迟到的结果按 key_id 匹配，面板关掉就丢弃）。
+#[derive(Debug, Clone)]
+pub struct ImportFlow {
+    pub key_id: String,
+    pub step: ImportStep,
+    /// Agent 步骤的选中下标。
+    pub agent: usize,
+    /// Models 步骤是否还在拉模型列表。
+    pub loading: bool,
+    pub items: Vec<ModelPick>,
+    /// 「可见列表」里的光标下标。
+    pub cursor: usize,
+    /// 默认模型（codex 顶层 `model`）在 items 里的下标。
+    pub default: Option<usize>,
+    pub filter: String,
+    pub searching: bool,
+    /// 是否连厂商明确声明不支持 Responses 的模型也列出来。
+    pub show_all: bool,
+    /// Failed 步骤的失败原因。
+    pub error: Option<String>,
+}
+
+impl ImportFlow {
+    pub fn new(key_id: String) -> Self {
+        Self {
+            key_id,
+            step: ImportStep::Agent,
+            agent: 0,
+            loading: false,
+            items: Vec::new(),
+            cursor: 0,
+            default: None,
+            filter: String::new(),
+            searching: false,
+            show_all: false,
+            error: None,
+        }
+    }
+
+    /// 可见条目在 `items` 里的下标：先按端点能力筛，再按搜索关键字筛。
+    pub fn visible(&self) -> Vec<usize> {
+        let needle = self.filter.trim().to_lowercase();
+        self.items
+            .iter()
+            .enumerate()
+            .filter(|(_, item)| self.show_all || item.responses != Some(false))
+            .filter(|(_, item)| needle.is_empty() || item.name.to_lowercase().contains(&needle))
+            .map(|(index, _)| index)
+            .collect()
+    }
+
+    pub fn checked_count(&self) -> usize {
+        self.items.iter().filter(|item| item.checked).count()
+    }
+
+    /// 被「只显示 responses 可用」挡掉的模型数。
+    pub fn hidden_count(&self) -> usize {
+        self.items
+            .iter()
+            .filter(|item| item.responses == Some(false))
+            .count()
+    }
+
+    /// 光标当前指向的 item 下标（可见列表为空时为 None）。
+    pub fn cursor_item(&self) -> Option<usize> {
+        self.visible().get(self.cursor).copied()
+    }
+}
+
+/// 后台导入任务的结果回执。
+#[derive(Debug)]
+pub struct ImportOutcome {
+    pub key_id: String,
+    pub result: Result<ImportReport, String>,
+    /// 成功后记录的状态（用于 ★ 标记与面板提示）。
+    pub state: Option<CodexState>,
+    /// 状态文件写失败时的说明（导入本身是成功的）。
+    pub state_error: Option<String>,
+}
+
+impl App {
+    fn import_flow(&self) -> Option<&ImportFlow> {
+        match &self.modal {
+            Modal::Import(flow) => Some(flow),
+            _ => None,
+        }
+    }
+
+    fn import_flow_mut(&mut self) -> Option<&mut ImportFlow> {
+        match &mut self.modal {
+            Modal::Import(flow) => Some(flow),
+            _ => None,
+        }
+    }
+
+    /// 面板正在等这个密钥的模型列表 / 导入结果（迟到结果据此丢弃）。
+    pub fn import_awaiting(&self, key_id: &str, step: ImportStep) -> bool {
+        self.import_flow()
+            .is_some_and(|flow| flow.key_id == key_id && flow.step == step)
+    }
+
+    /// 密钥栏按 `x`：打开面板第一步（选客户端）。
+    pub fn open_import(&mut self) {
+        if self.focus != Focus::Keys {
+            self.toast = Some(("先在右侧选中一把密钥再按 x".into(), Instant::now()));
+            return;
+        }
+        let Some(key) = self.selected_key_entry().cloned() else {
+            self.toast = Some(("没有可导入的密钥".into(), Instant::now()));
+            return;
+        };
+        if !self.recipes.contains_key(&key.provider) {
+            self.toast = Some((
+                format!("厂商 {} 的协议不存在，先修好再导入", key.provider),
+                Instant::now(),
+            ));
+            return;
+        }
+        self.modal = Modal::Import(ImportFlow::new(key.id()));
+    }
+
+    pub fn import_move_agent(&mut self, delta: isize) {
+        let count = Agent::ALL.len();
+        if let Some(flow) = self.import_flow_mut() {
+            flow.agent = clamp_index(flow.agent, delta, count);
+        }
+    }
+
+    /// 第一步选定客户端：拉这把密钥能看到的模型列表。
+    pub fn import_choose_agent(&mut self) {
+        let Some(flow) = self.import_flow() else {
+            return;
+        };
+        let key_id = flow.key_id.clone();
+        let Some(key) = self.keys.iter().find(|key| key.id() == key_id).cloned() else {
+            self.toast = Some(("这把密钥已不存在".into(), Instant::now()));
+            self.modal = Modal::None;
+            return;
+        };
+        let Some(recipe) = self.recipes.get(&key.provider).cloned() else {
+            self.toast = Some((
+                format!("厂商 {} 的协议不存在", key.provider),
+                Instant::now(),
+            ));
+            self.modal = Modal::None;
+            return;
+        };
+        if let Some(flow) = self.import_flow_mut() {
+            flow.step = ImportStep::Models;
+            flow.loading = true;
+            flow.items.clear();
+            flow.cursor = 0;
+            flow.default = None;
+            flow.filter.clear();
+            flow.searching = false;
+            flow.show_all = false;
+            flow.error = None;
+        }
+        let client = self.client.clone();
+        let tx = self.tx_task.clone();
+        tokio::spawn(async move {
+            let result = probe::fetch_models(&client, &recipe, &key.token).await;
+            let _ = tx.send(TaskMsg::Models(key_id, result));
+        });
+    }
+
+    /// 模型列表落地。
+    pub fn import_receive_models(
+        &mut self,
+        key_id: String,
+        result: Result<Vec<ModelEntry>, String>,
+    ) {
+        let Some(flow) = self.import_flow_mut() else {
+            return;
+        };
+        if flow.key_id != key_id || flow.step != ImportStep::Models {
+            return;
+        }
+        flow.loading = false;
+        let entries = match result {
+            Ok(entries) => entries,
+            Err(message) => {
+                flow.step = ImportStep::Failed;
+                flow.error = Some(message);
+                return;
+            }
+        };
+        flow.items = entries
+            .into_iter()
+            .map(|entry| ModelPick {
+                name: entry.id,
+                responses: entry.responses,
+                checked: false,
+            })
+            .collect();
+        // 默认勾上第一个可用模型：让「按 x → Enter → Enter」就能跑完，符合一键的预期
+        flow.default = flow.visible().first().copied();
+        if let Some(index) = flow.default {
+            flow.items[index].checked = true;
+        }
+        if flow.items.is_empty() {
+            flow.step = ImportStep::Failed;
+            flow.error = Some("这把密钥看不到任何模型".into());
+        }
+    }
+
+    pub fn import_move(&mut self, delta: isize) {
+        let Some(flow) = self.import_flow_mut() else {
+            return;
+        };
+        let count = flow.visible().len();
+        flow.cursor = clamp_index(flow.cursor, delta, count);
+    }
+
+    pub fn import_toggle(&mut self) {
+        let Some(flow) = self.import_flow_mut() else {
+            return;
+        };
+        if let Some(index) = flow.cursor_item() {
+            flow.items[index].checked = !flow.items[index].checked;
+        }
+    }
+
+    /// `a`：可见的全勾上；已经全勾了则全取消。
+    pub fn import_toggle_all(&mut self) {
+        let Some(flow) = self.import_flow_mut() else {
+            return;
+        };
+        let visible = flow.visible();
+        let all_checked = visible.iter().all(|index| flow.items[*index].checked);
+        for index in visible {
+            flow.items[index].checked = !all_checked;
+        }
+    }
+
+    /// `d`：把光标处的模型设为默认（并自动勾上）。
+    pub fn import_set_default(&mut self) {
+        let Some(flow) = self.import_flow_mut() else {
+            return;
+        };
+        if let Some(index) = flow.cursor_item() {
+            flow.items[index].checked = true;
+            flow.default = Some(index);
+        }
+    }
+
+    /// `f`：显示/隐藏厂商明确声明不支持 Responses 的模型。
+    pub fn import_toggle_show_all(&mut self) {
+        let Some(flow) = self.import_flow_mut() else {
+            return;
+        };
+        flow.show_all = !flow.show_all;
+        let count = flow.visible().len();
+        flow.cursor = flow.cursor.min(count.saturating_sub(1));
+    }
+
+    pub fn import_start_search(&mut self) {
+        if let Some(flow) = self.import_flow_mut() {
+            flow.searching = true;
+        }
+    }
+
+    pub fn import_exit_search(&mut self) {
+        if let Some(flow) = self.import_flow_mut() {
+            flow.searching = false;
+        }
+    }
+
+    pub fn import_search_char(&mut self, c: char) {
+        let Some(flow) = self.import_flow_mut() else {
+            return;
+        };
+        flow.filter.push(c);
+        flow.cursor = 0;
+    }
+
+    pub fn import_search_backspace(&mut self) {
+        let Some(flow) = self.import_flow_mut() else {
+            return;
+        };
+        flow.filter.pop();
+        flow.cursor = 0;
+    }
+
+    pub fn import_searching(&self) -> bool {
+        self.import_flow().is_some_and(|flow| flow.searching)
+    }
+
+    /// 第二步确认：写 codex 配置（后台线程，跑子进程 + 落盘）。
+    pub fn import_apply(&mut self) {
+        let Some(flow) = self.import_flow() else {
+            return;
+        };
+        let key_id = flow.key_id.clone();
+        let models: Vec<String> = flow
+            .items
+            .iter()
+            .filter(|item| item.checked)
+            .map(|item| item.name.clone())
+            .collect();
+        if models.is_empty() {
+            self.toast = Some(("至少勾选一个模型".into(), Instant::now()));
+            return;
+        }
+        // 默认模型：优先 `d` 指定的那个，否则用第一个勾选的
+        let default_model = flow
+            .default
+            .and_then(|index| flow.items.get(index))
+            .map(|item| item.name.clone())
+            .filter(|name| models.contains(name))
+            .unwrap_or_else(|| models[0].clone());
+
+        let Some(key) = self.keys.iter().find(|key| key.id() == key_id).cloned() else {
+            self.toast = Some(("这把密钥已不存在".into(), Instant::now()));
+            self.modal = Modal::None;
+            return;
+        };
+        let Some(recipe) = self.recipes.get(&key.provider).cloned() else {
+            self.toast = Some((
+                format!("厂商 {} 的协议不存在", key.provider),
+                Instant::now(),
+            ));
+            self.modal = Modal::None;
+            return;
+        };
+        if let Some(flow) = self.import_flow_mut() {
+            flow.step = ImportStep::Working;
+            flow.error = None;
+        }
+
+        let request = ImportRequest {
+            provider_id: recipe.id.clone(),
+            provider_name: recipe.name.clone(),
+            base_url: recipe.base_url.clone(),
+            api_key: key.token.clone(),
+            alias: key.alias.clone(),
+            models,
+            default_model,
+        };
+        let request_key_id = request.key_id();
+        let fallback_key_id = request_key_id.clone();
+        let config_dir = self.config_dir.clone();
+        let tx = self.tx_task.clone();
+        tokio::spawn(async move {
+            let outcome = tokio::task::spawn_blocking(move || {
+                let result = crate::clients::codex::import(&request);
+                let (state, state_error) = match &result {
+                    Ok(report) => {
+                        let (state, error) =
+                            crate::clients::codex::remember(&config_dir, &request, report);
+                        (Some(state), error)
+                    }
+                    Err(_) => (None, None),
+                };
+                ImportOutcome {
+                    key_id: request_key_id,
+                    result,
+                    state,
+                    state_error,
+                }
+            })
+            .await
+            .unwrap_or_else(|err| ImportOutcome {
+                key_id: fallback_key_id,
+                result: Err(format!("导入任务异常终止：{err}")),
+                state: None,
+                state_error: None,
+            });
+            let _ = tx.send(TaskMsg::Import(Box::new(outcome)));
+        });
+    }
+
+    /// 导入结果落地：成功就给成功反馈并关面板，失败留下面板显示原因。
+    pub fn import_result(&mut self, outcome: ImportOutcome) {
+        let waiting = self
+            .import_flow()
+            .is_some_and(|flow| flow.key_id == outcome.key_id);
+        match outcome.result {
+            Ok(report) => {
+                if let Some(state) = outcome.state {
+                    self.codex = Some(state);
+                }
+                let mut note = format!(
+                    "已导入 {}：{} · {} 个模型 · 默认 {}",
+                    Agent::Codex.label(),
+                    outcome.key_id,
+                    report.models.len(),
+                    report.model
+                );
+                if let Some(backup) = &report.backup_path {
+                    note.push_str(&format!(" · 旧配置备份为 {}", file_name(backup)));
+                }
+                if !report.verified {
+                    note.push_str("（未跑 codex 校验）");
+                }
+                if let Some(error) = outcome.state_error {
+                    note.push_str(&format!("（状态未记录：{error}）"));
+                }
+                self.toast = Some((note, Instant::now()));
+                if waiting {
+                    self.modal = Modal::None;
+                }
+            }
+            Err(message) => {
+                if waiting {
+                    if let Some(flow) = self.import_flow_mut() {
+                        flow.step = ImportStep::Failed;
+                        flow.error = Some(message);
+                    }
+                } else {
+                    self.toast = Some((format!("导入失败：{message}"), Instant::now()));
+                }
+            }
+        }
+    }
+}
+
+/// 取路径的文件名（提示条上只显示文件名，别撑爆一行）。
+fn file_name(path: &std::path::Path) -> String {
+    path.file_name()
+        .and_then(|name| name.to_str())
+        .unwrap_or("备份")
+        .to_string()
+}
+
+/// 把下标按 delta 移动并钳进 `[0, count)`；count 为 0 时回到 0。
+fn clamp_index(current: usize, delta: isize, count: usize) -> usize {
+    if count == 0 {
+        return 0;
+    }
+    let next = current as isize + delta;
+    next.clamp(0, count as isize - 1) as usize
+}
+
+/// 面板里的按键路由。返回 true 表示这个按键已被面板消费。
+pub(crate) fn handle_import_key(app: &mut App, key: KeyEvent) -> bool {
+    let Some(step) = app.import_flow().map(|flow| flow.step) else {
+        return false;
+    };
+    let searching = app.import_searching();
+    match step {
+        ImportStep::Agent => match key.code {
+            KeyCode::Char('j') | KeyCode::Down => app.import_move_agent(1),
+            KeyCode::Char('k') | KeyCode::Up => app.import_move_agent(-1),
+            KeyCode::Enter => app.import_choose_agent(),
+            KeyCode::Esc | KeyCode::Char('q') => app.cancel_modal(),
+            _ => return false,
+        },
+        ImportStep::Models if searching => match key.code {
+            KeyCode::Enter => app.import_exit_search(),
+            KeyCode::Esc => app.import_exit_search(),
+            KeyCode::Backspace => app.import_search_backspace(),
+            KeyCode::Char(c) if !key.modifiers.contains(KeyModifiers::CONTROL) => {
+                app.import_search_char(c)
+            }
+            _ => return false,
+        },
+        ImportStep::Models => match key.code {
+            KeyCode::Char('j') | KeyCode::Down => app.import_move(1),
+            KeyCode::Char('k') | KeyCode::Up => app.import_move(-1),
+            KeyCode::Char(' ') => app.import_toggle(),
+            KeyCode::Char('a') => app.import_toggle_all(),
+            KeyCode::Char('d') => app.import_set_default(),
+            KeyCode::Char('f') => app.import_toggle_show_all(),
+            KeyCode::Char('/') => app.import_start_search(),
+            KeyCode::Enter => app.import_apply(),
+            KeyCode::Esc | KeyCode::Char('q') => app.cancel_modal(),
+            _ => return false,
+        },
+        // 正在写配置：忽略按键；Esc 允许关面板（任务继续，结果走 toast）
+        ImportStep::Working => match key.code {
+            KeyCode::Esc => app.cancel_modal(),
+            _ => return false,
+        },
+        ImportStep::Failed => match key.code {
+            KeyCode::Esc | KeyCode::Enter | KeyCode::Char('q') => app.cancel_modal(),
+            _ => return false,
+        },
+    }
+    true
+}
+
+#[cfg(test)]
+mod tests;

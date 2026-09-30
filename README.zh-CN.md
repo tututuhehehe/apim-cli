@@ -1,6 +1,6 @@
 # apim
 
-终端里管理模型厂商 API Key：增删改查、看状态、看额度、复制密钥。
+终端里管理模型厂商 API Key：增删改查、看状态、看额度、复制密钥、一键导入到 Codex。
 
 [English](README.md) | **简体中文**
 
@@ -79,6 +79,7 @@ apim --version  # 版本
 | `i` | 厂商详情（鉴权 / 端点 / 额度脚本 / 来源 / vars，值不外显） | 密钥详情（`r` 显隐完整 token，`c` 复制） |
 | `Enter` | 用默认浏览器打开厂商主页（控制面板） | — |
 | `m` | — | 用**当前选中的这把 key** 拉取它的模型列表（模型可见性随 key/分组不同；弹窗内 `/` 聚焦搜索框实时过滤、`Esc` 退出搜索回到列表（过滤保留）、`j/k` 滚动、`c` 复制模型名、`Esc` 关闭弹窗） |
+| `x` | — | 把选中密钥 + 它的厂商 + 勾选的模型**一键导入到 Codex**（写 `~/.codex/config.toml`）；面板两步：`⏎` 下一步，模型多选 `空格` 勾选、`d` 设默认、`a` 全选/清空、`f` 显示全部、`/` 搜索、`⏎` 导入。详见下节 |
 | `j` / `k` | 上下移动 | 上下移动 |
 | `Tab` / `h` / `l` | 切换左右栏（h 左 = 厂商栏，l 右 = 密钥栏；已在边缘侧时不动） | 同左 |
 | `/` | 过滤厂商（匹配 id 或显示名） | 过滤密钥（匹配别名或分组） |
@@ -170,12 +171,40 @@ echo '你的key' | apim key add glm main
 apim status glm --json
 ```
 
+## 一键导入到 Codex
+
+密钥表里选中一把密钥按 `x`，把「这把密钥 + 它的厂商 + 勾选的模型」写进 Codex 配置，不用再手改 `~/.codex/config.toml`。面板只有两步：**选客户端**（目前只有 Codex）→ **勾选模型**（`空格` 勾选、`d` 设默认、`a` 全选/清空、`f` 显示厂商没声明支持 Responses 的模型、`/` 搜索）→ `⏎` 导入。
+
+导入完成前它会**让 codex 自己解析一遍新配置**（`codex debug models`）确认勾选的模型都在，然后给一条成功提示；不成功会当场把原因显示在面板里。
+
+写进去的东西：
+
+| 位置 | 内容 |
+|---|---|
+| `~/.codex/config.toml` 顶层 | `model_provider` = 厂商 id、`model` = 默认模型、`model_catalog_json = "apim-models.json"` |
+| `~/.codex/config.toml` 的 `[model_providers.<厂商id>]` | `name` / `base_url`（自动补 `/v1`）/ `wire_api = "responses"` / `experimental_bearer_token` |
+| `~/.codex/apim-models.json` | 勾选模型的模型目录，让 Codex 的 `/model` 能列出它们，并给每一条配 `medium/high/xhigh/max` 四档思考等级 |
+| `~/.config/apim/codex.toml` | apim 侧记录「当前导入的是哪把密钥 / 哪些模型」，用于给密钥打 ★ |
+
+几个刻意的选择：
+
+- **只切换激活项，不删旧配置**。Codex 允许 `config.toml` 里同时存在多个 `[model_providers.*]`，但同一时刻只有 `model_provider` 指向的那一个生效。所以导入新厂商时旧的 provider 块原样保留（想切回去改一下 `model_provider` 就行），你手写的注释、`[projects.*]`、`[tui]` 也不会被重写。
+- **密钥直接写进 `experimental_bearer_token`**。`~/.codex/config.toml` 本来就是 600 权限。在 apim 里轮换这把 key 后，记得重新按一次 `x` 同步。
+- **每次导入前备份**：改写前把现有内容存成 `~/.codex/config.toml.apim.bak`，想回退直接拿它覆盖回去。
+- **模型目录从你本机的 codex 克隆**（`codex debug models --bundled`），所以永远和你装的 codex 版本一致，apim 自身不需要跟着升级。
+- **只支持 Responses 协议**：Codex 0.134+ 已经删掉 `wire_api = "chat"`，中转站必须提供 `/v1/responses`，否则一律 400。面板默认只列厂商声明支持 Responses 的模型（new-api 系中转的 `/v1/models` 会带 `supported_endpoint_types`），按 `f` 可以强制显示全部。
+- 厂商 id 撞上 Codex 保留名（`openai` / `ollama` / `lmstudio` / `amazon-bedrock*`）时会自动加前缀写成 `apim-openai`。
+- 这份目录是**整表替换**（实测：只放一个模型进去，`codex debug models` 就只输出那一个），所以在用自定义 provider 时 `/model` 里只会出现你勾选的模型，内置 OpenAI 模型不再列出。想拿回内置表，把 `~/.codex/config.toml` 里的 `model_catalog_json` 一行删掉即可。
+
+> 需要本机装好 `codex`（用它生成并校验模型目录）；apim 从 `PATH` 找它，也可以用 `APIM_CODEX_BIN` 指定路径。
+
 ## 数据存哪
 
 都在 `~/.config/apim/`，TUI 的增删改直接写这两个文件（权限 600），也可以手动改：
 
 - `config.toml`：别名、分组（不含 token）
 - `secrets.toml`：真正的 token，键名是 `"厂商.别名"`
+- `codex.toml`：最后一次一键导入到 Codex 的记录（`x` 键用，只用于 ★ 标记与面板提示）
 
 手动改的格式示例：
 

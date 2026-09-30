@@ -3,10 +3,11 @@
 use std::path::PathBuf;
 use std::time::Instant;
 
-use super::{App, Focus};
+use super::import::{ImportFlow, ImportStep};
+use super::{App, Focus, TaskMsg};
 use crate::clipboard;
 use crate::form::{self, Form, LineEdit};
-use crate::probe;
+use crate::probe::{self, ModelEntry};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum FormKind {
@@ -78,6 +79,8 @@ pub enum Modal {
         filter: String,
         searching: bool,
     },
+    /// 一键导入到客户端（x 键打开）：选客户端 → 勾选模型 → 写入 → 校验。
+    Import(ImportFlow),
     /// 实时过滤搜索：边输入边改 key_filter / provider_filter，
     /// original 记打开前的旧值，Esc 恢复。
     Search {
@@ -305,7 +308,8 @@ impl App {
             | Modal::Form { .. }
             | Modal::Inspector { .. }
             | Modal::Models { .. }
-            | Modal::Search { .. } => {}
+            | Modal::Search { .. }
+            | Modal::Import(_) => {}
         }
     }
 
@@ -394,16 +398,21 @@ impl App {
             searching: false,
         };
         let client = self.client.clone();
-        let tx = self.tx_models.clone();
+        let tx = self.tx_task.clone();
         tokio::spawn(async move {
             let result = probe::fetch_models(&client, &recipe, &key.token).await;
-            let _ = tx.send((key_id, result));
+            let _ = tx.send(TaskMsg::Models(key_id, result));
         });
     }
 
-    /// 模型列表拉取结果落地：弹窗还开着且 key_id 匹配才更新，否则丢弃
+    /// 模型列表拉取结果落地：一键导入面板优先（它打开时会顶掉浏览弹窗），
+    /// 否则交给模型浏览弹窗；两边都按 key_id 匹配，不匹配就丢弃
     /// （弹窗可能已被关掉或换了把密钥打开）。
-    pub fn apply_models(&mut self, key_id: String, result: Result<Vec<String>, String>) {
+    pub fn apply_models(&mut self, key_id: String, result: Result<Vec<ModelEntry>, String>) {
+        if self.import_awaiting(&key_id, ImportStep::Models) {
+            self.import_receive_models(key_id, result);
+            return;
+        }
         let Modal::Models {
             key_id: modal_key_id,
             status,
@@ -416,7 +425,10 @@ impl App {
             return;
         }
         *status = match result {
-            Ok(items) => ModelsStatus::Done { items, selected: 0 },
+            Ok(entries) => ModelsStatus::Done {
+                items: entries.into_iter().map(|entry| entry.id).collect(),
+                selected: 0,
+            },
             Err(message) => ModelsStatus::Error { message },
         };
     }
@@ -549,7 +561,7 @@ mod tests {
             },
         );
         let (tx, _rx) = tokio::sync::mpsc::unbounded_channel();
-        let (tx_models, _rx_models) = tokio::sync::mpsc::unbounded_channel();
+        let (tx_task, _rx_task) = tokio::sync::mpsc::unbounded_channel();
         let mut app = App {
             recipes,
             keys: vec![KeyEntry {
@@ -571,10 +583,11 @@ mod tests {
             key_filter: None,
             provider_filter: None,
             tx,
-            tx_models,
+            tx_task,
             client: crate::probe::client().expect("client"),
             next_auto_refresh: Instant::now() + std::time::Duration::from_secs(300),
             config_dir: crate::app::tests::test_config_dir("modal"),
+            codex: None,
             undo_stack: std::collections::VecDeque::new(),
         };
         app.rebuild_provider_list();
@@ -640,6 +653,17 @@ mod tests {
         }
     }
 
+    /// 测试里只关心模型名时用这个造条目（不声明端点能力）。
+    fn entries(names: &[&str]) -> Vec<ModelEntry> {
+        names
+            .iter()
+            .map(|name| ModelEntry {
+                id: (*name).to_string(),
+                responses: None,
+            })
+            .collect()
+    }
+
     /// 断言当前是 Models 弹窗并拆出 (key_id, status)。
     fn models_modal(app: &App) -> (&str, &ModelsStatus) {
         match &app.modal {
@@ -687,7 +711,7 @@ mod tests {
         app.modal = models_loading("alpha.a1");
         app.apply_models(
             "alpha.a1".into(),
-            Ok(vec!["claude-4".into(), "gpt-5".into(), "Claude-3".into()]),
+            Ok(entries(&["claude-4", "gpt-5", "Claude-3"])),
         );
         assert!(!app.models_is_searching());
 
@@ -738,10 +762,7 @@ mod tests {
     fn models_copy_uses_filtered_selection() {
         let (mut app, _rx, _rx_models) = crate::app::tests::test_app(&[("alpha", &["a1"])]);
         app.modal = models_loading("alpha.a1");
-        app.apply_models(
-            "alpha.a1".into(),
-            Ok(vec!["claude-4".into(), "gpt-5".into()]),
-        );
+        app.apply_models("alpha.a1".into(), Ok(entries(&["claude-4", "gpt-5"])));
         app.models_start_search();
         app.models_search_char('g');
         // 只断言「选中哪一个」，不碰真实剪贴板（CI / Linux 无显示环境会失败）
@@ -757,7 +778,7 @@ mod tests {
         let (mut app, _rx, _rx_models) = crate::app::tests::test_app(&[("alpha", &["a1"])]);
         app.modal = models_loading("alpha.a1");
         // key_id 匹配：Loading → Done，选中从 0 开始
-        app.apply_models("alpha.a1".into(), Ok(vec!["m1".into(), "m2".into()]));
+        app.apply_models("alpha.a1".into(), Ok(entries(&["m1", "m2"])));
         let (id, status) = models_modal(&app);
         assert_eq!(id, "alpha.a1");
         assert_eq!(status, &done(&["m1", "m2"]));
@@ -772,24 +793,26 @@ mod tests {
         );
         // 弹窗已关：结果丢弃，不复活
         app.modal = Modal::None;
-        app.apply_models("alpha.a1".into(), Ok(vec!["m1".into()]));
+        app.apply_models("alpha.a1".into(), Ok(entries(&["m1"])));
         assert!(matches!(app.modal, Modal::None));
     }
 
     #[tokio::test]
     async fn open_models_sets_loading_and_delivers_result() {
-        let (mut app, _rx, mut rx_models) = crate::app::tests::test_app(&[("alpha", &["a1"])]);
+        let (mut app, _rx, mut rx_task) = crate::app::tests::test_app(&[("alpha", &["a1"])]);
         app.focus = Focus::Keys;
         app.open_models();
         let (id, status) = models_modal(&app);
         assert_eq!(id, "alpha.a1");
         assert_eq!(status, &ModelsStatus::Loading);
         // spawn 出去的 fetch 打 example.invalid 必失败，结果经通道回来后落地 Error
-        let (back_id, result) =
-            tokio::time::timeout(std::time::Duration::from_secs(10), rx_models.recv())
-                .await
-                .expect("应收到模型拉取结果")
-                .expect("channel 不应关闭");
+        let msg = tokio::time::timeout(std::time::Duration::from_secs(10), rx_task.recv())
+            .await
+            .expect("应收到模型拉取结果")
+            .expect("channel 不应关闭");
+        let TaskMsg::Models(back_id, result) = msg else {
+            panic!("本该是模型列表消息");
+        };
         assert_eq!(back_id, "alpha.a1");
         assert!(result.is_err(), "假厂商拉模型应失败: {result:?}");
         app.apply_models(back_id, result);

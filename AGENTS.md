@@ -18,6 +18,14 @@ src/
 ├── tui.rs             事件循环、按键路由（厂商栏 Enter 开主页）、快照渲染
 ├── clipboard.rs       复制到剪贴板（arboard → pbcopy 兜底）
 ├── browser.rs         用默认浏览器打开厂商主页（open/xdg-open，只放行 http(s)）
+├── clients/           一键导入到外部客户端（agent）
+│   ├── mod.rs         Agent 注册表（现在只有 Codex；加客户端只动这里）
+│   └── codex/         Codex 适配
+│       ├── mod.rs     ImportRequest/ImportReport、保留 id 加前缀、base_url 补 /v1、写入编排
+│       ├── config_file.rs  ~/.codex/config.toml 读改写（toml_edit 保注释保顺序）+ 备份 + 原子写
+│       ├── catalog.rs 模型目录：`codex debug models --bundled` 取模板 → 克隆条目 → 端到端校验
+│       ├── store.rs   ~/.config/apim/codex.toml（★ 标记用的「当前导入项」）
+│       └── tests.rs   沙盒测试 + 真机 opt-in 测试（`--ignored codex_real_end_to_end`）
 ├── cli/               CLI 子命令（AI/脚本的机器接口，与 TUI 共用底层）
 │   ├── mod.rs         Args 解析（--flag 值/布尔）、Ctx（config+recipes 目录，可注入测试）、分发与帮助
 │   ├── provider.rs    provider ls/add/set/rm/copy（--script 绑定/解绑；copy 整份复制含脚本文件）
@@ -30,6 +38,7 @@ src/
 │   └── tests.rs       表单引擎测试
 ├── app/               应用状态机
 │   ├── mod.rs         App 结构、start、导航、探活调度（探针代际：配置变更后旧结果丢弃）
+│   ├── import/        一键导入面板状态机（选客户端 → 勾选模型 → 写入 → 校验）
 │   ├── modal.rs       Modal 枚举 + 打开/保存分发/删除确认分发
 │   ├── keys_store.rs  密钥保存/删除（写 config.toml + secrets.toml）
 │   ├── undo.rs        Ctrl+Z 撤销栈（本次会话的写操作）+ 回退内存与磁盘
@@ -41,6 +50,7 @@ src/
 │   ├── keys.rs        右侧密钥表 + 状态标签
 │   ├── balance.rs     右下额度面板
 │   ├── form_modal.rs  表单弹窗（光标截断渲染）
+│   ├── import.rs      一键导入面板渲染
 │   └── confirm.rs     删除确认弹窗
 ├── recipe/            厂商协议
 │   ├── mod.rs         Recipe/Auth/HttpCall 模型、YAML 加载（builtin→manifest→user 逐级覆盖，加载期校验 id 字符集）、is_valid_id、{token}/{base_url} 模板替换
@@ -51,7 +61,7 @@ src/
 │   ├── mod.rs         KeyEntry、读取 config.toml + secrets.toml（严格版给 TUI，宽松版 load_keys_lenient 给 CLI 自救）
 │   └── store.rs       原子写入（tmp+rename，tmp 名带 pid，600 权限）
 └── probe/             并发探活（health + balance 并发，tokio::join!）
-    ├── mod.rs         Health/ProbeResult、client、http 一路（探活 + 模型列表拉取的鉴权请求）
+    ├── mod.rs         Health/ProbeResult/ModelEntry、client、http 一路（探活 + 模型列表拉取的鉴权请求）
     └── script.rs      脚本执行器（env 注入/超时 kill/stderr 截断 200/stdout 50 行上限）+ expand_tilde
 docs/
 ├── quota-script-prompt.md  额度脚本代写提示词（整体复制给 AI Agent 用）
@@ -74,6 +84,8 @@ recipes/              内置 recipe ×4（deepseek/openai/moonshot/openrouter，
 - `~/.config/apim/config.toml` — 密钥清单（provider/alias/group，无 token）
 - `~/.config/apim/secrets.toml` — token，键名 `"厂商.别名"`，600 权限
 - `~/.config/apim/recipes/*.yaml` — 用户厂商 recipe，同 id 覆盖内置
+- `~/.config/apim/codex.toml` — apim 最后一次一键导入到 Codex 的记录（只用于 ★ 标记与面板提示，不反向决定写什么）
+- `~/.codex/config.toml`、`~/.codex/apim-models.json` — 一键导入（`x` 键）写的，前者每次改写前备份成 `config.toml.apim.bak`
 - `APIM_CONFIG_DIR` 环境变量可重定向整个配置目录（测试用）
 
 ## 核心约定
@@ -89,13 +101,24 @@ recipes/              内置 recipe ×4（deepseek/openai/moonshot/openrouter，
 9. **发版走 `docs/RELEASING.md`**：版本号单一来源是 `Cargo.toml`；打 `v*` tag 触发 5 平台构建；npm/Homebrew 按手册各自更新；不要手改 Release 资产。
 10. **开发跑本地代码一律 `cargo run -- <args>`，别 `cargo install --path .`**：本机 `apim` 是 npm 装的正试版（`/opt/homebrew/bin/apim`），PATH 里 `~/.cargo/bin` 排在它之后 —— `cargo install` 装出的二进制**不会被 `apim` 命中**，只会变成一个过期副本让人误判“改了没生效”。
 
+11. **一键导入到 Codex（`x` 键）的硬约束**（都来自 codex 源码 + 真机实测，别凭感觉改）：
+    - Codex 允许 `config.toml` 里同时定义多个 `[model_providers.*]`，但同一时刻只有顶层 `model_provider` 指向的那个激活 → apim **只切换激活项，旧 provider 块一律保留**（用户手写的注释 / `[projects]` / `[tui]` 也不能丢），不做整体重写。
+    - 改写 `~/.codex/config.toml` **必须用 `toml_edit`**（`toml` 序列化会丢注释），写前备份成 `config.toml.apim.bak`，再 tmp + rename。
+    - `wire_api` 只接受 `"responses"`（0.134+ 删了 `"chat"`，写了会硬报错）→ 中转站得提供 `/v1/responses`；面板默认只列厂商声明支持 Responses 的模型。
+    - `model_catalog_json` 相对路径按 `CODEX_HOME` 解析；它是**整表替换**（不是合并）；条目**必须**有 `base_instructions` 或 `model_messages.instructions_template`，两样都缺会让 codex 解析整个目录失败。
+    - 模型目录一律从**本机 codex**（`codex debug models --bundled`）克隆条目改标识字段，不内嵌模板文本（避免跟 codex 版本漂移）；导入完用 `codex debug models` 反向校验勾选的模型都在。
+    - 厂商 id 撞上保留名（`openai`/`ollama`/`lmstudio`/`amazon-bedrock*`）时加 `apim-` 前缀。
+
 ## 验证命令速查
 
 ```bash
 cargo run                              # 进 TUI（跑当前代码）
 cargo run -- --snapshot                # 真实接口拉数据渲染成文本（不进 TUI）
 cargo run -- --snapshot-inspector      # 详情弹窗快照：假状态不拉接口；=provider 出厂商详情
-cargo test                             # 单测（recipe/表单/CLI 沙盒等）
+cargo run -- --snapshot-import         # 一键导入面板快照：第一步选客户端
+cargo run -- --snapshot-import-models  # 一键导入面板快照：第二步勾选模型
+cargo test                             # 单测（recipe/表单/CLI 沙盒/codex 适配等）
+cargo test -- codex_real_end_to_end --ignored --nocapture   # 需本机装 codex：真机端到端（生成目录 + 让 codex 校验）
 apim provider ls --json                # CLI 冒烟（跑已发布版；本地代码用 cargo run -- provider ls）
 ```
 

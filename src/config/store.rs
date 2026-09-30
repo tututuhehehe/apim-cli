@@ -57,7 +57,8 @@ pub(crate) fn tmp_path(path: &Path) -> PathBuf {
     path.with_file_name(format!("{name}.{}.tmp", std::process::id()))
 }
 
-fn write_private(path: &Path, contents: &str) -> Result<()> {
+/// 原子私有写入（tmp 带 pid + 600 权限 + rename）。密钥类文件统一走它。
+pub(crate) fn write_private(path: &Path, contents: &str) -> Result<()> {
     let tmp = tmp_path(path);
     fs::write(&tmp, contents).with_context(|| format!("write {}", tmp.display()))?;
     #[cfg(unix)]

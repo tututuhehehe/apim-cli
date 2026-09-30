@@ -1,6 +1,6 @@
 # apim
 
-Manage model-provider API keys from the terminal: add, edit, delete, check health, check balance, copy.
+Manage model-provider API keys from the terminal: add, edit, delete, check health, check balance, copy, and one-click import into Codex.
 
 **English** | [简体中文](README.zh-CN.md)
 
@@ -81,6 +81,7 @@ apim --version  # version
 | `i` | Provider details (auth / endpoints / balance script / origin / vars — values are hidden) | Key details (`r` toggles the full token, `c` copies) |
 | `Enter` | Open the provider homepage (console) in your default browser | — |
 | `m` | — | Fetch the model list with **the selected key** (visibility depends on the key/group; in the dialog `/` focuses the search box for live filtering, `Esc` leaves search back to the list (filter kept), `j`/`k` scroll, `c` copies a model name, `Esc` closes) |
+| `x` | — | One-click **import into Codex**: the selected key + its provider + the models you tick, written to `~/.codex/config.toml`. Two steps: `⏎` to advance; in the model list `space` toggles, `d` sets the default, `a` toggles all, `f` reveals everything, `/` searches, `⏎` imports. See below |
 | `j` / `k` | Move up/down | Move up/down |
 | `Tab` / `h` / `l` | Switch panes (`h` = provider list, `l` = key table; no-op at the edge) | Same |
 | `/` | Filter providers (matches id or display name) | Filter keys (matches alias or group) |
@@ -172,12 +173,40 @@ echo 'your-key' | apim key add glm main
 apim status glm --json
 ```
 
+## One-click import into Codex
+
+Select a key in the key table and press `x` to write "this key + its provider + the models you tick" into your Codex config — no more hand-editing `~/.codex/config.toml`. The panel has two steps: **pick a client** (Codex only for now) → **tick models** (`space` toggles, `d` sets the default, `a` toggles all, `f` reveals models the provider does not advertise as Responses-capable, `/` searches) → `⏎` imports.
+
+Before reporting success it makes **codex itself parse the new config** (`codex debug models`) and checks that every ticked model is there; on failure the reason is shown right in the panel.
+
+What gets written:
+
+| Location | Content |
+|---|---|
+| `~/.codex/config.toml` top level | `model_provider` = provider id, `model` = default model, `model_catalog_json = "apim-models.json"` |
+| `~/.codex/config.toml` → `[model_providers.<provider-id>]` | `name` / `base_url` (`/v1` appended when missing) / `wire_api = "responses"` / `experimental_bearer_token` |
+| `~/.codex/apim-models.json` | A model catalog so Codex's `/model` picker lists the models you ticked, each with the `medium/high/xhigh/max` reasoning levels |
+| `~/.config/apim/codex.toml` | apim's record of "what is currently imported", used for the ★ marker on the key row |
+
+Deliberate choices:
+
+- **Switch the active provider, never rewrite the file.** Codex happily keeps several `[model_providers.*]` blocks at once but only activates the one named by `model_provider`. Importing therefore leaves the previous provider block intact (change `model_provider` back to switch), and your comments, `[projects.*]` and `[tui]` are preserved.
+- **The key goes into `experimental_bearer_token`.** `~/.codex/config.toml` is already mode 600. If you rotate the key in apim, press `x` again to sync.
+- **Every import is backed up**: the previous content is saved as `~/.codex/config.toml.apim.bak`; copy it back to roll back.
+- **The catalog is cloned from your own codex** (`codex debug models --bundled`), so it always matches the codex version you have installed — apim itself needs no update.
+- **Responses protocol only**: Codex 0.134+ removed `wire_api = "chat"`, so the relay must serve `/v1/responses` or you get a hard 400. The panel lists only models the provider advertises as Responses-capable (new-api relays expose `supported_endpoint_types` in `/v1/models`); press `f` to force the full list.
+- Provider ids that collide with Codex reserved names (`openai` / `ollama` / `lmstudio` / `amazon-bedrock*`) get an `apim-` prefix, e.g. `apim-openai`.
+- The catalog **replaces** Codex's built-in model table rather than merging into it (verified: a catalog with one model makes `codex debug models` print exactly that one). So while a custom provider is active, `/model` lists only the models you ticked and the built-in OpenAI models disappear. To get the built-in table back, delete the `model_catalog_json` line from `~/.codex/config.toml`.
+
+> Requires `codex` on your machine (it is used to generate and verify the model catalog). apim finds it on `PATH`, or you can point `APIM_CODEX_BIN` at it.
+
 ## Where the data lives
 
 Everything lives under `~/.config/apim/`. TUI edits write these two files directly (mode 600), and you can edit them by hand as well:
 
 - `config.toml` — alias and group (no tokens)
 - `secrets.toml` — the actual tokens, keyed by `"provider.alias"`
+- `codex.toml` — what apim last imported into Codex (used by the `x` key for the ★ marker and panel hints)
 
 Hand-edit example:
 

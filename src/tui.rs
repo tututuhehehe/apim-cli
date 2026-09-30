@@ -13,24 +13,19 @@ use ratatui::backend::TestBackend;
 use ratatui::buffer::Buffer;
 use unicode_width::UnicodeWidthStr;
 
-use crate::app::{App, Focus, KeyState, Modal, ModelsMsg};
+use crate::app::{
+    App, Focus, ImportFlow, ImportStep, KeyState, Modal, ModelPick, TaskMsg, handle_import_key,
+};
 use crate::form::{Field, FormEvent};
 use crate::probe::{BalanceSnapshot, Health};
 use crate::ui;
 
 pub(crate) async fn run_tui() -> Result<()> {
-    let (mut app, mut rx, mut rx_models) = App::start()?;
+    let (mut app, mut rx, mut rx_task) = App::start()?;
     let mut terminal = ratatui::init();
     let _ = execute!(terminal.backend_mut(), EnableBracketedPaste);
     let mut events = EventStream::new();
-    let result = loop_tui(
-        &mut terminal,
-        &mut app,
-        &mut rx,
-        &mut rx_models,
-        &mut events,
-    )
-    .await;
+    let result = loop_tui(&mut terminal, &mut app, &mut rx, &mut rx_task, &mut events).await;
     ratatui::restore();
     result
 }
@@ -39,7 +34,7 @@ async fn loop_tui(
     terminal: &mut ratatui::DefaultTerminal,
     app: &mut App,
     rx: &mut tokio::sync::mpsc::UnboundedReceiver<crate::app::ProbeMsg>,
-    rx_models: &mut tokio::sync::mpsc::UnboundedReceiver<ModelsMsg>,
+    rx_models: &mut tokio::sync::mpsc::UnboundedReceiver<TaskMsg>,
     events: &mut EventStream,
 ) -> Result<()> {
     loop {
@@ -79,9 +74,12 @@ async fn loop_tui(
                 }
             }
             msg = rx_models.recv() => {
-                if let Some((key_id, result)) = msg {
-                    // 弹窗可能已被关掉/换了把密钥打开：apply_models 按 key_id 匹配，不匹配丢弃
-                    app.apply_models(key_id, result);
+                if let Some(msg) = msg {
+                    // 弹窗可能已被关掉/换了把密钥打开：两边都按 key_id 匹配，不匹配丢弃
+                    match msg {
+                        TaskMsg::Models(key_id, result) => app.apply_models(key_id, result),
+                        TaskMsg::Import(outcome) => app.import_result(*outcome),
+                    }
                 }
             }
             _ = tokio::time::sleep(std::time::Duration::from_millis(200)) => {
@@ -167,6 +165,9 @@ fn handle_key(app: &mut App, key: KeyEvent) {
                 _ => {}
             }
         }
+        Modal::Import(_) => {
+            handle_import_key(app, key);
+        }
         Modal::None => match key.code {
             KeyCode::Char('c') if key.modifiers.contains(KeyModifiers::CONTROL) => {}
             // Ctrl+Z 撤销最近一次写操作（增删改厂商/密钥）
@@ -186,6 +187,8 @@ fn handle_key(app: &mut App, key: KeyEvent) {
                 app.duplicate_selected_provider()
             }
             KeyCode::Char('i') => app.open_inspector(),
+            // x：把当前密钥 + 厂商 + 勾选的模型一键导入到 Codex
+            KeyCode::Char('x') => app.open_import(),
             KeyCode::Char('d') => app.open_delete(),
             KeyCode::Char('j') | KeyCode::Down => app.move_down(),
             KeyCode::Char('k') | KeyCode::Up => app.move_up(),
@@ -201,7 +204,7 @@ fn handle_key(app: &mut App, key: KeyEvent) {
 // ---- 快照（测试用） ----------------------------------------------------
 
 pub(crate) async fn run_snapshot() -> Result<()> {
-    let (mut app, _rx, _rx_models) = App::start()?;
+    let (mut app, _rx, _rx_task) = App::start()?;
     if let Ok(id) = std::env::var("APIM_SNAPSHOT_PROVIDER")
         && let Some(pos) = app.provider_ids.iter().position(|p| p == &id)
     {
@@ -212,7 +215,7 @@ pub(crate) async fn run_snapshot() -> Result<()> {
 }
 
 pub(crate) async fn run_snapshot_key_form() -> Result<()> {
-    let (mut app, _rx, _rx_models) = App::start()?;
+    let (mut app, _rx, _rx_task) = App::start()?;
     app.focus = Focus::Keys;
     app.open_add();
     if let Modal::Form { form, .. } = &mut app.modal {
@@ -224,7 +227,7 @@ pub(crate) async fn run_snapshot_key_form() -> Result<()> {
 }
 
 pub(crate) async fn run_snapshot_provider_form() -> Result<()> {
-    let (mut app, _rx, _rx_models) = App::start()?;
+    let (mut app, _rx, _rx_task) = App::start()?;
     app.focus = Focus::Providers;
     app.open_add();
     if let Modal::Form { form, .. } = &mut app.modal {
@@ -239,11 +242,67 @@ pub(crate) async fn run_snapshot_provider_form() -> Result<()> {
     render_snapshot(&app).await
 }
 
+/// 一键导入面板快照（第一步：选客户端）。不拉接口、不写盘，直接摆出面板状态。
+pub(crate) async fn run_snapshot_import() -> Result<()> {
+    let (mut app, _rx, _rx_task) = App::start()?;
+    app.focus = Focus::Keys;
+    app.codex = Some(crate::clients::CodexState {
+        provider: "ikun".into(),
+        provider_name: "ikun".into(),
+        alias: "codex".into(),
+        provider_key: "ikun".into(),
+        models: vec!["gpt-6-sol".into()],
+        default_model: "gpt-6-sol".into(),
+    });
+    app.modal = Modal::Import(ImportFlow::new(snapshot_key_id(&app)));
+    render_snapshot(&app).await
+}
+
+/// 一键导入面板快照（第二步：勾选模型）。包含一个厂商声明不支持 responses 的模型。
+pub(crate) async fn run_snapshot_import_models() -> Result<()> {
+    let (mut app, _rx, _rx_task) = App::start()?;
+    app.focus = Focus::Keys;
+    let mut flow = ImportFlow::new(snapshot_key_id(&app));
+    flow.step = ImportStep::Models;
+    flow.items = vec![
+        ModelPick {
+            name: "gpt-6-sol".into(),
+            responses: Some(true),
+            checked: true,
+        },
+        ModelPick {
+            name: "gpt-6.1-sol".into(),
+            responses: Some(true),
+            checked: true,
+        },
+        ModelPick {
+            name: "deepseek-v4".into(),
+            responses: Some(true),
+            checked: false,
+        },
+        ModelPick {
+            name: "text-embedding-3-large".into(),
+            responses: Some(false),
+            checked: false,
+        },
+    ];
+    flow.default = Some(0);
+    app.modal = Modal::Import(flow);
+    render_snapshot(&app).await
+}
+
+/// 快照用的密钥 id：有真实密钥就用它，没有就用占位（快照不依赖配置目录内容）。
+fn snapshot_key_id(app: &App) -> String {
+    app.selected_key_entry()
+        .map(|key| key.id())
+        .unwrap_or_else(|| "ikun.codex".into())
+}
+
 /// 检查器快照：不拉真实接口，给选中密钥塞一份假探测状态后渲染详情弹窗。
 /// 默认密钥详情；`APIM_SNAPSHOT_INSPECTOR=provider` 出厂商详情。
 /// 数据来自 APIM_CONFIG_DIR（测试时指向假配置目录）。
 pub(crate) async fn run_snapshot_inspector() -> Result<()> {
-    let (mut app, _rx, _rx_models) = App::start()?;
+    let (mut app, _rx, _rx_task) = App::start()?;
     if let Ok(id) = std::env::var("APIM_SNAPSHOT_PROVIDER")
         && let Some(pos) = app.provider_ids.iter().position(|p| p == &id)
     {

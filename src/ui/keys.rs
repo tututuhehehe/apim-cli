@@ -45,9 +45,18 @@ pub(crate) fn draw_keys(frame: &mut Frame, app: &App, area: Rect) {
         .map(|(i, idx)| {
             let key = &app.keys[idx];
             let (style, label) = status_label(app, key);
+            // ★ = 这把密钥是 apim 上次导入到 Codex 的那把
+            let alias = if app.is_codex_active(&key.id()) {
+                Cell::from(Span::styled(
+                    format!("★ {}", key.alias),
+                    Style::new().fg(theme::GOLD).add_modifier(Modifier::BOLD),
+                ))
+            } else {
+                Cell::from(key.alias.clone())
+            };
             Row::new([
                 Cell::from(format!("{}", i + 1)),
-                Cell::from(key.alias.clone()),
+                alias,
                 Cell::from(key.group_label().to_string()),
                 Cell::from(key.masked_token()),
                 Cell::from(Span::styled(label, style)),

@@ -2,6 +2,9 @@
 
 pub use modal::{InspectorTarget, Modal, ModelsStatus, SearchTarget, filter_models};
 
+pub(crate) use import::{ImportFlow, ImportOutcome, ImportStep, ModelPick, handle_import_key};
+
+mod import;
 mod keys_store;
 mod modal;
 mod providers_store;
@@ -14,9 +17,10 @@ use std::time::{Duration, Instant};
 use anyhow::Result;
 use tokio::sync::mpsc::{self, UnboundedReceiver, UnboundedSender};
 
+use crate::clients::CodexState;
 use crate::clipboard;
 use crate::config::{self, KeyEntry};
-use crate::probe::{self, BalanceSnapshot, Health, ProbeResult};
+use crate::probe::{self, BalanceSnapshot, Health, ModelEntry, ProbeResult};
 use crate::recipe::Recipe;
 
 pub(crate) use undo::UndoAction;
@@ -48,8 +52,14 @@ impl Default for KeyState {
 /// 自动全量刷新间隔：启动刷一次，之后到点后台全量重刷（含探活+额度）。
 pub const AUTO_REFRESH_INTERVAL: Duration = Duration::from_secs(5 * 60);
 
-/// 模型列表拉取结果：连同 key_id 一起回传，弹窗按 key_id 匹配（不匹配丢弃）。
-pub type ModelsMsg = (String, std::result::Result<Vec<String>, String>);
+/// 后台任务回执：模型列表拉取 / 一键导入结果。两者共用一条通道，
+/// 因为同一时刻只会有一个弹窗在等结果，消费端按 key_id 匹配即可。
+pub enum TaskMsg {
+    /// (key_id, 该密钥可见的模型列表)
+    Models(String, std::result::Result<Vec<ModelEntry>, String>),
+    /// 一键导入到客户端的结果
+    Import(Box<ImportOutcome>),
+}
 
 /// 探活/额度结果：带上**探针代际**。配置变更后旧代际的结果会被丢弃，
 /// 因此不会把按旧配置算出的数字填回面板（详见 App::apply）。
@@ -77,27 +87,27 @@ pub struct App {
     /// 探针代际发号器（单调递增）。
     pub(crate) next_probe_seq: u64,
     pub(crate) tx: UnboundedSender<ProbeMsg>,
-    pub(crate) tx_models: UnboundedSender<ModelsMsg>,
+    pub(crate) tx_task: UnboundedSender<TaskMsg>,
     pub(crate) client: reqwest::Client,
     /// 下一次自动全量刷新的时间点。
     pub(crate) next_auto_refresh: Instant,
     /// 配置根目录（`~/.config/apim` 或 `APIM_CONFIG_DIR`）。落盘都经它，
     /// 测试注入临时目录，不碰真实配置。
     pub(crate) config_dir: PathBuf,
+    /// apim 上一次一键导入到 codex 的记录（★ 标记与面板提示）。
+    pub codex: Option<CodexState>,
     /// 本次打开面板后的写操作历史（Ctrl+Z 逐步回退），只存可逆的写操作。
     pub(crate) undo_stack: VecDeque<UndoAction>,
 }
 
 impl App {
-    pub fn start() -> Result<(
-        App,
-        UnboundedReceiver<ProbeMsg>,
-        UnboundedReceiver<ModelsMsg>,
-    )> {
+    pub fn start() -> Result<(App, UnboundedReceiver<ProbeMsg>, UnboundedReceiver<TaskMsg>)> {
         let recipes = crate::recipe::load_recipes()?;
         let keys = config::load_keys(&recipes)?;
         let (tx, rx) = mpsc::unbounded_channel();
-        let (tx_models, rx_models) = mpsc::unbounded_channel();
+        let (tx_task, rx_task) = mpsc::unbounded_channel();
+        let config_dir = config::config_dir();
+        let codex = crate::clients::codex::current_state(&config_dir);
         let mut app = App {
             recipes,
             keys,
@@ -114,16 +124,17 @@ impl App {
             probe_seq: HashMap::new(),
             next_probe_seq: 0,
             tx,
-            tx_models,
+            tx_task,
             client: probe::client()?,
             next_auto_refresh: Instant::now() + AUTO_REFRESH_INTERVAL,
-            config_dir: config::config_dir(),
+            config_dir,
+            codex,
             undo_stack: VecDeque::new(),
         };
         app.rebuild_provider_list();
         // 打开即全量刷一遍所有厂商；切换厂商只读缓存，到点自动重刷。
         app.refresh_all_keys();
-        Ok((app, rx, rx_models))
+        Ok((app, rx, rx_task))
     }
 
     pub fn apply(&mut self, msg: ProbeMsg) {
@@ -264,6 +275,13 @@ impl App {
 
     pub fn state_for(&self, key: &KeyEntry) -> KeyState {
         self.states.get(&key.id()).cloned().unwrap_or_default()
+    }
+
+    /// 这把密钥是不是 apim 上次导入到 codex 的那把（密钥行打 ★）。
+    pub fn is_codex_active(&self, key_id: &str) -> bool {
+        self.codex
+            .as_ref()
+            .is_some_and(|state| state.key_id() == key_id)
     }
 
     pub(crate) fn rebuild_provider_list(&mut self) {
@@ -519,11 +537,7 @@ pub(crate) mod tests {
     /// 不经过 App::start，不读任何配置目录，不触碰 ~/.config/apim。
     pub(crate) fn test_app(
         providers: &[(&str, &[&str])],
-    ) -> (
-        App,
-        UnboundedReceiver<ProbeMsg>,
-        UnboundedReceiver<ModelsMsg>,
-    ) {
+    ) -> (App, UnboundedReceiver<ProbeMsg>, UnboundedReceiver<TaskMsg>) {
         let mut recipes = HashMap::new();
         let mut keys = Vec::new();
         for (pid, aliases) in providers {
@@ -553,7 +567,7 @@ pub(crate) mod tests {
             }
         }
         let (tx, rx) = mpsc::unbounded_channel();
-        let (tx_models, rx_models) = mpsc::unbounded_channel();
+        let (tx_task, rx_task) = mpsc::unbounded_channel();
         let mut app = App {
             recipes,
             keys,
@@ -570,14 +584,15 @@ pub(crate) mod tests {
             probe_seq: HashMap::new(),
             next_probe_seq: 0,
             tx,
-            tx_models,
+            tx_task,
             client: probe::client().expect("构建测试用 reqwest client"),
             next_auto_refresh: Instant::now() + AUTO_REFRESH_INTERVAL,
             config_dir: test_config_dir("app"),
+            codex: None,
             undo_stack: VecDeque::new(),
         };
         app.rebuild_provider_list();
-        (app, rx, rx_models)
+        (app, rx, rx_task)
     }
 
     /// 测试用配置目录：target/ 下的临时目录，避免任何测试写到真实 ~/.config/apim。

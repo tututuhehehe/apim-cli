@@ -45,7 +45,7 @@ pub(crate) fn draw_footer(frame: &mut Frame, app: &App, area: Rect) {
     let keys = if app.focus == Focus::Providers {
         " j/k 移动  Tab/hl 切换  ⏎ 主页  c 复制URL  y 复制厂商  i 详情  a 添加  e 编辑  d 删除  r 刷新  ^Z 撤销  q 退出 "
     } else {
-        " j/k 移动  Tab/hl 切换  m 模型  c 复制密钥  i 详情  a 添加  e 编辑  d 删除  r 刷新  ^Z 撤销  q 退出 "
+        " j/k 移动  Tab/hl 切换  m 模型  x 导入  c 复制密钥  i 详情  a 添加  e 编辑  d 删除  r 刷新  ^Z 撤销  q 退出 "
     };
     let mut spans = Vec::new();
     if let Some(toast) = toast {
