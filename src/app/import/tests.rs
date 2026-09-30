@@ -101,10 +101,9 @@ async fn choosing_agent_fetches_models_then_prechecks_first_usable_one() {
     let flow = flow(&app);
     assert!(!flow.loading);
     assert_eq!(flow.step, ImportStep::Models);
-    // 默认勾上第一个可用模型（chat-only 被隐藏，不参与）
+    // 不预勾任何模型：勾哪些、哪个当默认都由用户在面板里定
     assert_eq!(visible_names(&app), ["gpt-6-sol", "deepseek-v4"]);
-    assert_eq!(checked_names(&app), ["gpt-6-sol"]);
-    assert_eq!(flow.default, Some(0));
+    assert!(checked_names(&app).is_empty());
     assert_eq!(flow.hidden_count(), 1);
 }
 
@@ -154,28 +153,21 @@ fn picker_app() -> App {
 }
 
 #[test]
-fn toggle_default_all_and_show_all() {
+fn toggle_all_and_show_all() {
     let mut app = picker_app();
 
     // 光标在第 0 行：空格勾上
     app.import_toggle();
     assert_eq!(checked_names(&app), ["gpt-6-sol"]);
 
-    // 下移到 deepseek-v4（chat-only 默认隐藏）并设为默认 → 自动勾上
-    app.import_move(1);
-    assert_eq!(visible_names(&app), ["gpt-6-sol", "deepseek-v4"]);
-    app.import_set_default();
-    assert_eq!(flow(&app).default, Some(2));
+    // a：可见的全勾；再按一次全取消
+    app.import_toggle_all();
     assert_eq!(checked_names(&app), ["gpt-6-sol", "deepseek-v4"]);
-
-    // a：此时可见的已全勾 → 全取消；再按一次全勾
     app.import_toggle_all();
     assert!(
         checked_names(&app).is_empty(),
         "可见的已全勾，再按应变全取消"
     );
-    app.import_toggle_all();
-    assert_eq!(checked_names(&app).len(), 2);
 
     // f：把明确不支持 responses 的也显示出来（顺序按 items 下标）
     app.import_toggle_show_all();
@@ -212,19 +204,43 @@ fn search_filter_narrows_visible_list() {
 // ---- 应用 --------------------------------------------------------------
 
 #[test]
-fn apply_without_selection_only_toasts() {
+fn confirm_without_selection_only_toasts() {
     let mut app = picker_app();
-    app.import_apply();
-    assert_eq!(flow(&app).step, ImportStep::Models, "没勾选不能进入写入");
+    app.import_confirm_models();
+    assert_eq!(flow(&app).step, ImportStep::Models, "没勾选不能往下走");
     assert_eq!(app.toast_text(), Some("至少勾选一个模型"));
 }
 
 #[tokio::test]
-async fn apply_with_selection_enters_working_step() {
+async fn single_checked_model_skips_the_default_panel() {
     let mut app = picker_app();
     app.import_toggle();
-    app.import_apply();
-    // 真的 spawn 了后台导入任务；面板先进入 Working（任务结果按 key_id 回来）
+    app.import_confirm_models();
+    // 只勾了一个：跳过「选默认模型」，直接进 Working
+    assert_eq!(flow(&app).step, ImportStep::Working);
+}
+
+#[tokio::test]
+async fn multiple_checked_models_ask_which_is_the_default() {
+    let mut app = picker_app();
+    app.import_toggle_all();
+    assert_eq!(checked_names(&app), ["gpt-6-sol", "deepseek-v4"]);
+    app.import_confirm_models();
+    // 先停在「选默认模型」，光标默认第一个勾选的
+    assert_eq!(flow(&app).step, ImportStep::DefaultModel);
+    assert_eq!(flow(&app).default_cursor, 0);
+
+    // j/k 在「已勾选」列表里移动；h 退回勾选步骤
+    app.import_move_default(1);
+    assert_eq!(flow(&app).default_cursor, 1);
+    app.import_move_default(99);
+    assert_eq!(flow(&app).default_cursor, 1, "钳到最后一个已勾选模型");
+    app.import_default_back();
+    assert_eq!(flow(&app).step, ImportStep::Models);
+
+    // 再进一次并确认：进入写入
+    app.import_confirm_models();
+    app.import_confirm_default();
     assert_eq!(flow(&app).step, ImportStep::Working);
 }
 
@@ -254,7 +270,7 @@ fn outcome(key_id: &str, result: Result<ImportReport, String>) -> ImportOutcome 
 async fn successful_import_toasts_marks_key_and_closes_panel() {
     let mut app = picker_app();
     app.import_toggle();
-    app.import_apply();
+    app.import_confirm_models();
     let mut result = outcome("alpha.a1", Ok(report(&["gpt-6-sol"], "gpt-6-sol")));
     result.state = Some(CodexState {
         provider: "alpha".into(),
@@ -282,7 +298,7 @@ async fn successful_import_toasts_marks_key_and_closes_panel() {
 async fn failed_import_keeps_panel_open_with_reason() {
     let mut app = picker_app();
     app.import_toggle();
-    app.import_apply();
+    app.import_confirm_models();
     app.import_result(outcome("alpha.a1", Err("codex 未识别这些模型：x".into())));
 
     assert_eq!(flow(&app).step, ImportStep::Failed);
@@ -346,6 +362,25 @@ fn keys_route_through_the_panel() {
     assert!(matches!(app.modal, Modal::Import(_)));
     handle_import_key(&mut app, key(KeyCode::Esc));
     assert!(matches!(app.modal, Modal::None));
+}
+
+#[tokio::test]
+async fn keys_route_through_the_default_model_step() {
+    let mut app = picker_app();
+    app.import_toggle_all();
+    handle_import_key(&mut app, key(KeyCode::Enter));
+    assert_eq!(flow(&app).step, ImportStep::DefaultModel);
+
+    // j 移动，h 返回勾选
+    handle_import_key(&mut app, key(KeyCode::Char('j')));
+    assert_eq!(flow(&app).default_cursor, 1);
+    handle_import_key(&mut app, key(KeyCode::Char('h')));
+    assert_eq!(flow(&app).step, ImportStep::Models);
+
+    // 再进，Enter 开写
+    handle_import_key(&mut app, key(KeyCode::Enter));
+    handle_import_key(&mut app, key(KeyCode::Enter));
+    assert_eq!(flow(&app).step, ImportStep::Working);
 }
 
 #[tokio::test]

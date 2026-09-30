@@ -38,7 +38,7 @@ src/
 │   └── tests.rs       表单引擎测试
 ├── app/               应用状态机
 │   ├── mod.rs         App 结构、start、导航、探活调度（探针代际：配置变更后旧结果丢弃）
-│   ├── import/        一键导入面板状态机（选客户端 → 勾选模型 → 写入 → 校验）
+│   ├── import/        一键导入面板状态机（选客户端 → 勾选模型 → 选默认模型 → 写入 → 校验）
 │   ├── modal.rs       Modal 枚举 + 打开/保存分发/删除确认分发
 │   ├── keys_store.rs  密钥保存/删除（写 config.toml + secrets.toml）
 │   ├── undo.rs        Ctrl+Z 撤销栈（本次会话的写操作）+ 回退内存与磁盘
@@ -119,6 +119,7 @@ cargo run -- --snapshot                # 真实接口拉数据渲染成文本（
 cargo run -- --snapshot-inspector      # 详情弹窗快照：假状态不拉接口；=provider 出厂商详情
 cargo run -- --snapshot-import         # 一键导入面板快照：第一步选客户端
 cargo run -- --snapshot-import-models  # 一键导入面板快照：第二步勾选模型
+cargo run -- --snapshot-import-default # 一键导入面板快照：第三步选默认模型
 cargo test                             # 单测（recipe/表单/CLI 沙盒/codex 适配等）
 cargo test -- codex_real_end_to_end --ignored --nocapture   # 需本机装 codex：真机端到端（生成目录 + 让 codex 校验）
 apim provider ls --json                # CLI 冒烟（跑已发布版；本地代码用 cargo run -- provider ls）

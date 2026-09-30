@@ -17,6 +17,7 @@ pub(crate) fn draw_import(frame: &mut Frame, app: &App, flow: &ImportFlow, area:
     match flow.step {
         ImportStep::Agent => draw_agent(frame, app, flow, area),
         ImportStep::Models => draw_model_picker(frame, flow, area),
+        ImportStep::DefaultModel => draw_default_picker(frame, flow, area),
         ImportStep::Working => draw_message(
             frame,
             " 一键导入 ",
@@ -108,7 +109,7 @@ fn flow_note(app: &App, flow: &ImportFlow) -> String {
 fn draw_model_picker(frame: &mut Frame, flow: &ImportFlow, area: Rect) {
     let visible = flow.visible();
     let rows = visible.len().clamp(1, VISIBLE_ROWS) as u16;
-    let rect = centered(78, rows + 6, area);
+    let rect = centered(78, rows + 5, area);
     frame.render_widget(Clear, rect);
     let block = pane_block(format!(" 一键导入 · {} · 勾选模型 ", flow.key_id), true);
     let inner = block.inner(rect);
@@ -119,7 +120,6 @@ fn draw_model_picker(frame: &mut Frame, flow: &ImportFlow, area: Rect) {
         .constraints([
             Constraint::Length(1), // 搜索框
             Constraint::Min(1),    // 列表
-            Constraint::Length(1), // 默认模型 + 思考强度
             Constraint::Length(1), // 统计
             Constraint::Length(1), // 快捷键
         ])
@@ -160,35 +160,92 @@ fn draw_model_picker(frame: &mut Frame, flow: &ImportFlow, area: Rect) {
         frame.render_widget(Paragraph::new(lines), chunks[1]);
     }
 
-    frame.render_widget(Paragraph::new(default_line(flow)), chunks[2]);
-    frame.render_widget(Paragraph::new(count_line(flow)), chunks[3]);
+    frame.render_widget(Paragraph::new(count_line(flow)), chunks[2]);
     frame.render_widget(
         Paragraph::new(Line::from(Span::styled(
-            " 空格勾选  d 默认模型  a 全选  f 全部  / 搜索  ⏎ 导入  Esc 取消 ",
+            " 空格 勾选  a 全选  f 全部  / 搜索  ⏎ 下一步（选默认模型）  Esc 取消 ",
             Style::new().fg(theme::MUTED),
         ))),
-        chunks[4],
+        chunks[3],
     );
 }
 
-/// 面板上那行「会写进 config.toml 的东西」：默认模型 + 思考强度。
-fn default_line(flow: &ImportFlow) -> Line<'static> {
-    Line::from(vec![
-        Span::styled(" 默认模型：", Style::new().fg(theme::MUTED)),
-        Span::styled(
-            flow.default_model().unwrap_or("—").to_string(),
-            Style::new().fg(theme::OK).add_modifier(Modifier::BOLD),
-        ),
-        Span::styled("    思考强度：", Style::new().fg(theme::MUTED)),
-        Span::styled(
-            crate::clients::DEFAULT_EFFORT.to_string(),
-            Style::new().fg(theme::GOLD).add_modifier(Modifier::BOLD),
-        ),
-        Span::styled(
-            "（模型在 codex 里可选 4 档）",
+/// 第三步：从已勾选的模型里选一个当默认（写进 codex 顶层 `model`）。
+fn draw_default_picker(frame: &mut Frame, flow: &ImportFlow, area: Rect) {
+    let checked = flow.checked_models();
+    let rows = checked.len().clamp(1, VISIBLE_ROWS) as u16;
+    let rect = centered(78, rows + 4, area);
+    frame.render_widget(Clear, rect);
+    let block = pane_block(format!(" 一键导入 · {} · 选默认模型 ", flow.key_id), true);
+    let inner = block.inner(rect);
+    frame.render_widget(block, rect);
+
+    let chunks = Layout::default()
+        .direction(Direction::Vertical)
+        .constraints([
+            Constraint::Length(1), // 说明
+            Constraint::Min(1),    // 已勾选列表
+            Constraint::Length(1), // 快捷键
+        ])
+        .split(inner);
+
+    frame.render_widget(
+        Paragraph::new(Line::from(Span::styled(
+            format!(
+                " 这 {} 个模型都会写进 codex；选中的那个作为默认（config.toml 的 model）",
+                checked.len()
+            ),
             Style::new().fg(theme::MUTED),
-        ),
-    ])
+        )))
+        .wrap(Wrap { trim: true }),
+        chunks[0],
+    );
+
+    let offset = flow
+        .default_cursor
+        .saturating_sub(VISIBLE_ROWS.saturating_sub(1));
+    let lines: Vec<Line> = checked
+        .iter()
+        .enumerate()
+        .skip(offset)
+        .take(VISIBLE_ROWS)
+        .map(|(position, name)| {
+            let is_cursor = position == flow.default_cursor;
+            let mut spans = vec![
+                Span::styled(
+                    if is_cursor { "▶ " } else { "  " },
+                    Style::new().fg(theme::ACCENT),
+                ),
+                Span::styled(
+                    name.clone(),
+                    if is_cursor {
+                        Style::new().fg(theme::TEXT).add_modifier(Modifier::BOLD)
+                    } else {
+                        Style::new().fg(theme::TEXT)
+                    },
+                ),
+            ];
+            if is_cursor {
+                spans.push(Span::styled(
+                    format!(
+                        "   ← 写进 config.toml 的 model（强度 {}）",
+                        crate::clients::DEFAULT_EFFORT
+                    ),
+                    Style::new().fg(theme::GOLD),
+                ));
+            }
+            Line::from(spans)
+        })
+        .collect();
+    frame.render_widget(Paragraph::new(lines), chunks[1]);
+
+    frame.render_widget(
+        Paragraph::new(Line::from(Span::styled(
+            " j/k 移动   ⏎ 导入   h 返回勾选   Esc 取消 ",
+            Style::new().fg(theme::MUTED),
+        ))),
+        chunks[2],
+    );
 }
 
 fn model_line(flow: &ImportFlow, position: usize, index: usize) -> Line<'static> {
@@ -217,12 +274,6 @@ fn model_line(flow: &ImportFlow, position: usize, index: usize) -> Line<'static>
         ),
         Span::styled(item.name.clone(), name_style),
     ];
-    if flow.default == Some(index) {
-        spans.push(Span::styled(
-            "   ★ 默认",
-            Style::new().fg(theme::GOLD).add_modifier(Modifier::BOLD),
-        ));
-    }
     if unsupported {
         spans.push(Span::styled(
             "   · 厂商标注不支持 responses",

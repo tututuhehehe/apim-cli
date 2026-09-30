@@ -287,7 +287,34 @@ pub(crate) async fn run_snapshot_import_models() -> Result<()> {
             checked: false,
         },
     ];
-    flow.default = Some(0);
+    app.modal = Modal::Import(flow);
+    render_snapshot(&app).await
+}
+
+/// 一键导入面板快照（第三步：从已勾选模型里选默认模型）。
+pub(crate) async fn run_snapshot_import_default() -> Result<()> {
+    let (mut app, _rx, _rx_task) = App::start()?;
+    app.focus = Focus::Keys;
+    let mut flow = ImportFlow::new(snapshot_key_id(&app));
+    flow.step = ImportStep::DefaultModel;
+    flow.items = vec![
+        ModelPick {
+            name: "gpt-6-sol".into(),
+            responses: Some(true),
+            checked: true,
+        },
+        ModelPick {
+            name: "gpt-6.1-sol".into(),
+            responses: Some(true),
+            checked: true,
+        },
+        ModelPick {
+            name: "deepseek-v4".into(),
+            responses: Some(true),
+            checked: false,
+        },
+    ];
+    flow.default_cursor = 1;
     app.modal = Modal::Import(flow);
     render_snapshot(&app).await
 }

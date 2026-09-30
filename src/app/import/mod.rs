@@ -16,8 +16,11 @@ use crate::probe::{self, ModelEntry};
 pub enum ImportStep {
     /// 第一步：选目标客户端。
     Agent,
-    /// 第二步：勾选模型。
+    /// 第二步：勾选要导入的模型（多选）。
     Models,
+    /// 第三步：从已勾选的模型里选哪个当默认（写进 codex 顶层 `model`）。
+    /// 只勾了一个模型时自动跳过这步。
+    DefaultModel,
     /// 正在写入 + 校验（不可交互，避免半截状态）。
     Working,
     /// 失败，显示原因（Esc/Enter 关闭）。
@@ -45,8 +48,8 @@ pub struct ImportFlow {
     pub items: Vec<ModelPick>,
     /// 「可见列表」里的光标下标。
     pub cursor: usize,
-    /// 默认模型（codex 顶层 `model`）在 items 里的下标。
-    pub default: Option<usize>,
+    /// DefaultModel 步骤的光标下标（指向「已勾选模型」列表）。
+    pub default_cursor: usize,
     pub filter: String,
     pub searching: bool,
     /// 是否连厂商明确声明不支持 Responses 的模型也列出来。
@@ -64,7 +67,7 @@ impl ImportFlow {
             loading: false,
             items: Vec::new(),
             cursor: 0,
-            default: None,
+            default_cursor: 0,
             filter: String::new(),
             searching: false,
             show_all: false,
@@ -72,18 +75,13 @@ impl ImportFlow {
         }
     }
 
-    /// 已勾选模型里当前标为默认的那个（面板上要显示出来）。
-    pub fn default_model(&self) -> Option<&str> {
-        self.default
-            .and_then(|index| self.items.get(index))
+    /// 已勾选的模型名，按 items 顺序（顺带决定默认模型面板的列表顺序）。
+    pub fn checked_models(&self) -> Vec<String> {
+        self.items
+            .iter()
             .filter(|item| item.checked)
-            .map(|item| item.name.as_str())
-            .or_else(|| {
-                self.items
-                    .iter()
-                    .find(|item| item.checked)
-                    .map(|item| item.name.as_str())
-            })
+            .map(|item| item.name.clone())
+            .collect()
     }
 
     /// 可见条目在 `items` 里的下标：先按端点能力筛，再按搜索关键字筛。
@@ -135,6 +133,13 @@ impl App {
             Modal::Import(flow) => Some(flow),
             _ => None,
         }
+    }
+
+    /// 当前面板里已勾选的模型名（None = 没有导入面板）。
+    fn import_checked(&self) -> Vec<String> {
+        self.import_flow()
+            .map(ImportFlow::checked_models)
+            .unwrap_or_default()
     }
 
     fn import_flow_mut(&mut self) -> Option<&mut ImportFlow> {
@@ -201,7 +206,7 @@ impl App {
             flow.loading = true;
             flow.items.clear();
             flow.cursor = 0;
-            flow.default = None;
+            flow.default_cursor = 0;
             flow.filter.clear();
             flow.searching = false;
             flow.show_all = false;
@@ -244,11 +249,6 @@ impl App {
                 checked: false,
             })
             .collect();
-        // 默认勾上第一个可用模型：让「按 x → Enter → Enter」就能跑完，符合一键的预期
-        flow.default = flow.visible().first().copied();
-        if let Some(index) = flow.default {
-            flow.items[index].checked = true;
-        }
         if flow.items.is_empty() {
             flow.step = ImportStep::Failed;
             flow.error = Some("这把密钥看不到任何模型".into());
@@ -284,14 +284,49 @@ impl App {
         }
     }
 
-    /// `d`：把光标处的模型设为默认（并自动勾上）。
-    pub fn import_set_default(&mut self) {
-        let Some(flow) = self.import_flow_mut() else {
+    /// 第二步确认（`⏎`）：勾完模型后去选默认模型；只勾了一个就跳过那一步直接写。
+    pub fn import_confirm_models(&mut self) {
+        let checked = self.import_checked();
+        if checked.is_empty() {
+            self.toast = Some(("至少勾选一个模型".into(), Instant::now()));
+            return;
+        }
+        if checked.len() == 1 {
+            let only = checked[0].clone();
+            self.start_import(checked, only);
+            return;
+        }
+        if let Some(flow) = self.import_flow_mut() {
+            flow.step = ImportStep::DefaultModel;
+            flow.default_cursor = 0;
+        }
+    }
+
+    pub fn import_move_default(&mut self, delta: isize) {
+        let count = self.import_checked().len();
+        if let Some(flow) = self.import_flow_mut() {
+            flow.default_cursor = clamp_index(flow.default_cursor, delta, count);
+        }
+    }
+
+    /// 第三步确认：光标处那个已勾选模型当默认（写进 codex 的 `model`），然后开写。
+    pub fn import_confirm_default(&mut self) {
+        let checked = self.import_checked();
+        let index = self
+            .import_flow()
+            .map(|flow| flow.default_cursor)
+            .unwrap_or(0)
+            .min(checked.len().saturating_sub(1));
+        let Some(default_model) = checked.get(index).cloned() else {
             return;
         };
-        if let Some(index) = flow.cursor_item() {
-            flow.items[index].checked = true;
-            flow.default = Some(index);
+        self.start_import(checked, default_model);
+    }
+
+    /// 从「选默认模型」退回「勾选模型」。
+    pub fn import_default_back(&mut self) {
+        if let Some(flow) = self.import_flow_mut() {
+            flow.step = ImportStep::Models;
         }
     }
 
@@ -337,29 +372,12 @@ impl App {
         self.import_flow().is_some_and(|flow| flow.searching)
     }
 
-    /// 第二步确认：写 codex 配置（后台线程，跑子进程 + 落盘）。
-    pub fn import_apply(&mut self) {
+    /// 真正开写：后台线程跑 codex 导入 + 校验 + 重启 daemon。
+    fn start_import(&mut self, models: Vec<String>, default_model: String) {
         let Some(flow) = self.import_flow() else {
             return;
         };
         let key_id = flow.key_id.clone();
-        let models: Vec<String> = flow
-            .items
-            .iter()
-            .filter(|item| item.checked)
-            .map(|item| item.name.clone())
-            .collect();
-        if models.is_empty() {
-            self.toast = Some(("至少勾选一个模型".into(), Instant::now()));
-            return;
-        }
-        // 默认模型：优先 `d` 指定的那个，否则用第一个勾选的
-        let default_model = flow
-            .default
-            .and_then(|index| flow.items.get(index))
-            .map(|item| item.name.clone())
-            .filter(|name| models.contains(name))
-            .unwrap_or_else(|| models[0].clone());
 
         let Some(key) = self.keys.iter().find(|key| key.id() == key_id).cloned() else {
             self.toast = Some(("这把密钥已不存在".into(), Instant::now()));
@@ -527,10 +545,18 @@ pub(crate) fn handle_import_key(app: &mut App, key: KeyEvent) -> bool {
             KeyCode::Char('k') | KeyCode::Up => app.import_move(-1),
             KeyCode::Char(' ') => app.import_toggle(),
             KeyCode::Char('a') => app.import_toggle_all(),
-            KeyCode::Char('d') => app.import_set_default(),
             KeyCode::Char('f') => app.import_toggle_show_all(),
             KeyCode::Char('/') => app.import_start_search(),
-            KeyCode::Enter => app.import_apply(),
+            KeyCode::Enter => app.import_confirm_models(),
+            KeyCode::Esc | KeyCode::Char('q') => app.cancel_modal(),
+            _ => return false,
+        },
+        // 默认模型：选完开写；h/← 退回上一步重选
+        ImportStep::DefaultModel => match key.code {
+            KeyCode::Char('j') | KeyCode::Down => app.import_move_default(1),
+            KeyCode::Char('k') | KeyCode::Up => app.import_move_default(-1),
+            KeyCode::Enter => app.import_confirm_default(),
+            KeyCode::Char('h') | KeyCode::Left => app.import_default_back(),
             KeyCode::Esc | KeyCode::Char('q') => app.cancel_modal(),
             _ => return false,
         },

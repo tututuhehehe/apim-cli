@@ -23,6 +23,7 @@ async fn main() -> Result<()> {
             "--snapshot-inspector" => tui::run_snapshot_inspector().await,
             "--snapshot-import" => tui::run_snapshot_import().await,
             "--snapshot-import-models" => tui::run_snapshot_import_models().await,
+            "--snapshot-import-default" => tui::run_snapshot_import_default().await,
             "--snapshot" => tui::run_snapshot().await,
             other => {
                 eprintln!("未知参数 {other}");

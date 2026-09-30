@@ -175,7 +175,7 @@ apim status glm --json
 
 ## One-click import into Codex
 
-Select a key in the key table and press `x` to write "this key + its provider + the models you tick" into your Codex config — no more hand-editing `~/.codex/config.toml`. The panel has two steps: **pick a client** (Codex only for now) → **tick models** (`space` toggles, `d` sets the default model, `a` toggles all, `f` reveals models the provider does not advertise as Responses-capable, `/` searches) → `⏎` imports. The panel shows `默认模型 / 思考强度` live while you tick.
+Select a key in the key table and press `x` to write "this key + its provider + the models you tick" into your Codex config — no more hand-editing `~/.codex/config.toml`. The panel has three steps: **pick a client** (Codex only for now) → **tick models** (`space` toggles, `a` toggles all, `f` reveals models the provider does not advertise as Responses-capable, `/` searches, `⏎` advances) → **pick the default model** (one of the models you ticked becomes `config.toml`'s `model`; `j`/`k` move, `h` goes back, `⏎` imports). With a single ticked model the third step is skipped automatically.
 
 Before reporting success it makes **codex itself parse the new config** (`codex debug models`) and checks that every ticked model is there; on failure the reason is shown right in the panel.
 
