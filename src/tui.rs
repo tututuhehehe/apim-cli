@@ -268,22 +268,18 @@ pub(crate) async fn run_snapshot_import_models() -> Result<()> {
     flow.items = vec![
         ModelPick {
             name: "gpt-6-sol".into(),
-            responses: Some(true),
             checked: true,
         },
         ModelPick {
             name: "gpt-6.1-sol".into(),
-            responses: Some(true),
             checked: true,
         },
         ModelPick {
             name: "deepseek-v4".into(),
-            responses: Some(true),
             checked: false,
         },
         ModelPick {
             name: "text-embedding-3-large".into(),
-            responses: Some(false),
             checked: false,
         },
     ];
@@ -300,17 +296,14 @@ pub(crate) async fn run_snapshot_import_default() -> Result<()> {
     flow.items = vec![
         ModelPick {
             name: "gpt-6-sol".into(),
-            responses: Some(true),
             checked: true,
         },
         ModelPick {
             name: "gpt-6.1-sol".into(),
-            responses: Some(true),
             checked: true,
         },
         ModelPick {
             name: "deepseek-v4".into(),
-            responses: Some(true),
             checked: false,
         },
     ];

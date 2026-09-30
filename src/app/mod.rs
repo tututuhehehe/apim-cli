@@ -20,7 +20,7 @@ use tokio::sync::mpsc::{self, UnboundedReceiver, UnboundedSender};
 use crate::clients::CodexState;
 use crate::clipboard;
 use crate::config::{self, KeyEntry};
-use crate::probe::{self, BalanceSnapshot, Health, ModelEntry, ProbeResult};
+use crate::probe::{self, BalanceSnapshot, Health, ProbeResult};
 use crate::recipe::Recipe;
 
 pub(crate) use undo::UndoAction;
@@ -56,7 +56,7 @@ pub const AUTO_REFRESH_INTERVAL: Duration = Duration::from_secs(5 * 60);
 /// 因为同一时刻只会有一个弹窗在等结果，消费端按 key_id 匹配即可。
 pub enum TaskMsg {
     /// (key_id, 该密钥可见的模型列表)
-    Models(String, std::result::Result<Vec<ModelEntry>, String>),
+    Models(String, std::result::Result<Vec<String>, String>),
     /// 一键导入到客户端的结果
     Import(Box<ImportOutcome>),
 }

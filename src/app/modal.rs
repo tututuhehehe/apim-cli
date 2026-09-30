@@ -7,7 +7,7 @@ use super::import::{ImportFlow, ImportStep};
 use super::{App, Focus, TaskMsg};
 use crate::clipboard;
 use crate::form::{self, Form, LineEdit};
-use crate::probe::{self, ModelEntry};
+use crate::probe;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum FormKind {
@@ -408,7 +408,7 @@ impl App {
     /// 模型列表拉取结果落地：一键导入面板优先（它打开时会顶掉浏览弹窗），
     /// 否则交给模型浏览弹窗；两边都按 key_id 匹配，不匹配就丢弃
     /// （弹窗可能已被关掉或换了把密钥打开）。
-    pub fn apply_models(&mut self, key_id: String, result: Result<Vec<ModelEntry>, String>) {
+    pub fn apply_models(&mut self, key_id: String, result: Result<Vec<String>, String>) {
         if self.import_awaiting(&key_id, ImportStep::Models) {
             self.import_receive_models(key_id, result);
             return;
@@ -425,10 +425,7 @@ impl App {
             return;
         }
         *status = match result {
-            Ok(entries) => ModelsStatus::Done {
-                items: entries.into_iter().map(|entry| entry.id).collect(),
-                selected: 0,
-            },
+            Ok(items) => ModelsStatus::Done { items, selected: 0 },
             Err(message) => ModelsStatus::Error { message },
         };
     }
@@ -654,15 +651,9 @@ mod tests {
         }
     }
 
-    /// 测试里只关心模型名时用这个造条目（不声明端点能力）。
-    fn entries(names: &[&str]) -> Vec<ModelEntry> {
-        names
-            .iter()
-            .map(|name| ModelEntry {
-                id: (*name).to_string(),
-                responses: None,
-            })
-            .collect()
+    /// 测试里造模型名列表。
+    fn entries(names: &[&str]) -> Vec<String> {
+        names.iter().map(|name| (*name).to_string()).collect()
     }
 
     /// 断言当前是 Models 弹窗并拆出 (key_id, status)。

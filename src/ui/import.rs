@@ -251,15 +251,12 @@ fn draw_default_picker(frame: &mut Frame, flow: &ImportFlow, area: Rect) {
 fn model_line(flow: &ImportFlow, position: usize, index: usize) -> Line<'static> {
     let item = &flow.items[index];
     let is_cursor = position == flow.cursor;
-    let unsupported = item.responses == Some(false);
-    let name_style = if unsupported {
-        Style::new().fg(theme::MUTED)
-    } else if is_cursor {
+    let name_style = if is_cursor {
         Style::new().fg(theme::TEXT).add_modifier(Modifier::BOLD)
     } else {
         Style::new().fg(theme::TEXT)
     };
-    let mut spans = vec![
+    Line::from(vec![
         Span::styled(
             if is_cursor { "▶ " } else { "  " },
             Style::new().fg(theme::ACCENT),
@@ -273,25 +270,11 @@ fn model_line(flow: &ImportFlow, position: usize, index: usize) -> Line<'static>
             }),
         ),
         Span::styled(item.name.clone(), name_style),
-    ];
-    if unsupported {
-        // 只是厂商标注，实测会漏报，所以照旧可勾选
-        spans.push(Span::styled(
-            "   · 厂商标注不支持 responses（仍可勾选）",
-            Style::new().fg(theme::MUTED),
-        ));
-    }
-    Line::from(spans)
+    ])
 }
 
 fn count_line(flow: &ImportFlow) -> Line<'static> {
-    let mut text = format!(" 已勾选 {}/{}", flow.checked_count(), flow.items.len());
-    let declared = flow.declared_unsupported_count();
-    if declared > 0 {
-        text.push_str(&format!(
-            "   · {declared} 个厂商标注不支持 responses（只是提示，不影响勾选）"
-        ));
-    }
+    let text = format!(" 已勾选 {}/{}", flow.checked_count(), flow.items.len());
     Line::from(Span::styled(text, Style::new().fg(theme::MUTED)))
 }
 

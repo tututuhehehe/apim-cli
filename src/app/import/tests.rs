@@ -5,21 +5,13 @@ use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 use super::*;
 use crate::app::tests::test_app;
 use crate::clients::DEFAULT_EFFORT;
-use crate::probe::ModelEntry;
 
-fn entry(id: &str, responses: Option<bool>) -> ModelEntry {
-    ModelEntry {
-        id: id.to_string(),
-        responses,
-    }
-}
-
-/// 三种端点能力都有的模型列表：明确支持 / 明确不支持 / 没给信息。
-fn mixed_entries() -> Vec<ModelEntry> {
+/// 与 `m` 键浏览一致的模型名列表（不再区分端点能力）。
+fn mixed_entries() -> Vec<String> {
     vec![
-        entry("gpt-6-sol", Some(true)),
-        entry("chat-only", Some(false)),
-        entry("deepseek-v4", None),
+        "gpt-6-sol".to_string(),
+        "chat-only".to_string(),
+        "deepseek-v4".to_string(),
     ]
 }
 
@@ -102,13 +94,11 @@ async fn choosing_agent_fetches_models_and_leaves_selection_empty() {
     assert!(!flow.loading);
     assert_eq!(flow.step, ImportStep::Models);
     // 不预勾任何模型：勾哪些、哪个当默认都由用户在面板里定
-    // 也不隐藏任何模型：厂商标注只当提示（实测会漏报）
     assert_eq!(
         visible_names(&app),
         ["gpt-6-sol", "chat-only", "deepseek-v4"]
     );
     assert!(checked_names(&app).is_empty());
-    assert_eq!(flow.declared_unsupported_count(), 1);
 }
 
 #[tokio::test]
@@ -146,9 +136,8 @@ fn picker_app() -> App {
     app_flow.step = ImportStep::Models;
     app_flow.items = mixed_entries()
         .into_iter()
-        .map(|entry| ModelPick {
-            name: entry.id,
-            responses: entry.responses,
+        .map(|name| ModelPick {
+            name,
             checked: false,
         })
         .collect();
@@ -176,12 +165,11 @@ fn toggle_all_keeps_every_model_visible() {
         "可见的已全勾，再按应变全取消"
     );
 
-    // 厂商标注「不支持 responses」的模型**不会**被隐藏（实测标注会漏报，隐藏会藏掉能用的模型）
+    // 导入面板列出的是和 `m` 键完全一样的模型名列表，不做任何端点能力筛选
     assert_eq!(
         visible_names(&app),
         ["gpt-6-sol", "chat-only", "deepseek-v4"]
     );
-    assert_eq!(flow(&app).declared_unsupported_count(), 1);
 }
 
 #[test]

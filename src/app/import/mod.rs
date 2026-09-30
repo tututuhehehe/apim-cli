@@ -9,7 +9,7 @@ use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 
 use super::{App, Focus, Modal, TaskMsg};
 use crate::clients::{Agent, CodexState, ImportReport, ImportRequest};
-use crate::probe::{self, ModelEntry};
+use crate::probe;
 
 /// 面板当前停在哪一步。
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -27,12 +27,10 @@ pub enum ImportStep {
     Failed,
 }
 
-/// 面板里的一个模型条目。
+/// 面板里的一个模型条目（列表和 `m` 键浏览用的是同一份模型名）。
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ModelPick {
     pub name: String,
-    /// 厂商声明的端点能力（None = 没给信息）。
-    pub responses: Option<bool>,
     pub checked: bool,
 }
 
@@ -99,14 +97,6 @@ impl ImportFlow {
 
     pub fn checked_count(&self) -> usize {
         self.items.iter().filter(|item| item.checked).count()
-    }
-
-    /// 厂商在 /models 里声明「不支持 responses」的模型数（只是提示，不隐藏）。
-    pub fn declared_unsupported_count(&self) -> usize {
-        self.items
-            .iter()
-            .filter(|item| item.responses == Some(false))
-            .count()
     }
 
     /// 光标当前指向的 item 下标（可见列表为空时为 None）。
@@ -221,11 +211,7 @@ impl App {
     }
 
     /// 模型列表落地。
-    pub fn import_receive_models(
-        &mut self,
-        key_id: String,
-        result: Result<Vec<ModelEntry>, String>,
-    ) {
+    pub fn import_receive_models(&mut self, key_id: String, result: Result<Vec<String>, String>) {
         let Some(flow) = self.import_flow_mut() else {
             return;
         };
@@ -233,19 +219,18 @@ impl App {
             return;
         }
         flow.loading = false;
-        let entries = match result {
-            Ok(entries) => entries,
+        let names = match result {
+            Ok(names) => names,
             Err(message) => {
                 flow.step = ImportStep::Failed;
                 flow.error = Some(message);
                 return;
             }
         };
-        flow.items = entries
+        flow.items = names
             .into_iter()
-            .map(|entry| ModelPick {
-                name: entry.id,
-                responses: entry.responses,
+            .map(|name| ModelPick {
+                name,
                 checked: false,
             })
             .collect();

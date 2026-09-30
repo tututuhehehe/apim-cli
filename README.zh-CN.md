@@ -173,7 +173,7 @@ apim status glm --json
 
 ## 一键导入到 Codex
 
-密钥表里选中一把密钥按 `x`，把「这把密钥 + 它的厂商 + 勾选的模型」写进 Codex 配置，不用再手改 `~/.codex/config.toml`。面板三步：**选客户端**（目前只有 Codex）→ **勾选模型**（`空格` 勾选、`a` 全选/清空、`f` 显示厂商没声明支持 Responses 的模型、`/` 搜索，`⏎` 下一步）→ **选默认模型**（从刚勾的那些里挑一个当 `config.toml` 的 `model`，`j/k` 移动、`h` 返回上一步、`⏎` 导入）。只勾了一个模型时第三步自动跳过。
+密钥表里选中一把密钥按 `x`，把「这把密钥 + 它的厂商 + 勾选的模型」写进 Codex 配置，不用再手改 `~/.codex/config.toml`。面板三步：**选客户端**（目前只有 Codex）→ **勾选模型**（列表与 `m` 键一致；`空格` 勾选、`a` 全选/清空、`/` 搜索，`⏎` 下一步）→ **选默认模型**（从刚勾的那些里挑一个当 `config.toml` 的 `model`，`j/k` 移动、`h` 返回上一步、`⏎` 导入）。只勾了一个模型时第三步自动跳过。
 
 导入完成前它会**让 codex 自己解析一遍新配置**（`codex debug models`）确认勾选的模型都在，然后给一条成功提示；不成功会当场把原因显示在面板里。
 
@@ -200,8 +200,8 @@ apim status glm --json
 - **每次导入前备份**：改写前把现有内容存成 `~/.codex/config.toml.apim.bak`，想回退直接拿它覆盖回去。
 - **模型条目是照 codex 官方字段手写的迷你条目**（GLM / DeepSeek 官方 Codex 接入文档 + cc-switch 跨版本实测的最小模板）：`shell_type: "shell_command"`、`apply_patch_tool_type: "freeform"`、一句中性的 `base_instructions`（codex 把它当必填字段），并带 `supports_reasoning_summaries` 与 `supports_parallel_tool_calls` 两个**老版 codex 会当必填**的字段。所以每个模型只要 **~1.5KB**，也**不会**把 GPT 专属的东西（`code_mode_only`、`use_responses_lite`、872k 上下文窗口、62KB 的 GPT harness）塞给第三方模型。上下文窗口用 codex 给未知模型的默认值 272000，想按模型写真实值直接改 `apim-models.json`。
 - **校验用你本机的 codex**：写完让它自己解析一遍新配置（`codex debug models`），勾选的模型都在才算导入成功。
-- **只支持 Responses 协议**：Codex 0.134+ 已经删掉 `wire_api = "chat"`，中转站必须提供 `/v1/responses`，否则一律 400。所以面板会拿厂商 `/v1/models` 里的 `supported_endpoint_types`（new-api 系）当**行尾提示**，但**绝不据此隐藏模型** —— 实测这个字段会漏报：ikun 把 `gpt-6-sol` 标成只有 `openai`，而它在 Codex 里走 `/responses` 完全能用。
-- **上下文窗口 / 输入模态**：现在的目录条目统一用 codex 给未知模型的默认值（272000 窗口、`[text, image]`）。如果厂商在 `/v1/models` 里明说了（DeepSeek 官方会给 `context_window` 与 `input_modalities`），可以直接改 `~/.codex/apim-models.json` 里对应条目。
+- **只支持 Responses 协议**：Codex 0.134+ 已经删掉 `wire_api = "chat"`，中转站必须提供 `/v1/responses`，否则一律 400。面板**不替你做端点能力判断** —— 它列出的模型列表和密钥表按 `m` 看到的完全一致（同一个接口、同一份解析），你勾哪些就导哪些。
+- **上下文窗口 / 输入模态**：目录条目统一用 codex 给未知模型的默认值（272000 窗口、`[text, image]`）。想按模型写真实值（比如 DeepSeek 官方 `/v1/models` 会返回 `context_window`），直接改 `~/.codex/apim-models.json` 里对应条目即可。
 - 厂商 id 撞上 Codex 保留名（`openai` / `ollama` / `lmstudio` / `amazon-bedrock*`）时会自动加前缀写成 `apim-openai`。
 - 这份目录是**整表替换**（实测：只放一个模型进去，`codex debug models` 就只输出那一个），所以在用自定义 provider 时 `/model` 里只会出现你勾选的模型，内置 OpenAI 模型不再列出。想拿回内置表，把 `~/.codex/config.toml` 里的 `model_catalog_json` 一行删掉即可。
 

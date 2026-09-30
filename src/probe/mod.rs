@@ -110,7 +110,7 @@ pub async fn fetch_models(
     client: &Client,
     recipe: &Recipe,
     token: &str,
-) -> std::result::Result<Vec<ModelEntry>, String> {
+) -> std::result::Result<Vec<String>, String> {
     let mut last_err = "没有可用的模型端点".to_string();
     for url in model_endpoint_candidates(recipe, token) {
         let call = HttpCall::get(url);
@@ -130,66 +130,17 @@ pub async fn fetch_models(
         if !status.is_success() {
             return Err(format!("HTTP {} {}", status.as_u16(), truncate(&body, 180)));
         }
-        return parse_model_entries(&body);
+        return parse_models(&body);
     }
     Err(last_err)
 }
 
-/// `/models` 返回的一条模型：名字 + 厂商声明的端点能力。
-///
-/// 端点能力用来筛「能走 Responses API 的模型」——codex 只支持
-/// `wire_api = "responses"`，把只能走 Chat Completions 的模型导过去必然 400。
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct ModelEntry {
-    pub id: String,
-    /// 厂商声明的端点类型里是否含 Responses API；None = 厂商没给这个信息（无法判断）。
-    pub responses: Option<bool>,
-}
-
-/// 归一化后的「走 Responses API」端点类型名。
-const RESPONSES_ENDPOINT_TYPES: &[&str] = &[
-    "openai-response",
-    "openai-responses",
-    "responses",
-    "response",
-];
-
-/// `/models` 里可能出现端点能力的字段名（new-api 是 `supported_endpoint_types`）。
-const ENDPOINT_TYPE_FIELDS: &[&str] = &[
-    "supported_endpoint_types",
-    "supported_endpoint_type",
-    "endpoint_types",
-    "supported_endpoints",
-];
-
-/// 从一条模型对象里读端点能力：厂商没声明这个字段时返回 None。
-fn endpoint_supports_responses(entry: &serde_json::Value) -> Option<bool> {
-    let raw = ENDPOINT_TYPE_FIELDS
-        .iter()
-        .find_map(|field| entry.get(*field))?;
-    let kinds: Vec<String> = match raw {
-        serde_json::Value::Array(items) => items
-            .iter()
-            .filter_map(serde_json::Value::as_str)
-            .map(normalize_endpoint_type)
-            .collect(),
-        serde_json::Value::String(one) => vec![normalize_endpoint_type(one)],
-        _ => return None,
-    };
-    Some(
-        kinds
-            .iter()
-            .any(|kind| RESPONSES_ENDPOINT_TYPES.contains(&kind.as_str())),
-    )
-}
-
-fn normalize_endpoint_type(raw: &str) -> String {
-    raw.trim().to_ascii_lowercase().replace('_', "-")
-}
-
-/// 纯函数：模型列表 JSON → 排序去重后的模型条目。认 OpenAI 风格
+/// 纯函数：模型列表 JSON → 排序去重后的模型名。认 OpenAI 风格
 /// `{"data":[{"id":"..."}]}`，兼容裸数组（字符串或 `{"id":...}`）。
-fn parse_model_entries(body: &str) -> std::result::Result<Vec<ModelEntry>, String> {
+///
+/// 只取名字，不看厂商声明的端点能力之类：`m` 键浏览用的就是这份列表，
+/// 一键导入面板复用同一个函数，保证两边「看到的模型完全一致」。
+fn parse_models(body: &str) -> std::result::Result<Vec<String>, String> {
     let json: serde_json::Value =
         serde_json::from_str(body).map_err(|err| format!("parse JSON: {err}"))?;
     let entries: Vec<&serde_json::Value> = match &json {
@@ -200,39 +151,21 @@ fn parse_model_entries(body: &str) -> std::result::Result<Vec<ModelEntry>, Strin
         },
         _ => return Err("响应结构异常，无法解析模型列表".into()),
     };
-    let mut found: std::collections::BTreeMap<String, Option<bool>> =
-        std::collections::BTreeMap::new();
+    let mut names: std::collections::BTreeSet<String> = std::collections::BTreeSet::new();
     for entry in entries {
         match entry {
-            serde_json::Value::String(id) => {
-                found.entry(id.clone()).or_insert(None);
+            serde_json::Value::String(name) => {
+                names.insert(name.clone());
             }
             serde_json::Value::Object(fields) => {
                 if let Some(serde_json::Value::String(id)) = fields.get("id") {
-                    let capability = endpoint_supports_responses(entry);
-                    found
-                        .entry(id.clone())
-                        .and_modify(|existing| *existing = merge_capability(*existing, capability))
-                        .or_insert(capability);
+                    names.insert(id.clone());
                 }
             }
             _ => {}
         }
     }
-    Ok(found
-        .into_iter()
-        .map(|(id, responses)| ModelEntry { id, responses })
-        .collect())
-}
-
-/// 按序合并同名模型的能力声明：只要有一处声明支持就算支持
-/// （宁可在面板上多列一个，也别把能用的模型藏起来）。
-fn merge_capability(left: Option<bool>, right: Option<bool>) -> Option<bool> {
-    match (left, right) {
-        (Some(true), _) | (_, Some(true)) => Some(true),
-        (Some(false), _) | (_, Some(false)) => Some(false),
-        _ => None,
-    }
+    Ok(names.into_iter().collect())
 }
 
 async fn hit_health(
@@ -375,61 +308,45 @@ mod tests {
         );
     }
 
-    /// 测试里只关心模型名时用这个把条目拍平。
-    fn model_names(entries: Vec<ModelEntry>) -> Vec<String> {
-        entries.into_iter().map(|entry| entry.id).collect()
-    }
-
     #[test]
     fn parse_models_openai_data_shape() {
         let body = r#"{"object":"list","data":[
             {"id":"deepseek-reasoner","object":"model"},
             {"id":"deepseek-chat","object":"model"}
         ]}"#;
-        let models = parse_model_entries(body).expect("OpenAI 形态应解析成功");
-        assert_eq!(
-            model_names(models),
-            vec!["deepseek-chat", "deepseek-reasoner"]
-        );
+        let models = parse_models(body).expect("OpenAI 形态应解析成功");
+        assert_eq!(models, vec!["deepseek-chat", "deepseek-reasoner"]);
     }
 
     #[test]
     fn parse_models_bare_array_sorts_and_dedupes() {
         let body = r#"["b-model", {"id":"a-model"}, "b-model", {"object":"model"}]"#;
-        let models = parse_model_entries(body).expect("裸数组应解析成功");
+        let models = parse_models(body).expect("裸数组应解析成功");
         // 排序去重；没有 id 的对象跳过
-        assert_eq!(model_names(models), vec!["a-model", "b-model"]);
+        assert_eq!(models, vec!["a-model", "b-model"]);
     }
 
+    /// 厂商多给什么字段都不影响：只取名字（`supported_endpoint_types` 之类一律忽略）。
     #[test]
-    fn parse_models_reads_new_api_endpoint_capabilities() {
+    fn parse_models_ignores_extra_capability_fields() {
         let body = r#"{"data":[
-            {"id":"gpt-6-sol","supported_endpoint_types":["openai","openai-response"]},
-            {"id":"chat-only","supported_endpoint_types":["openai"]},
-            {"id":"no-info"},
-            {"id":"dup","supported_endpoint_types":["openai"]},
-            {"id":"dup","supported_endpoint_types":["openai_response"]}
+            {"id":"gpt-6-sol","supported_endpoint_types":["openai"]},
+            {"id":"gpt-5.5","supported_endpoint_types":["openai","openai-response"]},
+            {"id":"deepseek-flash","context_window":1048576,"input_modalities":["text","image"]}
         ]}"#;
-        let entries = parse_model_entries(body).expect("端点能力应解析成功");
-        let by_id = |id: &str| entries.iter().find(|entry| entry.id == id).unwrap();
-        assert_eq!(by_id("gpt-6-sol").responses, Some(true));
-        assert_eq!(by_id("chat-only").responses, Some(false));
-        // 厂商没给端点信息：不判死，面板里当作可用
-        assert_eq!(by_id("no-info").responses, None);
-        // 同名条目只要有一处声明支持就算支持
-        assert_eq!(by_id("dup").responses, Some(true));
+        let models = parse_models(body).expect("多余字段应被忽略");
+        assert_eq!(models, vec!["deepseek-flash", "gpt-5.5", "gpt-6-sol"]);
     }
 
     #[test]
     fn parse_models_bad_json_errors() {
-        let err = parse_model_entries("<html>502</html>").expect_err("坏 JSON 应报错");
+        let err = parse_models("<html>502</html>").expect_err("坏 JSON 应报错");
         assert!(err.contains("parse JSON"), "实际错误: {err}");
     }
 
     #[test]
     fn parse_models_object_without_data_errors() {
-        let err =
-            parse_model_entries(r#"{"error":{"message":"nope"}}"#).expect_err("缺 data 应报错");
+        let err = parse_models(r#"{"error":{"message":"nope"}}"#).expect_err("缺 data 应报错");
         assert!(err.contains("data"), "实际错误: {err}");
     }
 }

@@ -200,7 +200,7 @@ apim status <id> --json
 
 ## 一键导入到 Codex（TUI `x` 键，暂无 CLI）
 
-密钥表里选中一把密钥按 `x`：把「这把密钥 + 它的厂商 + 勾选的模型」写进 Codex 配置（`~/.codex/config.toml`）。面板三步：选客户端（目前只有 Codex）→ 勾选模型（`空格` 勾选、`a` 全选、`f` 显示全部、`/` 搜索、`⏎` 下一步）→ 选默认模型（从已勾选里挑一个写进 `config.toml` 的 `model`；只勾一个时自动跳过）。导入后会跑 `codex debug models` 让 codex 自己解析一遍新配置来确认成功，密钥行上会打 ★ 标出当前导入的那把。
+密钥表里选中一把密钥按 `x`：把「这把密钥 + 它的厂商 + 勾选的模型」写进 Codex 配置（`~/.codex/config.toml`）。面板三步：选客户端（目前只有 Codex）→ 勾选模型（列表与 `m` 键一致；`空格` 勾选、`a` 全选、`/` 搜索、`⏎` 下一步）→ 选默认模型（从已勾选里挑一个写进 `config.toml` 的 `model`；只勾一个时自动跳过）。导入后会跑 `codex debug models` 让 codex 自己解析一遍新配置来确认成功，密钥行上会打 ★ 标出当前导入的那把。
 
 **模型不在 `config.toml` 里**（Codex 的机制，GLM / DeepSeek 官方 Codex 文档也是这个写法）：顶层只写 `model_provider` / `model` / `model_reasoning_effort` / `model_catalog_json="apim-models.json"`，模型元数据（每模型都带 medium/high/xhigh/max 四档思考等级，默认档固定 high；面板不让人挑）在 `~/.codex/apim-models.json`。apim 侧记在 `~/.config/apim/codex.toml`。
 
@@ -209,7 +209,7 @@ apim status <id> --json
 几个容易踩的：
 
 - Codex **可以同时定义多个** `[model_providers.*]`，但同一时刻只有 `model_provider` 指向的那个生效 → apim 只切激活项，旧 provider 块保留（想要多套并存就用官方的 `codex --profile <name>` + `~/.codex/<name>.config.toml`）。
-- **`wire_api = "chat"` 已被 codex 删除**（0.134+ 硬报错）。中转站必须提供 `/v1/responses`；new-api 系的 `/v1/models` 会带 `supported_endpoint_types`，但**那只是后台端点映射、会漏报**（实测 ikun 把 `gpt-6-sol` 标成只有 `openai`，实际能用），所以面板只把它当行尾提示、**不隐藏任何模型**。
+- **`wire_api = "chat"` 已被 codex 删除**（0.134+ 硬报错）。中转站必须提供 `/v1/responses`；导入面板的模型列表与 `m` 键**完全一致**（同一个解析函数，只取模型名）；**不做端点能力筛选** —— `supported_endpoint_types` 是 new-api 后台的端点映射、会漏报（实测 ikun 把 `gpt-6-sol` 标成只有 `openai`，实际能用），拿它筛选会藏掉能用的模型。
 - 模型条目是照 codex 官方字段手写的**迷你条目**（GLM/DeepSeek 官方文档 + cc-switch 实测模板，~1.5KB/模型，带 `supports_reasoning_summaries` 与 `supports_parallel_tool_calls` 以兼容老版 codex）；导入完用 `codex debug models` 反向校验。
 - 厂商 id 撞保留名（`openai`/`ollama`/`lmstudio`/`amazon-bedrock*`）时写成 `apim-openai`。
 - 验证：`cargo run -- --snapshot-import` / `--snapshot-import-models` 看渲染；`cargo test -- codex_real_end_to_end --ignored --nocapture` 跑真机端到端（需本机装 codex）。
