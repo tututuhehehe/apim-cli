@@ -17,7 +17,7 @@ use std::time::{Duration, Instant};
 use anyhow::Result;
 use tokio::sync::mpsc::{self, UnboundedReceiver, UnboundedSender};
 
-use crate::clients::CodexState;
+use crate::clients::{Agent, LastImport};
 use crate::clipboard;
 use crate::config::{self, KeyEntry};
 use crate::probe::{self, BalanceSnapshot, Health, ProbeResult};
@@ -96,14 +96,18 @@ pub struct App {
     /// 配置根目录（`~/.config/apim` 或 `APIM_CONFIG_DIR`）。落盘都经它，
     /// 测试注入临时目录，不碰真实配置。
     pub(crate) config_dir: PathBuf,
-    /// apim 上一次一键导入到 codex 的记录（★ 标记与面板提示）。
-    pub codex: Option<CodexState>,
+    /// 各客户端「上次导入」的摘要（★ 标记与面板提示）。启动时读一次，导入成功后刷新。
+    /// 内容由客户端适配层产出（`Agent::last_import`），面板不解析客户端细节。
+    pub last_imports: HashMap<Agent, LastImport>,
     /// 导入成功后是否自动重启 codex 守护进程（codex 只在 daemon 启动时读一次模型目录）。
     /// 测试里一律关掉，免得 `cargo test` 去杀用户机器上正在跑的 codex。
     pub(crate) restart_codex_daemon: bool,
     /// 导入面板的请求代际发号器（单调递增）：面板关掉再开、对同一把密钥重发请求时，
     /// 靠它把旧结果丢掉。
     pub(crate) next_import_seq: u64,
+    /// 面板 → 客户端适配层的调用点（`None` = 走真实 `Agent::import`）。
+    /// 只给测试替换，用来断言请求交给了所选客户端。
+    pub(crate) import_runner: Option<import::ImportRunner>,
     /// 本次打开面板后的写操作历史（Ctrl+Z 逐步回退），只存可逆的写操作。
     pub(crate) undo_stack: VecDeque<UndoAction>,
 }
@@ -115,7 +119,7 @@ impl App {
         let (tx, rx) = mpsc::unbounded_channel();
         let (tx_task, rx_task) = mpsc::unbounded_channel();
         let config_dir = config::config_dir();
-        let codex = crate::clients::codex::current_state(&config_dir);
+        let last_imports = Agent::load_all_last_imports(&config_dir);
         let mut app = App {
             recipes,
             keys,
@@ -136,9 +140,10 @@ impl App {
             client: probe::client()?,
             next_auto_refresh: Instant::now() + AUTO_REFRESH_INTERVAL,
             config_dir,
-            codex,
+            last_imports,
             restart_codex_daemon: true,
             next_import_seq: 0,
+            import_runner: None,
             undo_stack: VecDeque::new(),
         };
         app.rebuild_provider_list();
@@ -287,11 +292,16 @@ impl App {
         self.states.get(&key.id()).cloned().unwrap_or_default()
     }
 
-    /// 这把密钥是不是 apim 上次导入到 codex 的那把（密钥行打 ★）。
-    pub fn is_codex_active(&self, key_id: &str) -> bool {
-        self.codex
-            .as_ref()
-            .is_some_and(|state| state.key_id() == key_id)
+    /// 这把密钥是不是 apim 上次导入给 `agent` 的那把（密钥行打 ★）。
+    pub fn is_active(&self, agent: Agent, key_id: &str) -> bool {
+        self.last_imports
+            .get(&agent)
+            .is_some_and(|record| record.key_id == key_id)
+    }
+
+    /// 某个客户端「上次导入」的摘要（面板提示用）。
+    pub fn last_import_of(&self, agent: Agent) -> Option<&LastImport> {
+        self.last_imports.get(&agent)
     }
 
     pub(crate) fn rebuild_provider_list(&mut self) {
@@ -598,9 +608,10 @@ pub(crate) mod tests {
             client: probe::client().expect("构建测试用 reqwest client"),
             next_auto_refresh: Instant::now() + AUTO_REFRESH_INTERVAL,
             config_dir: test_config_dir("app"),
-            codex: None,
+            last_imports: HashMap::new(),
             restart_codex_daemon: false,
             next_import_seq: 0,
+            import_runner: None,
             undo_stack: VecDeque::new(),
         };
         app.rebuild_provider_list();

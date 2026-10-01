@@ -440,6 +440,17 @@ pub(crate) fn looks_like_wrapped_codex_server(line: &str) -> bool {
     false
 }
 
+/// 面板上显示的配置文件位置（尊重 `CODEX_HOME`，别写死 `~/.codex/...`）。
+pub fn config_hint() -> String {
+    let text = codex_home().join("config.toml").display().to_string();
+    // 在 HOME 下就缩成 `~/…`：面板里铺一整条绝对路径太吵。
+    // 设了 `CODEX_HOME`（不在 HOME 下）时仍如实显示那条路径，绝不写成 `~/.codex`。
+    match std::env::var_os("HOME").and_then(|home| home.to_str().map(str::to_string)) {
+        Some(home) if !home.is_empty() && text.starts_with(&home) => text.replacen(&home, "~", 1),
+        _ => text,
+    }
+}
+
 /// `~/.codex`（尊重 `CODEX_HOME`）。
 pub fn codex_home() -> PathBuf {
     if let Some(dir) = std::env::var_os("CODEX_HOME") {

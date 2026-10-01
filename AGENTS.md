@@ -7,7 +7,7 @@
 ## 技术选型（已定，勿改）
 
 - **Rust**（用户本机有 rustc，无 Go）。产物是单二进制，Alfred 调用秒开。
-- **可扩展性靠数据不靠代码**：厂商协议 = YAML recipe（怎么鉴权、怎么探活、怎么查额度、怎么展示）。加一个中转站 = 丢一个 YAML，不重新编译。只有协议特别歪才写 adapter（目前没有）。
+- **可扩展性靠数据不靠代码（范围：厂商协议）**：厂商协议 = YAML recipe（怎么鉴权、怎么探活、怎么查额度、怎么展示）。加一个中转站 = 丢一个 YAML，不重新编译。**这条只管「同一套协议内的厂商差异」**；跨协议的差异（声明式 http 已退役）与**客户端差异**各写 Rust 子模块，不做 DSL。
 - TUI 用 ratatui；HTTP 用 reqwest(rustls)；密钥存 TOML，不进仓库。
 
 ## 目录结构（按功能单元拆分，单文件 ≤ ~300 行）
@@ -19,7 +19,7 @@ src/
 ├── clipboard.rs       复制到剪贴板（arboard → pbcopy 兜底）
 ├── browser.rs         用默认浏览器打开厂商主页（open/xdg-open，只放行 http(s)）
 ├── clients/           一键导入到外部客户端（agent）
-│   ├── mod.rs         Agent 注册表（现在只有 Codex；加客户端只动这里）
+│   ├── mod.rs         Agent 注册表 + 分派（加客户端：加变体、加子模块、补这个 match）
 │   └── codex/         Codex 适配
 │       ├── mod.rs     ImportRequest/ImportReport、保留 id 加前缀、base_url 补 /v1、写入编排
 │       ├── config_file.rs  ~/.codex/config.toml 读改写（toml_edit 保注释保顺序）+ 备份 + 原子写
@@ -108,7 +108,7 @@ recipes/              内置 recipe ×4（deepseek/openai/moonshot/openrouter，
     - **密钥落盘权限一律 600，且必须「建文件时就 600」**（`OpenOptions::mode`，不要 `fs::write` + `chmod`：中间有 0644 窗口）。`~/.codex/config.toml` 与它的 `.apim.bak` 备份里都有 `experimental_bearer_token`，用 `fs::write` 会按 umask 摊成 0644 = 密钥副本全机可读。
     - **杀 codex daemon 要能只杀 daemon**：`is_codex_server` 只认「可执行文件名正好是 codex + 第一个参数是 `app-server`」；扫「任意 token」会把 `codex --profile app-server` 这类用户会话也杀掉。只扫描一次、只杀扫描到的 pid（重扫会杀掉刚起、已加载新配置的 daemon）。
     - **`config.toml` 是符号链接时要跟随写入**（dotfiles 常这么管）：直接在链接路径上 tmp + rename 会把链接替换成普通文件、与仓库版本分叉；但**备份不跟随**，始终放 `~/.codex/` 下，免得含 token 的备份落进用户的 dotfiles 仓库。
-    - **导入后必须让 codex 重启才能生效**：codex 的模型目录（`model_catalog_json`）只在 app-server daemon 启动时读一次，之后一直缓存（TUI 和桌面端都挂同一个 daemon）。实测现象：不重启时 `codex exec` 已能用新模型、但 `/model` 里还是旧的内置 GPT 表。cc-switch 的 v3.16.1 release notes 也只是提示用户重启；apim 做得更直接：导入成功后杀在跑的 `codex app-server`（`APIM_NO_RESTART_CODEX=1` 可关）。找进程必须**严格匹配**「可执行文件名正好是 codex + 参数里有 `app-server`」，只按命令行 contains 会把 `ps | grep codex app-server` 这种无关进程也杀掉（已加单测守）。
+    - **导入后必须让 codex 重启才能生效**：codex 的模型目录（`model_catalog_json`）只在 app-server daemon 启动时读一次，之后一直缓存（TUI 和桌面端都挂同一个 daemon）。实测现象：不重启时 `codex exec` 已能用新模型、但 `/model` 里还是旧的内置 GPT 表。cc-switch 的 v3.16.1 release notes 也只是提示用户重启；apim 做得更直接：导入成功后杀在跑的 `codex app-server`（`APIM_NO_RESTART_CODEX=1` 可关）。找进程必须**严格匹配**「可执行文件名正好是 codex + **子命令位（argv[2]）正好是 `app-server`**」；按「参数里有 `app-server`」或命令行 contains 会把 `codex --profile app-server`、`ps | grep codex app-server` 这类无关进程/用户会话也杀掉（已加单测守）。
     - 改写 `~/.codex/config.toml` **必须用 `toml_edit`**（`toml` 序列化会丢注释），写前备份成 `config.toml.apim.bak`，再 tmp + rename。注意加注释要挂在 **key 的 decor**（`leaf_decor_mut`）上，挂到 value 的 decor 会把值挤到下一行、产出非法 TOML。
     - `wire_api` 只接受 `"responses"`（0.134+ 删了 `"chat"`，写了会硬报错）→ 中转站得提供 `/v1/responses`；**导入面板的模型列表必须与 `m` 键完全一致**（同一个 `probe::fetch_models` / `parse_models`，只取模型名）；**不要做端点能力判断** —— `supported_endpoint_types` 是 new-api 后端的端点映射配置而非能力探测，实测会漏报（ikun 把 `gpt-6-sol` 标成只有 `openai`，实际 /responses 完全能用），照它筛会藏掉能用的模型。
     - `model_catalog_json` 相对路径按 `CODEX_HOME` 解析；它是**整表替换**（不是合并）；条目必须带 `base_instructions`（不能缺也不能给空串）；`supports_reasoning_summaries`（codex ≥0.144.5）与 `supports_parallel_tool_calls`（0.144.5~0.148.0-alpha.15）也被部分版本当必填 —— 两个字段名都给最安全（cc-switch v3.18.0 / v3.20.2 release notes 记了这两个坑）。
@@ -116,6 +116,14 @@ recipes/              内置 recipe ×4（deepseek/openai/moonshot/openrouter，
     - 厂商 id 撞上保留名（`openai`/`ollama`/`lmstudio`/`amazon-bedrock*`）时加 `apim-` 前缀。
 
 12. **`apim update` 只认三条渠道**（install.sh / npm / Homebrew，见 `docs/RELEASING.md` 的速查表）：`src/cli/update.rs` 按可执行文件路径认渠道（npm 看 `node_modules/apim-cli`、brew 看 `Cellar/apim`，其余当 install.sh 装的裸二进制），裸二进制那条复用官方 install.sh，但**不是 `curl | sh`**：URL 钉到本次要更新到的 tag、下载到临时文件、先做形状校验（是 shell 脚本 / 是本仓库安装器 / 含 sha256 校验）、再按 Release 发布的 `install.sh.sha256` 校验摘要（**拿不到摘要就拒绝执行**），最后用 `sh <file>` 跑；`APIM_INSTALL_DIR` 钉在当前二进制的**真实位置**（先 canonicalize，否则符号链接会被替换掉）保证原地更新。**`target/` 下的开发构建与 `~/.cargo/bin` 里的 cargo 副本一律不更新**（前者会被 Release 覆盖掉开发二进制，后者是 `cargo install` 留下的、被 PATH 遮挡的多余副本）。加渠道要同时改 `Channel`、测试和 RELEASING 的表。
+
+13. **加一个客户端（Claude Code / pi …）就是三处改动**，别在面板里写客户端专属分支：
+    - `src/clients/mod.rs`：加 `Agent` 变体（所有 `match` 会被编译器强制补全）+ 一条分派；
+    - `src/clients/<id>/`：新子模块，实现「写哪里 / 怎么写 / 写完后怎么校验 / 怎么重新加载」；
+    - `app/import` 与 `ui/import` **不用改**：它们只经 `Agent` 的 `import/remember/reload/last_import/label/config_hint/note` 调客户端，文案全取自 `Agent`。
+    - 例外（已知）：密钥行的 ★ 目前读 `App::last_imports` 里 Codex 那一条，`Agent::last_import` 已经通用，加客户端时只需确认 ★ 是否要一起显示多客户端。
+    - **不要**给客户端造 YAML 配方（约定 2 的数据化范围是厂商协议）；客户端之间不是同一套协议，各写 Rust 更直白。
+    - 「不需要选模型的客户端」暂时还得先做一步重构：`ImportRequest.models/default_model` 现在是必填，要先改成 `Option` 才能让面板跳过勾选模型两步（见 `DEV-NOTES.local.md`）。
 
 ## 验证命令速查
 

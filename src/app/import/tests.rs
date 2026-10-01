@@ -4,7 +4,7 @@ use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 
 use super::*;
 use crate::app::tests::test_app;
-use crate::clients::{DEFAULT_EFFORT, RestartReport};
+use crate::clients::{Agent, DEFAULT_EFFORT, LastImport, RestartReport};
 
 /// 与 `m` 键浏览一致的模型名列表（不再区分端点能力）。
 fn mixed_entries() -> Vec<String> {
@@ -265,12 +265,21 @@ fn report(models: &[&str], model: &str) -> ImportReport {
 
 fn outcome(key_id: &str, result: Result<ImportReport, String>) -> ImportOutcome {
     ImportOutcome {
+        agent: Agent::Codex,
         key_id: key_id.into(),
         seq: 1,
         result,
-        state: None,
+        last_import: None,
         state_error: None,
         restart: RestartReport::default(),
+    }
+}
+
+/// 测试用的「上次导入」摘要。
+fn last_import(key_id: &str) -> LastImport {
+    LastImport {
+        key_id: key_id.into(),
+        summary: format!("alpha（表名 alpha）· 默认 gpt-6-sol · 强度 {DEFAULT_EFFORT} · 1 个模型"),
     }
 }
 
@@ -280,15 +289,7 @@ async fn successful_import_toasts_marks_key_and_closes_panel() {
     app.import_toggle();
     app.import_confirm_models();
     let mut result = outcome("alpha.a1", Ok(report(&["gpt-6-sol"], "gpt-6-sol")));
-    result.state = Some(CodexState {
-        provider: "alpha".into(),
-        provider_name: "alpha".into(),
-        alias: "a1".into(),
-        provider_key: "alpha".into(),
-        models: vec!["gpt-6-sol".into()],
-        default_model: "gpt-6-sol".into(),
-        reasoning_effort: DEFAULT_EFFORT.into(),
-    });
+    result.last_import = Some(last_import("alpha.a1"));
     result.seq = seq_of(&app);
     app.import_result(result);
 
@@ -296,11 +297,14 @@ async fn successful_import_toasts_marks_key_and_closes_panel() {
     assert_eq!(
         app.toast_text(),
         Some(
-            "已导入 Codex：alpha.a1 · 1 个模型 · 默认 gpt-6-sol · 强度 high · 重启 codex 后 /model 才会列出新模型"
+            "已导入 Codex：alpha.a1 · 1 个模型 · 默认 gpt-6-sol · 强度 high · 表名 alpha · 重启 Codex 后才会列出新模型"
         )
     );
-    assert!(app.is_codex_active("alpha.a1"), "★ 应打在这把密钥上");
-    assert!(!app.is_codex_active("alpha.a2"));
+    assert!(
+        app.is_active(Agent::Codex, "alpha.a1"),
+        "★ 应打在这把密钥上"
+    );
+    assert!(!app.is_active(Agent::Codex, "alpha.a2"));
 }
 
 #[tokio::test]
@@ -314,7 +318,10 @@ async fn failed_import_keeps_panel_open_with_reason() {
 
     assert_eq!(flow(&app).step, ImportStep::Failed);
     assert_eq!(flow(&app).error.as_deref(), Some("codex 未识别这些模型：x"));
-    assert!(app.codex.is_none(), "失败不能留下 ★ 状态");
+    assert!(
+        app.last_import_of(Agent::Codex).is_none(),
+        "失败不能留下 ★ 状态"
+    );
 }
 
 #[test]
@@ -458,15 +465,7 @@ async fn stale_import_outcome_does_not_close_a_newer_panel() {
     app.open_import();
     let mut stale = outcome("alpha.a1", Ok(report(&["gpt-6-sol"], "gpt-6-sol")));
     stale.seq = first_seq;
-    stale.state = Some(CodexState {
-        provider: "alpha".into(),
-        provider_name: "alpha".into(),
-        alias: "a1".into(),
-        provider_key: "alpha".into(),
-        models: vec!["gpt-6-sol".into()],
-        default_model: "gpt-6-sol".into(),
-        reasoning_effort: DEFAULT_EFFORT.into(),
-    });
+    stale.last_import = Some(last_import("alpha.a1"));
     app.import_result(stale);
 
     assert!(
@@ -474,7 +473,10 @@ async fn stale_import_outcome_does_not_close_a_newer_panel() {
         "旧代际的回执不该关掉新面板"
     );
     assert!(app.toast_text().is_some(), "但要给一条提示");
-    assert!(app.codex.is_some(), "导入本身是成功的，★ 记录应更新");
+    assert!(
+        app.is_active(Agent::Codex, "alpha.a1"),
+        "导入本身是成功的，★ 记录应更新"
+    );
 }
 
 /// `m` 键浏览弹窗不参与代际（固定 seq=0），仍要能正常落地。
@@ -556,4 +558,47 @@ async fn confirm_default_with_nothing_checked_is_a_no_op() {
         ImportStep::DefaultModel,
         "没可选项时保持原状"
     );
+}
+
+// ---- 面板 → 客户端的注入点（原来地笔记 B11）--------------------------------
+
+/// 「请求确实交给了所选的那个客户端」——以前面板级测试全部绕过 `start_import`，
+/// 这条补上：注入一个假 runner，断言收到的是 `Agent::Codex` 与面板上那份请求。
+#[tokio::test]
+async fn import_request_goes_to_the_selected_agent() {
+    use std::sync::{Arc, Mutex};
+    /// runner 收到的调用记录：(交给了哪个客户端, 密钥 id, 勾选的模型)
+    type Calls = Arc<Mutex<Vec<(Agent, String, Vec<String>)>>>;
+    let (mut app, _rx, _rx_task) = test_app(&[("alpha", &["a1"])]);
+    app.focus = Focus::Keys;
+
+    let seen: Calls = Arc::new(Mutex::new(Vec::new()));
+    let recorder = seen.clone();
+    app.import_runner = Some(Arc::new(move |agent, request| {
+        recorder
+            .lock()
+            .unwrap()
+            .push((agent, request.key_id(), request.models.clone()));
+        Ok(report(&["gpt-6-sol"], "gpt-6-sol"))
+    }));
+
+    app.open_import();
+    // 第一步选中 Codex（单客户端，符号语义上仍是显式选中的那个）
+    assert_eq!(flow(&app).agent, Agent::Codex);
+    app.import_choose_agent();
+    app.import_receive_models("alpha.a1".into(), seq_of(&app), Ok(mixed_entries()));
+    app.import_toggle();
+    app.import_confirm_models();
+    assert_eq!(flow(&app).step, ImportStep::Working, "应已派发到后台任务");
+
+    // 等后台任务把请求交给 runner
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(5);
+    while seen.lock().unwrap().is_empty() && std::time::Instant::now() < deadline {
+        tokio::time::sleep(std::time::Duration::from_millis(10)).await;
+    }
+    let calls = seen.lock().unwrap().clone();
+    assert_eq!(calls.len(), 1, "runner 应被调用一次");
+    assert_eq!(calls[0].0, Agent::Codex, "交给的应是所选客户端");
+    assert_eq!(calls[0].1, "alpha.a1");
+    assert_eq!(calls[0].2, vec!["gpt-6-sol".to_string()]);
 }

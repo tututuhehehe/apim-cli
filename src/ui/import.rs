@@ -6,7 +6,7 @@ use ratatui::style::{Modifier, Style};
 use ratatui::text::{Line, Span};
 use ratatui::widgets::{Clear, Paragraph, Wrap};
 
-use super::{centered, pane_block, theme};
+use super::{centered, draw_search_box, pane_block, scroll_offset, theme};
 use crate::app::{App, ImportFlow, ImportStep};
 use crate::clients::Agent;
 
@@ -21,7 +21,11 @@ pub(crate) fn draw_import(frame: &mut Frame, app: &App, flow: &ImportFlow, area:
         ImportStep::Working => draw_message(
             frame,
             " 一键导入 ",
-            "正在写入 Codex 配置并让 codex 校验…",
+            &format!(
+                "正在写入 {} 配置（{}）并校验…",
+                flow.agent.label(),
+                flow.agent.config_hint()
+            ),
             " Esc 关闭（任务继续，结果会以底部提示条反馈） ",
             theme::ACCENT,
             area,
@@ -40,7 +44,9 @@ pub(crate) fn draw_import(frame: &mut Frame, app: &App, flow: &ImportFlow, area:
 // ---- 第一步：选客户端 --------------------------------------------------
 
 fn draw_agent(frame: &mut Frame, app: &App, flow: &ImportFlow, area: Rect) {
-    let height = (Agent::ALL.len() * 2 + 7) as u16;
+    // 每个客户端恒定 3 行（显示名 / 配置位置 / 说明）+ 固定 4 行，再加 2 行边框。
+    // 之前是 `n*2+7`：n=1 恰好不裁，n≥2 起最后那行快捷键提示会被切掉。
+    let height = (Agent::ALL.len() * 3 + 6) as u16;
     let rect = centered(76, height, area);
     frame.render_widget(Clear, rect);
     let block = pane_block(" 一键导入 · 选择客户端 ", true);
@@ -48,8 +54,8 @@ fn draw_agent(frame: &mut Frame, app: &App, flow: &ImportFlow, area: Rect) {
     frame.render_widget(block, rect);
 
     let mut lines: Vec<Line> = Vec::new();
-    for (index, agent) in Agent::ALL.iter().enumerate() {
-        let selected = index == flow.agent;
+    for agent in Agent::ALL.iter() {
+        let selected = *agent == flow.agent;
         let marker = if selected { "▶ " } else { "  " };
         let label_style = if selected {
             Style::new().fg(theme::ACCENT).add_modifier(Modifier::BOLD)
@@ -78,11 +84,6 @@ fn draw_agent(frame: &mut Frame, app: &App, flow: &ImportFlow, area: Rect) {
         flow_note(app, flow),
         Style::new().fg(theme::GOLD),
     )));
-    // 「旧配置块保留」是有代价的：块里的旧 token 也一起留着，得让用户知道
-    lines.push(Line::from(Span::styled(
-        " 旧厂商的配置块会保留（方便切回），里面的旧 token 需手动删 ",
-        Style::new().fg(theme::MUTED),
-    )));
     lines.push(Line::from(Span::styled(
         " j/k 移动   ⏎ 下一步   Esc 取消 ",
         Style::new().fg(theme::MUTED),
@@ -90,22 +91,18 @@ fn draw_agent(frame: &mut Frame, app: &App, flow: &ImportFlow, area: Rect) {
     frame.render_widget(Paragraph::new(lines).wrap(Wrap { trim: false }), inner);
 }
 
-/// 面板上那句「当前 Codex 用的是谁 / 这次要导入谁」。
+/// 面板上那句「上次导入的是谁 / 这次要导入谁」。
+///
+/// 数据源是 apim 自己记的摘要（`Agent::last_import`），不是回读客户端配置，
+/// 所以文案说「apim 上次导入」而不是断言客户端里现在是什么。
 fn flow_note(app: &App, flow: &ImportFlow) -> String {
-    match &app.codex {
-        // 数据源是 ~/.config/apim/codex.toml（apim 自记），不是回读 codex 的配置，
-        // 所以文案说「apim 上次导入」而不是断言 codex 里现在是什么
-        Some(state) if state.key_id() == flow.key_id => {
-            format!(
-                "apim 上次导入的也是 {}（{} 个模型）",
-                state.key_id(),
-                state.models.len()
-            )
+    match app.last_import_of(flow.agent) {
+        Some(record) if record.key_id == flow.key_id => {
+            format!("apim 上次导入的也是 {}：{}", record.key_id, record.summary)
         }
-        Some(state) => format!(
-            "将导入：{}（apim 上次导入的是 {}，它的配置块会保留）",
-            flow.key_id,
-            state.key_id()
+        Some(record) => format!(
+            "将导入：{}（apim 上次导入的是 {}）",
+            flow.key_id, record.key_id
         ),
         None => format!("将导入：{}", flow.key_id),
     }
@@ -156,7 +153,7 @@ fn draw_model_picker(frame: &mut Frame, flow: &ImportFlow, area: Rect) {
             chunks[1],
         );
     } else {
-        let offset = flow.cursor.saturating_sub(VISIBLE_ROWS.saturating_sub(1));
+        let offset = scroll_offset(flow.cursor, VISIBLE_ROWS);
         let lines: Vec<Line> = visible
             .iter()
             .enumerate()
@@ -177,7 +174,7 @@ fn draw_model_picker(frame: &mut Frame, flow: &ImportFlow, area: Rect) {
     );
 }
 
-/// 第三步：从已勾选的模型里选一个当默认（写进 codex 顶层 `model`）。
+/// 第三步：从已勾选的模型里选一个当默认（各客户端自己决定写到哪里）。
 fn draw_default_picker(frame: &mut Frame, flow: &ImportFlow, area: Rect) {
     let checked = flow.checked_models();
     let rows = checked.len().clamp(1, VISIBLE_ROWS) as u16;
@@ -199,7 +196,7 @@ fn draw_default_picker(frame: &mut Frame, flow: &ImportFlow, area: Rect) {
     frame.render_widget(
         Paragraph::new(Line::from(Span::styled(
             format!(
-                " 这 {} 个模型都会写进 codex；选中的那个作为默认（config.toml 的 model）",
+                " 这 {} 个模型都会写进客户端；选中的那个作为它的默认模型",
                 checked.len()
             ),
             Style::new().fg(theme::MUTED),
@@ -208,9 +205,7 @@ fn draw_default_picker(frame: &mut Frame, flow: &ImportFlow, area: Rect) {
         chunks[0],
     );
 
-    let offset = flow
-        .default_cursor
-        .saturating_sub(VISIBLE_ROWS.saturating_sub(1));
+    let offset = scroll_offset(flow.default_cursor, VISIBLE_ROWS);
     let lines: Vec<Line> = checked
         .iter()
         .enumerate()
@@ -286,25 +281,6 @@ fn count_line(flow: &ImportFlow) -> Line<'static> {
 }
 
 // ---- 公共零件 ----------------------------------------------------------
-
-fn draw_search_box(frame: &mut Frame, area: Rect, filter: &str, searching: bool) {
-    let mut spans = vec![Span::styled(" 搜索: ", Style::new().fg(theme::MUTED))];
-    if filter.is_empty() && !searching {
-        spans.push(Span::styled(
-            "/ 输入关键字过滤",
-            Style::new().fg(theme::MUTED),
-        ));
-    } else {
-        spans.push(Span::styled(
-            filter.to_string(),
-            Style::new().fg(theme::TEXT),
-        ));
-        if searching {
-            spans.push(Span::styled("_", Style::new().fg(theme::ACCENT)));
-        }
-    }
-    frame.render_widget(Paragraph::new(Line::from(spans)), area);
-}
 
 fn draw_message(
     frame: &mut Frame,

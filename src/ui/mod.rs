@@ -111,6 +111,32 @@ pub(crate) fn pane_block<'a>(
         .padding(Padding::horizontal(1))
 }
 
+/// 搜索框那一行（模型列表弹窗与一键导入面板共用，样式别各写一份）。
+pub(crate) fn draw_search_box(frame: &mut Frame, area: Rect, filter: &str, searching: bool) {
+    use ratatui::text::{Line, Span};
+    let mut spans = vec![Span::styled(" 搜索: ", Style::new().fg(theme::MUTED))];
+    if filter.is_empty() && !searching {
+        spans.push(Span::styled(
+            "/ 输入关键字过滤",
+            Style::new().fg(theme::MUTED),
+        ));
+    } else {
+        spans.push(Span::styled(
+            filter.to_string(),
+            Style::new().fg(theme::TEXT),
+        ));
+        if searching {
+            spans.push(Span::styled("_", Style::new().fg(theme::ACCENT)));
+        }
+    }
+    frame.render_widget(ratatui::widgets::Paragraph::new(Line::from(spans)), area);
+}
+
+/// 滚动偏移：选中行跟随窗口移动，保证 selected 落在 `[offset, offset+visible)` 内。
+pub(crate) fn scroll_offset(selected: usize, visible: usize) -> usize {
+    selected.saturating_sub(visible.saturating_sub(1))
+}
+
 pub(crate) fn centered(width: u16, height: u16, area: Rect) -> Rect {
     // 宽高都钳到区域内，矮终端下弹窗贴顶显示而非溢出裁切
     let v = Layout::default()

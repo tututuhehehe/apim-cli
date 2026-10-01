@@ -22,6 +22,8 @@ use std::process::Command;
 
 use serde_json::{Value, json};
 
+use crate::util::truncate;
+
 /// 勾选模型一律给这四档思考等级（不按模型差异化）。
 /// 顶层 `model_reasoning_effort` 固定 [`DEFAULT_EFFORT`]，**面板不提供逐个选择**：
 /// 想换档就在 codex 里用 `/model` 选，或直接改 `apim-models.json`。
@@ -215,12 +217,4 @@ pub fn verify(codex_bin: &Path, home: &Path, models: &[String]) -> Result<(), St
     } else {
         Err(format!("codex 未识别这些模型：{}", missing.join(", ")))
     }
-}
-
-fn truncate(text: &str, max: usize) -> String {
-    let trimmed = text.trim();
-    if trimmed.chars().count() <= max {
-        return trimmed.to_string();
-    }
-    trimmed.chars().take(max).collect::<String>() + "…"
 }

@@ -45,8 +45,8 @@ pub(crate) fn draw_keys(frame: &mut Frame, app: &App, area: Rect) {
         .map(|(i, idx)| {
             let key = &app.keys[idx];
             let (style, label) = status_label(app, key);
-            // ★ = 这把密钥是 apim 上次导入到 Codex 的那把
-            let alias = if app.is_codex_active(&key.id()) {
+            // ★ = 这把密钥是 apim 上次导入给该客户端的那把
+            let alias = if app.is_active(crate::clients::Agent::Codex, &key.id()) {
                 Cell::from(Span::styled(
                     format!("★ {}", key.alias),
                     Style::new().fg(theme::GOLD).add_modifier(Modifier::BOLD),

@@ -7,7 +7,7 @@ use ratatui::style::{Color, Modifier, Style};
 use ratatui::text::{Line, Span};
 use ratatui::widgets::{Clear, List, ListItem, ListState, Paragraph, Wrap};
 
-use super::{centered, pane_block, theme};
+use super::{centered, draw_search_box, pane_block, scroll_offset, theme};
 use crate::app::{ModelsStatus, filter_models};
 
 /// 弹窗列表区最多显示的模型行数，超出靠滚动。
@@ -118,30 +118,6 @@ pub(crate) fn draw_models(
             rows[2],
         );
     }
-}
-
-fn draw_search_box(frame: &mut Frame, area: Rect, filter: &str, searching: bool) {
-    let mut spans = vec![Span::styled(" 搜索: ", Style::new().fg(theme::MUTED))];
-    if filter.is_empty() && !searching {
-        spans.push(Span::styled(
-            "/ 输入关键字过滤",
-            Style::new().fg(theme::MUTED),
-        ));
-    } else {
-        spans.push(Span::styled(
-            filter.to_string(),
-            Style::new().fg(theme::TEXT),
-        ));
-        if searching {
-            spans.push(Span::styled("_", Style::new().fg(theme::ACCENT)));
-        }
-    }
-    frame.render_widget(Paragraph::new(Line::from(spans)), area);
-}
-
-/// 滚动偏移：选中行跟随窗口移动，保证 selected 落在 [offset, offset+visible) 内。
-fn scroll_offset(selected: usize, visible: usize) -> usize {
-    selected.saturating_sub(visible.saturating_sub(1))
 }
 
 #[cfg(test)]

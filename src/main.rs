@@ -9,6 +9,7 @@ mod probe;
 mod recipe;
 mod tui;
 mod ui;
+mod util;
 
 use anyhow::Result;
 

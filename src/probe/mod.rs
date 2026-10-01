@@ -13,6 +13,7 @@ use reqwest::{Client, Method, RequestBuilder, StatusCode};
 
 use crate::config::KeyEntry;
 use crate::recipe::{self, Auth, AuthKind, HttpCall, Recipe};
+use crate::util::truncate;
 
 #[derive(Debug, Clone)]
 pub enum Health {
@@ -238,14 +239,6 @@ fn elapsed_ms(started: Instant) -> u64 {
 
 fn compact_error(err: &anyhow::Error) -> String {
     truncate(&err.to_string(), 200)
-}
-
-fn truncate(s: &str, max: usize) -> String {
-    let mut out: String = s.chars().take(max).collect();
-    if s.chars().count() > max {
-        out.push('…');
-    }
-    out.replace('\n', " ")
 }
 
 #[cfg(test)]

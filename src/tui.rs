@@ -246,15 +246,13 @@ pub(crate) async fn run_snapshot_provider_form() -> Result<()> {
 pub(crate) async fn run_snapshot_import() -> Result<()> {
     let (mut app, _rx, _rx_task) = App::start()?;
     app.focus = Focus::Keys;
-    app.codex = Some(crate::clients::CodexState {
-        provider: "ikun".into(),
-        provider_name: "ikun".into(),
-        alias: "codex".into(),
-        provider_key: "ikun".into(),
-        models: vec!["gpt-6-sol".into()],
-        default_model: "gpt-6-sol".into(),
-        reasoning_effort: crate::clients::DEFAULT_EFFORT.into(),
-    });
+    app.last_imports.insert(
+        crate::clients::Agent::Codex,
+        crate::clients::LastImport {
+            key_id: "ikun.codex".into(),
+            summary: "ikun（表名 ikun）· 默认 gpt-6-sol · 强度 high · 1 个模型".into(),
+        },
+    );
     app.modal = Modal::Import(ImportFlow::new(snapshot_key_id(&app), 0));
     render_snapshot(&app).await
 }

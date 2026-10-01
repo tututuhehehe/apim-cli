@@ -5,10 +5,8 @@
 
 use std::time::Instant;
 
-use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
-
 use super::{App, Focus, Modal, TaskMsg};
-use crate::clients::{Agent, CodexState, ImportReport, ImportRequest, RestartReport};
+use crate::clients::{Agent, ImportReport, ImportRequest, LastImport, RestartReport};
 use crate::probe;
 
 /// 面板当前停在哪一步。
@@ -41,8 +39,8 @@ pub struct ImportFlow {
     /// 本次面板的请求代际（App 单调发号）。迟到的模型列表/导入回执代际不匹配就丢弃。
     pub seq: u64,
     pub step: ImportStep,
-    /// Agent 步骤的选中下标。
-    pub agent: usize,
+    /// Agent 步骤选中的客户端（真正参与后续分派，不只是画光标）。
+    pub agent: Agent,
     /// Models 步骤是否还在拉模型列表。
     pub loading: bool,
     pub items: Vec<ModelPick>,
@@ -62,7 +60,7 @@ impl ImportFlow {
             key_id,
             seq,
             step: ImportStep::Agent,
-            agent: 0,
+            agent: Agent::Codex,
             loading: false,
             items: Vec::new(),
             cursor: 0,
@@ -108,18 +106,27 @@ impl ImportFlow {
     }
 }
 
+/// 面板 → 客户端适配层的调用点。
+///
+/// 生产环境为 `None`（直接走 `Agent::import`）；测试替换它，用来断言
+/// 「请求确实交给了所选的那个客户端」，而不用真去写 `~/.codex` 或起 codex。
+pub(crate) type ImportRunner =
+    std::sync::Arc<dyn Fn(Agent, &ImportRequest) -> Result<ImportReport, String> + Send + Sync>;
+
 /// 后台导入任务的结果回执。
 #[derive(Debug)]
 pub struct ImportOutcome {
+    /// 这次导入交给哪个客户端（提示文案与 ★ 记录都按它来）。
+    pub agent: Agent,
     pub key_id: String,
     /// 发起这次导入时面板的代际号（面板换了一代就不再关它、只落一条提示）。
     pub seq: u64,
     pub result: Result<ImportReport, String>,
-    /// 成功后记录的状态（用于 ★ 标记与面板提示）。
-    pub state: Option<CodexState>,
+    /// 成功后该客户端「上次导入」的摘要（★ 标记与面板提示用）。
+    pub last_import: Option<LastImport>,
     /// 状态文件写失败时的说明（导入本身是成功的）。
     pub state_error: Option<String>,
-    /// 自动重启 codex 守护进程的结果（killed=0 表示当时没在跑或已被禁用）。
+    /// 让客户端重新加载的结果（`killed=0` 表示当时没在跑或已被禁用）。
     pub restart: RestartReport,
 }
 
@@ -178,10 +185,15 @@ impl App {
         self.modal = Modal::Import(ImportFlow::new(key.id(), seq));
     }
 
+    /// 面板第一步：换选中的客户端（往上/下走一个）。
     pub fn import_move_agent(&mut self, delta: isize) {
-        let count = Agent::ALL.len();
         if let Some(flow) = self.import_flow_mut() {
-            flow.agent = clamp_index(flow.agent, delta, count);
+            let current = Agent::ALL
+                .iter()
+                .position(|agent| *agent == flow.agent)
+                .unwrap_or_default();
+            let next = clamp_index(current, delta, Agent::ALL.len());
+            flow.agent = Agent::ALL[next];
         }
     }
 
@@ -400,44 +412,54 @@ impl App {
             models,
             default_model,
         };
+        let agent = self
+            .import_flow()
+            .map(|flow| flow.agent)
+            .unwrap_or(Agent::Codex);
         let request_key_id = request.key_id();
         let fallback_key_id = request_key_id.clone();
         let import_seq = self.import_flow().map(|flow| flow.seq).unwrap_or_default();
         let config_dir = self.config_dir.clone();
         let restart_daemon = self.restart_codex_daemon;
+        let runner = self.import_runner.clone();
         let tx = self.tx_task.clone();
         tokio::spawn(async move {
             let outcome = tokio::task::spawn_blocking(move || {
-                let result = crate::clients::codex::import(&request);
-                let (state, state_error) = match &result {
+                // 所有写盘动作都经客户端适配层：面板不认识任何客户端细节
+                let result = match &runner {
+                    Some(runner) => runner(agent, &request),
+                    None => agent.import(&request),
+                };
+                let (last_import, state_error) = match &result {
                     Ok(report) => {
-                        let (state, error) =
-                            crate::clients::codex::remember(&config_dir, &request, report);
-                        (Some(state), error)
+                        let error = agent.remember(&config_dir, &request, report);
+                        (agent.last_import(&config_dir), error)
                     }
                     Err(_) => (None, None),
                 };
-                // 写成功才重启：codex 只会在 daemon 启动时读一次模型目录
-                let restart = if result.is_ok() && restart_daemon {
-                    crate::clients::codex::restart_daemon().unwrap_or_default()
+                // 写成功才重新加载：客户端只在进程启动时读一次配置
+                let restart = if result.is_ok() && restart_daemon && agent.needs_reload() {
+                    agent.reload().unwrap_or_default()
                 } else {
                     RestartReport::default()
                 };
                 ImportOutcome {
+                    agent,
                     key_id: request_key_id,
                     seq: import_seq,
                     result,
-                    state,
+                    last_import,
                     state_error,
                     restart,
                 }
             })
             .await
             .unwrap_or_else(|err| ImportOutcome {
+                agent,
                 key_id: fallback_key_id,
                 seq: import_seq,
                 result: Err(format!("导入任务异常终止：{err}")),
-                state: None,
+                last_import: None,
                 state_error: None,
                 restart: RestartReport::default(),
             });
@@ -453,34 +475,40 @@ impl App {
             .is_some_and(|flow| flow.key_id == outcome.key_id && flow.seq == outcome.seq);
         match outcome.result {
             Ok(report) => {
-                if let Some(state) = outcome.state {
-                    self.codex = Some(state);
+                if let Some(record) = outcome.last_import {
+                    self.last_imports.insert(outcome.agent, record);
                 }
                 let mut note = format!(
-                    "已导入 {}：{} · {} 个模型 · 默认 {} · 强度 {}",
-                    Agent::Codex.label(),
+                    "已导入 {}：{} · {} 个模型 · 默认 {} · 强度 {} · 表名 {}",
+                    outcome.agent.label(),
                     outcome.key_id,
                     report.models.len(),
                     report.model,
-                    report.reasoning_effort
+                    report.reasoning_effort,
+                    report.provider_key
                 );
                 if let Some(backup) = &report.backup_path {
                     note.push_str(&format!(" · 旧配置备份为 {}", file_name(backup)));
                 }
-                // codex 的模型目录只在 app-server 启动时读一次，必须重启才能让 /model 刷新
+                // 客户端的配置只在进程启动时读一次，必须重新加载才能让它的选择器刷新
                 if outcome.restart.killed > 0 {
                     note.push_str(&format!(
-                        " · 已重启 codex 守护进程({} 个)，重开 codex 即可看到新模型",
+                        " · 已重启 {} 守护进程({} 个)，重开它即可看到新模型",
+                        outcome.agent.label(),
                         outcome.restart.killed
                     ));
                 } else if outcome.restart.ambiguous > 0 {
                     // 形态不标准的没敢自动杀：说清楚，让他自己重启
                     note.push_str(&format!(
-                        " · 没找到标准形态的 codex 守护进程（有 {} 个类似进程没敢动），若 codex 正开着请手动重启",
+                        " · 没找到标准形态的 {} 守护进程（有 {} 个类似进程没敢动），若它正开着请手动重启",
+                        outcome.agent.label(),
                         outcome.restart.ambiguous
                     ));
                 } else {
-                    note.push_str(" · 重启 codex 后 /model 才会列出新模型");
+                    note.push_str(&format!(
+                        " · 重启 {} 后才会列出新模型",
+                        outcome.agent.label()
+                    ));
                 }
                 if let Some(error) = outcome.state_error {
                     note.push_str(&format!("（状态未记录：{error}）"));
@@ -521,60 +549,9 @@ fn clamp_index(current: usize, delta: isize, count: usize) -> usize {
     next.clamp(0, count as isize - 1) as usize
 }
 
-/// 面板里的按键路由。返回 true 表示这个按键已被面板消费。
-pub(crate) fn handle_import_key(app: &mut App, key: KeyEvent) -> bool {
-    let Some(step) = app.import_flow().map(|flow| flow.step) else {
-        return false;
-    };
-    let searching = app.import_searching();
-    match step {
-        ImportStep::Agent => match key.code {
-            KeyCode::Char('j') | KeyCode::Down => app.import_move_agent(1),
-            KeyCode::Char('k') | KeyCode::Up => app.import_move_agent(-1),
-            KeyCode::Enter => app.import_choose_agent(),
-            KeyCode::Esc | KeyCode::Char('q') => app.cancel_modal(),
-            _ => return false,
-        },
-        ImportStep::Models if searching => match key.code {
-            KeyCode::Enter => app.import_exit_search(),
-            KeyCode::Esc => app.import_exit_search(),
-            KeyCode::Backspace => app.import_search_backspace(),
-            KeyCode::Char(c) if !key.modifiers.contains(KeyModifiers::CONTROL) => {
-                app.import_search_char(c)
-            }
-            _ => return false,
-        },
-        ImportStep::Models => match key.code {
-            KeyCode::Char('j') | KeyCode::Down => app.import_move(1),
-            KeyCode::Char('k') | KeyCode::Up => app.import_move(-1),
-            KeyCode::Char(' ') => app.import_toggle(),
-            KeyCode::Char('a') => app.import_toggle_all(),
-            KeyCode::Char('/') => app.import_start_search(),
-            KeyCode::Enter => app.import_confirm_models(),
-            KeyCode::Esc | KeyCode::Char('q') => app.cancel_modal(),
-            _ => return false,
-        },
-        // 默认模型：选完开写；h/← 退回上一步重选
-        ImportStep::DefaultModel => match key.code {
-            KeyCode::Char('j') | KeyCode::Down => app.import_move_default(1),
-            KeyCode::Char('k') | KeyCode::Up => app.import_move_default(-1),
-            KeyCode::Enter => app.import_confirm_default(),
-            KeyCode::Char('h') | KeyCode::Left => app.import_default_back(),
-            KeyCode::Esc | KeyCode::Char('q') => app.cancel_modal(),
-            _ => return false,
-        },
-        // 正在写配置：忽略按键；Esc 允许关面板（任务继续，结果走 toast）
-        ImportStep::Working => match key.code {
-            KeyCode::Esc => app.cancel_modal(),
-            _ => return false,
-        },
-        ImportStep::Failed => match key.code {
-            KeyCode::Esc | KeyCode::Enter | KeyCode::Char('q') => app.cancel_modal(),
-            _ => return false,
-        },
-    }
-    true
-}
+mod keys;
+
+pub(crate) use keys::handle_import_key;
 
 #[cfg(test)]
 mod tests;

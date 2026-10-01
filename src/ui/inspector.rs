@@ -563,9 +563,10 @@ mod tests {
             client: reqwest::Client::new(),
             next_auto_refresh: Instant::now(),
             config_dir: crate::app::tests::test_config_dir("inspector"),
-            codex: None,
+            last_imports: HashMap::new(),
             restart_codex_daemon: false,
             next_import_seq: 0,
+            import_runner: None,
             undo_stack: std::collections::VecDeque::new(),
         }
     }
