@@ -211,6 +211,8 @@ Deliberate choices:
 
 > Requires `codex` on your machine (it is used to generate and verify the model catalog). apim finds it on `PATH`, or you can point `APIM_CODEX_BIN` at it.
 
+**Codex is the only target for now.** Adding another client (Claude Code / pi …) is a Rust-side change: one `Agent` variant + one `clients/<id>/` submodule + one dispatch arm — the panel needs no changes. There is deliberately **no YAML recipe for clients**: their config formats, auth variable names and reload mechanisms all differ, so they are not the same protocol (see AGENTS.md convention 13).
+
 ## Where the data lives
 
 Everything lives under `~/.config/apim/`. TUI edits write these two files directly (mode 600), and you can edit them by hand as well:

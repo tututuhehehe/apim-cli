@@ -209,6 +209,8 @@ apim status glm --json
 
 > 需要本机装好 `codex`（用它生成并校验模型目录）；apim 从 `PATH` 找它，也可以用 `APIM_CODEX_BIN` 指定路径。
 
+**暂时只支持 Codex。** 加一个客户端（Claude Code / pi …）是 Rust 侧的事：一个 `Agent` 变体 + 一个 `clients/<id>/` 子模块 + 一条分派，面板不用改；**不做 YAML 配方** —— 各家配置格式、鉴权变量名、生效方式都不一样，不是同一套协议（详见 AGENTS.md 约定 13）。
+
 ## 数据存哪
 
 都在 `~/.config/apim/`，TUI 的增删改直接写这两个文件（权限 600），也可以手动改：
