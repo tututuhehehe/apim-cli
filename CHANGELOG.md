@@ -5,6 +5,40 @@
 
 ## [Unreleased]
 
+## [0.1.2] - 2026-10-01
+
+### 新增
+
+- **一键导入到 Codex**（密钥表选中一把密钥按 `x`）：三步面板（选客户端 → 勾选模型 → 选默认模型）
+  → 把密钥 / 厂商 / 勾选的模型写进 `~/.codex/config.toml`（`model_provider`/`model`/`model_reasoning_effort`/
+  `model_catalog_json`）+ 生成 `~/.codex/apim-models.json`（每个模型带 medium/high/xhigh/max 四档思考等级），
+  写完让 **codex 自己解析校验**，成功后在密钥行打 ★
+- **`apim update`**：识别安装渠道（npm / Homebrew / install.sh）后从原渠道更新自己；
+  `--check` 只看当前/最新版本，`--force` 版本相同时也重装，`--json` 给脚本用
+- 客户端适配层 `src/clients/`：`Agent` 抽象 + `clients/codex/`。加一个新客户端 = 加变体 + 子模块 + 一条分派，
+  面板不用改
+
+### 变更
+
+- 一键导入成功后**自动重启 codex 的 app-server 守护进程**（codex 只在进程启动时读一次模型目录；
+  `APIM_NO_RESTART_CODEX=1` 可关掉自动重启）
+- install.sh 更新渠道**不再 `curl | sh`**：URL 钉到目标 tag → 进程内下载到临时文件 → 形状校验 →
+  按 Release 发布的 `install.sh.sha256` 校验摘要（拿不到就拒绝执行）→ 才交给 `sh` 执行
+- `~/.codex/config.toml`、它的备份、以及 `secrets.toml` 一律 **0600，且建文件时就是 600**
+- 导入面板与 `m` 键列出**完全一致**的模型列表（不再按厂商声明的端点能力筛掉实际可用的模型）
+
+### 修复
+
+- 备份文件曾按 umask 落成 0644，而备份里有 `experimental_bearer_token` → 现在强制 600
+- 导入校验失败时用备份**回滚**两处改动，不再出现「提示导入失败、配置其实已切换」
+- 重启 codex 的进程匹配收紧到「子命令位正好是 `app-server`」，避免误杀 `codex --profile app-server` 这类用户会话；
+  包装脚本形态只如实报告，不再静默跳过
+- 并发导入加排他锁（`.apim-import.lock`，崩溃残留可被认领），不再互相抹掉 provider 块
+- 导入结果按**请求代际**丢弃过期回执 / 旧模型列表
+- 补写顶层 `model_reasoning_effort`；模型目录条目改成厂商官方文档那种迷你条目（64KB/模型 → ~1.4KB/模型）
+- `config.toml` 是符号链接（dotfiles 管理）时跟随写入而不是替换链接；备份始终留在 `~/.codex/`
+
+
 ## [0.1.1] - 2026-09-28
 
 ### 新增
@@ -42,6 +76,7 @@
 - `apim --version` 版本输出（供安装脚本与更新检测使用）
 - MIT 开源协议
 
-[Unreleased]: https://github.com/tututuhehehe/apim-cli/compare/v0.1.1...HEAD
+[Unreleased]: https://github.com/tututuhehehe/apim-cli/compare/v0.1.2...HEAD
+[0.1.2]: https://github.com/tututuhehehe/apim-cli/releases/tag/v0.1.2
 [0.1.1]: https://github.com/tututuhehehe/apim-cli/releases/tag/v0.1.1
 [0.1.0]: https://github.com/tututuhehehe/apim-cli/releases/tag/v0.1.0
