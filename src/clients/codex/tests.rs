@@ -672,3 +672,76 @@ fn write_follows_symlink_and_keeps_backup_out_of_dotfiles() {
     );
     assert!(!dotfiles.join("codex-config.toml.apim.bak").exists());
 }
+
+// ---- 并发导入锁（原来地笔记 2.2）------------------------------------------
+
+/// 测试用的导入请求。
+fn request_for(alias: &str, models: &[&str]) -> ImportRequest {
+    ImportRequest {
+        provider_id: "ikun".into(),
+        provider_name: "ikun".into(),
+        base_url: "https://api.ikuncode.cc".into(),
+        api_key: "sk-placeholder".into(),
+        alias: alias.into(),
+        models: models.iter().map(|m| (*m).to_string()).collect(),
+        default_model: models[0].to_string(),
+    }
+}
+
+/// 已经有人在导入时，第二个实例必须被挡住，而不是互相覆盖 provider 块。
+/// 被挡住时磁盘上一点都不能动。
+#[cfg(unix)]
+#[test]
+fn concurrent_import_is_locked_out() {
+    let dir = temp_dir("lock");
+    let home = dir.join("codex-home");
+    fs::create_dir_all(&home).unwrap();
+    let bin = fake_codex(&dir);
+
+    // 手动占住锁：写当前进程的 pid → 会被判成「还活着」，不会被抢
+    fs::write(
+        home.join(".apim-import.lock"),
+        format!("{}\n", std::process::id()),
+    )
+    .unwrap();
+
+    let err = import_in(&home, &request_for("codex", &["m1"]), Some(&bin)).unwrap_err();
+    assert!(err.contains("另一个 apim"), "应提示被锁挡住：{err}");
+    assert!(!home.join("config.toml").exists(), "被挡住时不该写任何东西");
+    assert!(!home.join(CATALOG_FILE).exists(), "被挡住时不该写目录");
+
+    // 释放后能正常导入，且导入结束要把锁清掉（否则下一次永远进不来）
+    fs::remove_file(home.join(".apim-import.lock")).unwrap();
+    import_in(&home, &request_for("codex", &["m1"]), Some(&bin)).unwrap();
+    assert!(!home.join(".apim-import.lock").exists(), "导入结束要清除锁");
+}
+
+/// 进程崩溃留下的锁（pid 已不在）要能被下一个实例认领，别把用户永久锁在门外。
+#[cfg(unix)]
+#[test]
+fn stale_lock_is_taken_over() {
+    let dir = temp_dir("lock-stale");
+    let home = dir.join("codex-home");
+    fs::create_dir_all(&home).unwrap();
+    let bin = fake_codex(&dir);
+    // 999_999 基本不可能是活着的进程
+    fs::write(home.join(".apim-import.lock"), "999999\n").unwrap();
+
+    import_in(&home, &request_for("codex", &["m1"]), Some(&bin)).expect("陈旧锁应被认领");
+    assert!(home.join("config.toml").exists());
+    assert!(!home.join(".apim-import.lock").exists());
+}
+
+/// 内容坏掉的锁也当陈旧（否则一次异常退出就永久占着）。
+#[cfg(unix)]
+#[test]
+fn corrupt_lock_is_treated_as_stale() {
+    let dir = temp_dir("lock-corrupt");
+    let home = dir.join("codex-home");
+    fs::create_dir_all(&home).unwrap();
+    let bin = fake_codex(&dir);
+    fs::write(home.join(".apim-import.lock"), "not-a-pid").unwrap();
+
+    import_in(&home, &request_for("codex", &["m1"]), Some(&bin)).expect("坏锁应被认领");
+    assert!(!home.join(".apim-import.lock").exists());
+}
