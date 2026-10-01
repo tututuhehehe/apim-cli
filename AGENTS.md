@@ -20,17 +20,20 @@ src/
 ├── browser.rs         用默认浏览器打开厂商主页（open/xdg-open，只放行 http(s)）
 ├── clients/           一键导入到外部客户端（agent）
 │   ├── mod.rs         Agent 注册表 + 分派（加客户端：加变体、加子模块、补这个 match）
-│   └── codex/         Codex 适配
-│       ├── mod.rs     ImportRequest/ImportReport、保留 id 加前缀、base_url 补 /v1、写入编排
+│   └── codex/         Codex 适配（mod.rs 只是门面：子模块声明 + 再导出 + codex_home/config_hint）
+│       ├── import.rs  ImportRequest/ImportReport、保留 id 加前缀、base_url 补 /v1、写入编排 + 回滚
+│       ├── lock.rs    codex home 排他锁（并发导入不互相覆盖）
+│       ├── restart.rs RestartReport、按进程表找 codex daemon 并重启（严格匹配 argv[2]）
 │       ├── config_file.rs  ~/.codex/config.toml 读改写（toml_edit 保注释保顺序）+ 备份 + 原子写
 │       ├── catalog.rs 模型目录：手写官方迷你条目（~1KB/模型）+ `codex debug models` 端到端校验
 │       ├── store.rs   ~/.config/apim/codex.toml（★ 标记用的「当前导入项」）
-│       └── tests.rs   沙盒测试 + 真机 opt-in 测试（`--ignored codex_real_end_to_end`）
+│       └── tests/     沙盒测试（按源码文件分）+ 真机 opt-in（`--ignored codex_real_end_to_end`）
 ├── cli/               CLI 子命令（AI/脚本的机器接口，与 TUI 共用底层）
 │   ├── mod.rs         Args 解析（--flag 值/布尔）、Ctx（config+recipes 目录，可注入测试）、分发与帮助
 │   ├── provider.rs    provider ls/add/set/rm/copy（--script 绑定/解绑；copy 整份复制含脚本文件）
 │   ├── keys.rs        key ls/add/set/rm（token 只走 stdin，不进 argv）
 │   ├── query.rs       status（并发探活+额度，--json）/ copy / use
+│   ├── update/        apim update：channel.rs 认渠道 / install_sh.rs 下载+校验+执行 / http.rs 取 tag
 │   └── tests.rs       CLI 沙盒测试（临时目录全流程）
 ├── form/              通用表单引擎（密钥表单、厂商表单共用）
 │   ├── mod.rs         Field（文本/选择/只读）、Form、按键分发、表单构造器
@@ -38,13 +41,15 @@ src/
 │   └── tests.rs       表单引擎测试
 ├── app/               应用状态机
 │   ├── mod.rs         App 结构、start、导航、探活调度（探针代际：配置变更后旧结果丢弃）
-│   ├── import/        一键导入面板状态机（选客户端 → 勾选模型 → 选默认模型 → 写入 → 校验）
+│   ├── import/        一键导入面板：mod.rs 流程控制 + flow.rs 状态 + apply.rs 写盘回执 + keys.rs 按键
+│   │                  （tests/ 按 flow / apply 分）
 │   ├── modal.rs       Modal 枚举 + 打开/保存分发/删除确认分发
 │   ├── keys_store.rs  密钥保存/删除（写 config.toml + secrets.toml）
 │   ├── undo.rs        Ctrl+Z 撤销栈（本次会话的写操作）+ 回退内存与磁盘
 │   └── providers_store.rs  厂商保存/删除/整份复制（recipe YAML + 额度脚本文件）
 ├── ui/                一个面板一个文件
-│   ├── mod.rs         draw 分发 + theme + pane_block/centered
+│   ├── mod.rs         draw 分发 + theme + pane_block/centered + 公共零件（搜索框/滚动偏移）
+├── util.rs            跨模块小工具（truncate 等；只放「多处各写了一遍」的东西）
 │   ├── header.rs      顶栏/底栏（底栏按焦点显示 c 复制什么）
 │   ├── providers.rs   左栏厂商列表
 │   ├── keys.rs        右侧密钥表 + 状态标签

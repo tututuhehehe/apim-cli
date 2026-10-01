@@ -29,6 +29,10 @@ use crate::util::truncate;
 /// 想换档就在 codex 里用 `/model` 选，或直接改 `apim-models.json`。
 pub const EFFORTS: [&str; 4] = ["medium", "high", "xhigh", "max"];
 
+/// 生成的模型目录文件名。写进 `model_catalog_json` 时用相对路径
+/// （codex 按 `CODEX_HOME` 解析相对路径，源码 `load_model_catalog` 已确认）。
+pub const CATALOG_FILE: &str = "apim-models.json";
+
 /// 默认思考强度：目录条目的 `default_reasoning_level` 与顶层 `model_reasoning_effort` 都用它。
 pub const DEFAULT_EFFORT: &str = "high";
 
@@ -165,17 +169,17 @@ fn model_entry(slug: &str, effort: &str, priority: i64) -> Value {
     })
 }
 
-/// 原子写目录文件（tmp + rename；不含密钥，权限保持默认）。
+/// 原子写目录文件（tmp + rename）。
+///
+/// tmp 名走 `config::tmp_path`（`<原名>.<pid>.tmp`）：与 config.toml 的写盘同一套规则，
+/// 两个 apim 实例并发时不会互踩。
+///
+/// 这里刻意用 `fs::write`（默认 644）而**不是** `config::write_private`：这个文件里没有
+/// 密钥，600 反而是坑 —— `sudo codex` 会读不到它。
 pub fn write_catalog(path: &Path, catalog: &Value) -> Result<(), String> {
     let text = serde_json::to_string_pretty(catalog)
         .map_err(|err| format!("序列化模型目录失败：{err}"))?;
-    let tmp = path.with_file_name(format!(
-        "{}.{}.tmp",
-        path.file_name()
-            .and_then(|n| n.to_str())
-            .unwrap_or("catalog"),
-        std::process::id()
-    ));
+    let tmp = crate::config::tmp_path(path);
     std::fs::write(&tmp, text).map_err(|err| format!("写 {} 失败：{err}", tmp.display()))?;
     std::fs::rename(&tmp, path).map_err(|err| format!("替换 {} 失败：{err}", path.display()))?;
     Ok(())
