@@ -214,7 +214,7 @@ impl App {
         }
     }
 
-    /// 第三步确认：光标处那个已勾选模型当默认（写进 codex 的 `model`），然后开写。
+    /// 第三步确认：光标处那个已勾选模型当默认（写到哪里由客户端决定），然后开写。
     pub fn import_confirm_default(&mut self) {
         let checked = self.import_checked();
         let index = self

@@ -1,4 +1,6 @@
-//! 一次一键导入的编排：定位本机 codex → 生成目录 → 改写 config.toml → 端到端校验 → 记下导入项。
+//! 一次一键导入的编排：定位本机 codex → 生成目录 → 改写 config.toml → 端到端校验。
+//!
+//! （★ 不在这里记台账：「哪把密钥在用」是回读 `config.toml` 现场算出来的，见 `active`。）
 //!
 //! 写进 `config.toml` 的内容：
 //! - `model_provider` = 厂商 id（保留 id 加 `apim-` 前缀，见 [`provider_key`]）

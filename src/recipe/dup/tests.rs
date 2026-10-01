@@ -97,7 +97,7 @@ fn duplicate_copies_recipe_and_script_as_independent_file() {
     let balance = recipe.balance.as_ref().unwrap();
     let stored_cmd = balance.command.as_deref().unwrap();
     assert_eq!(
-        crate::probe::expand_tilde(stored_cmd),
+        crate::util::expand_tilde(stored_cmd),
         copied.display().to_string(),
         "存储值（可能是 ~/ 缩写）展开后应指向新脚本文件"
     );

@@ -137,3 +137,72 @@ fn missing_config_reads_as_nothing() {
     .unwrap();
     assert!(active::active_provider(Some(&dir)).is_none());
 }
+
+/// provider 条目里**根本没有 `apiKey`**（pi 会报 no authentication method configured，用不起来）
+/// → 不算在用，不能因为 base_url 碰巧一样就打 ★。
+#[test]
+fn provider_without_api_key_is_not_in_use() {
+    let dir = temp_dir("active-no-api-key");
+    fs::write(
+        config::models_path(&dir),
+        r#"{
+  "providers": {
+    "apim-ikun": { "baseUrl": "https://api.ikuncode.cc/v1", "api": "openai-completions" }
+  }
+}
+"#,
+    )
+    .unwrap();
+    fs::write(
+        config::settings_path(&dir),
+        r#"{ "defaultProvider": "apim-ikun" }"#,
+    )
+    .unwrap();
+    let keys = [key("ikun", "codex", "sk-1")];
+    let recipes = recipes("ikun", "https://api.ikuncode.cc");
+    assert!(active::active_key_ids(Some(&dir), &keys, &recipes).is_empty());
+}
+
+/// `$$` / `$!` 是 pi 的转义写法：字面值是去掉一个字符后的串，对账时要按字面值比。
+#[test]
+fn escaped_api_key_is_compared_by_its_literal_value() {
+    let dir = temp_dir("active-escaped-key");
+    imported(&dir, "$$sk-1");
+    let keys = [key("ikun", "codex", "$sk-1")];
+    let recipes = recipes("ikun", "https://other.example.com");
+    assert_eq!(
+        active::active_key_ids(Some(&dir), &keys, &recipes),
+        vec!["ikun.codex".to_string()]
+    );
+}
+
+/// 项目级 `.pi/settings.json` 会深合并到 agent 目录设置之上（项目优先）。
+/// 项目里把默认 provider 切走时，★ 不能再留在 apim 写的那把上。
+#[test]
+fn project_settings_override_the_agent_directory() {
+    let dir = temp_dir("active-project-override");
+    imported(&dir, "sk-1");
+    let project = dir.join("project/.pi");
+    fs::create_dir_all(&project).unwrap();
+    fs::write(
+        project.join(config::SETTINGS_FILE),
+        r#"{ "defaultProvider": "opencode-go" }"#,
+    )
+    .unwrap();
+
+    assert!(
+        active::active_provider_with(Some(&dir), Some(project.join(config::SETTINGS_FILE)))
+            .is_none(),
+        "项目里切走了默认 provider，就不该再说 apim 那把在用"
+    );
+    // 项目里没提 defaultProvider 时不影响
+    fs::write(
+        project.join(config::SETTINGS_FILE),
+        r#"{ "theme": "dark" }"#,
+    )
+    .unwrap();
+    assert!(
+        active::active_provider_with(Some(&dir), Some(project.join(config::SETTINGS_FILE)))
+            .is_some()
+    );
+}

@@ -49,6 +49,31 @@ async fn star_disappears_after_the_client_config_is_hand_edited() {
     );
 }
 
+/// 撤销（Ctrl+Z）也要重算 ★：把刚删掉的密钥放回来时，★ 要跟着回来。
+#[tokio::test]
+async fn undo_rechecks_the_star() {
+    let mut app = picker_app();
+    codex_uses(&app, "sk-test-placeholder");
+    let key = app
+        .keys
+        .iter()
+        .find(|key| key.id() == "alpha.a1")
+        .cloned()
+        .expect("测试 App 里有 alpha.a1");
+    // 模拟「刚删掉这把密钥」：内存里没了，但写操作历史里还留着可撤销的 KeyDeleted
+    app.keys.retain(|key| key.id() != "alpha.a1");
+    app.push_undo(crate::app::UndoAction::KeyDeleted { key });
+    assert!(app.agents_using("alpha.a1").is_empty());
+
+    app.undo();
+
+    assert_eq!(
+        app.agents_using("alpha.a1"),
+        vec![Agent::Codex],
+        "撤销把密钥放回来，★ 要跟着回来"
+    );
+}
+
 #[tokio::test]
 async fn failed_import_keeps_panel_open_with_reason() {
     let mut app = picker_app();

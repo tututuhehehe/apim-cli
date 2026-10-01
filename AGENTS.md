@@ -56,15 +56,18 @@ src/
 │   ├── undo.rs        Ctrl+Z 撤销栈（本次会话的写操作）+ 回退内存与磁盘
 │   └── providers_store.rs  厂商保存/删除/整份复制（recipe YAML + 额度脚本文件）
 ├── ui/                一个面板一个文件
-│   ├── mod.rs         draw 分发 + theme + pane_block/centered + 公共零件（搜索框/滚动偏移）
-├── util.rs            跨模块小工具（truncate 等；只放「多处各写了一遍」的东西）
+│   ├── mod.rs         draw 分发 + theme + pane_block/centered + 滚动偏移
 │   ├── header.rs      顶栏/底栏（底栏按焦点显示 c 复制什么）
 │   ├── providers.rs   左栏厂商列表
-│   ├── keys.rs        右侧密钥表 + 状态标签
+│   ├── keys.rs        右侧密钥表 + 状态标签（含 ★ 角标）
 │   ├── balance.rs     右下额度面板
+│   ├── inspector.rs   详情弹窗（密钥 / 厂商）
+│   ├── models.rs      `m` 键的模型浏览弹窗
+│   ├── search.rs      搜索框零件（密钥/厂商/模型共用）
 │   ├── form_modal.rs  表单弹窗（光标截断渲染）
 │   ├── import.rs      一键导入面板渲染
 │   └── confirm.rs     删除确认弹窗
+├── util.rs            跨模块小工具（truncate、expand_tilde；只放「多处各写了一遍」的东西）
 ├── recipe/            厂商协议
 │   ├── mod.rs         Recipe/Auth/HttpCall 模型、YAML 加载（builtin→manifest→user 逐级覆盖，加载期校验 id 字符集）、is_valid_id、{token}/{base_url} 模板替换
 │   ├── script.rs      ScriptSpec（balance.kind=script，command/run 二选一，自定义 serde 校验）
@@ -101,7 +104,7 @@ recipes/              内置 recipe ×4（deepseek/openai/moonshot/openrouter，
 - `~/.pi/agent/models.json`、`~/.pi/agent/settings.json` — 一键导入到 Pi（`x` 键）写的，各自备份成 `<原名>.apim.bak`；`PI_CODING_AGENT_DIR` 可改整个目录
 - `APIM_CONFIG_DIR` 环境变量可重定向整个配置目录（测试用）
 
-★ 不落在 apim 自己的文件里：密钥行的 ★ 是**回读各客户端配置现场**算出来的，见约定 11。
+★ 不落在 apim 自己的文件里：密钥行的 ★ 是**回读各客户端配置现场**算出来的（codex 见约定 11、pi 见约定 14）。
 
 ## 核心约定
 

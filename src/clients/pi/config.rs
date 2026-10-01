@@ -30,7 +30,10 @@ pub fn read(path: &Path) -> Result<Map<String, Value>, String> {
         Ok(text) => match serde_json::from_str::<Value>(&text) {
             Ok(Value::Object(map)) => Ok(map),
             Ok(_) => Err(format!("{} 的顶层不是 JSON 对象（未改动）", path.display())),
-            Err(err) => Err(format!("解析 {} 失败（未改动）：{err}", path.display())),
+            Err(err) => Err(format!(
+                "解析 {} 失败（未改动）：{err}；若文件里有 `//` 注释（pi 自己能读，apim 不读），先删掉注释再试",
+                path.display()
+            )),
         },
         Err(err) if err.kind() == std::io::ErrorKind::NotFound => Ok(Map::new()),
         Err(err) => Err(format!("读取 {} 失败：{err}", path.display())),

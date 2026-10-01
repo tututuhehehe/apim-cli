@@ -9,7 +9,7 @@ pub enum ImportStep {
     Agent,
     /// 第二步：勾选要导入的模型（多选）。
     Models,
-    /// 第三步：从已勾选的模型里选哪个当默认（写进 codex 顶层 `model`）。
+    /// 第三步：从已勾选的模型里选哪个当默认（写到哪里由客户端决定，见 `Agent::default_model_hint`）。
     /// 只勾了一个模型时自动跳过这步。
     DefaultModel,
     /// 正在写入 + 校验（不可交互，避免半截状态）。

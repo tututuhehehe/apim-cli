@@ -48,9 +48,11 @@ pub fn config_hint() -> String {
 }
 
 /// pi 的 `<agent-dir>`：默认 `~/.pi/agent`，`PI_CODING_AGENT_DIR` 可改写（pi 文档的官方开关）。
+/// 环境变量里写的前导 `~/` 要自己展开：pi 解析时会展开（`config.js` → `utils/paths.js`），
+/// 不展开就会写到一个名字叫 `~` 的目录里去。
 pub fn agent_dir() -> PathBuf {
     if let Some(dir) = std::env::var_os("PI_CODING_AGENT_DIR") {
-        return PathBuf::from(dir);
+        return PathBuf::from(crate::util::expand_tilde(&dir.to_string_lossy()));
     }
     let base = std::env::var_os("HOME")
         .map(PathBuf::from)

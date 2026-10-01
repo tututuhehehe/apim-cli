@@ -38,6 +38,7 @@ pub(super) fn fake_pi(dir: &Path) -> PathBuf {
         &bin,
         "#!/bin/sh\n\
          if [ \"$1\" = \"--list-models\" ]; then\n\
+           cat \"${PI_CODING_AGENT_DIR}/fake-warning.txt\" >&2 2>/dev/null\n\
            cat \"${PI_CODING_AGENT_DIR}/fake-list.txt\" 2>/dev/null\n\
            exit 0\n\
          fi\n\

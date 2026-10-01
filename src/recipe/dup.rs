@@ -97,7 +97,7 @@ fn copy_balance_script(
     command: &str,
     scripts_dir: &Path,
 ) -> Result<Option<(String, PathBuf)>> {
-    let source = PathBuf::from(crate::probe::expand_tilde(command));
+    let source = PathBuf::from(crate::util::expand_tilde(command));
     if !source.is_file() {
         return Ok(None);
     }

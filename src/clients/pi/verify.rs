@@ -53,8 +53,14 @@ pub fn verify(
         })
         .collect();
     if missing.is_empty() {
-        Ok(())
-    } else {
-        Err(format!("pi 未列出这些模型：{}", missing.join(", ")))
+        return Ok(());
     }
+    // pi 对 schema 非法的 models.json 会**整份忽略**，退出码却是 0，只在 stderr 打一行 warning ——
+    // 不带上它，用户只能看到「未列出这些模型」，找不到真因。
+    let mut message = format!("pi 未列出这些模型：{}", missing.join(", "));
+    let stderr = truncate(&String::from_utf8_lossy(&output.stderr), 200);
+    if !stderr.is_empty() {
+        message.push_str(&format!("；pi 的警告：{stderr}"));
+    }
+    Err(message)
 }

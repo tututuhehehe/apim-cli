@@ -11,7 +11,7 @@ use super::ImportStep;
 /// 面板 → 客户端适配层的调用点。
 ///
 /// 生产环境为 `None`（直接走 `Agent::import`）；测试替换它，用来断言
-/// 「请求确实交给了所选的那个客户端」，而不用真去写 `~/.codex` 或起 codex。
+/// 「请求确实交给了所选的那个客户端」，而不用真去写 `~/.codex` / `~/.pi` 或起客户端进程。
 pub(crate) type ImportRunner =
     std::sync::Arc<dyn Fn(Agent, &ImportRequest) -> Result<ImportReport, String> + Send + Sync>;
 
@@ -29,7 +29,7 @@ pub struct ImportOutcome {
 }
 
 impl App {
-    /// 真正开写：后台线程跑 codex 导入 + 校验 + 重启 daemon。
+    /// 真正开写：后台线程跑客户端导入 + 校验（codex 那一路还要重启它的 daemon）。
     pub(super) fn start_import(&mut self, models: Vec<String>, default_model: String) {
         let Some(flow) = self.import_flow() else {
             return;
@@ -122,7 +122,7 @@ impl App {
                     report.model,
                     report.provider_key
                 );
-                // 客户端自己报的补充（codex：思考强度；pi 没有）：客户端才知道自己写了什么
+                // 客户端自己报的补充（codex 报思考强度，pi 没有）：面板不猜，客户端才知道自己写了什么
                 if let Some(detail) = &report.detail {
                     note.push_str(&format!(" · {detail}"));
                 }

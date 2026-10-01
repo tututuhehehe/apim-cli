@@ -1,7 +1,6 @@
 //! 额度查询的脚本逃生舱：跑 spec 指定的脚本，stdout 逐行进额度面板。密钥只经 env 注入。
 
 use std::collections::HashMap;
-use std::path::PathBuf;
 use std::time::{Duration, Instant};
 
 use anyhow::{Context, Result};
@@ -9,6 +8,7 @@ use anyhow::{Context, Result};
 use super::{BalanceSnapshot, compact_error, elapsed_ms, truncate};
 use crate::config::KeyEntry;
 use crate::recipe::{Recipe, ScriptSpec};
+use crate::util::expand_tilde;
 
 /// stdout 最多保留的行数，超出截断（防野脚本刷屏）。
 const MAX_LINES: usize = 50;
@@ -103,18 +103,6 @@ fn script_env_vars(recipe: &Recipe) -> HashMap<String, String> {
             (name, v.clone())
         })
         .collect()
-}
-
-pub(crate) fn expand_tilde(path: &str) -> String {
-    if let Some(rest) = path.strip_prefix("~/")
-        && let Some(home) = std::env::var_os("HOME")
-    {
-        return PathBuf::from(home)
-            .join(rest)
-            .to_string_lossy()
-            .into_owned();
-    }
-    path.to_string()
 }
 
 #[cfg(test)]

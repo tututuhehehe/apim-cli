@@ -55,7 +55,7 @@ impl App {
         }
         base_url = base_url.trim_end_matches('/').to_string();
         if !script_cmd.is_empty()
-            && !std::path::Path::new(&crate::probe::expand_tilde(&script_cmd)).is_file()
+            && !std::path::Path::new(&crate::util::expand_tilde(&script_cmd)).is_file()
         {
             self.set_form_error(&format!("脚本不存在：{script_cmd}"));
             return;

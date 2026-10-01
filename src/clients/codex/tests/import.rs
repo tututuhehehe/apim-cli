@@ -11,6 +11,34 @@ use super::helpers::{
     assert_no_tmp, fake_codex, fake_codex_with_empty_catalog, request_for, temp_dir,
 };
 
+/// 写进去的东西必须能被「回读现场」认出来：writer 与 reader 不能各说各话
+/// （导入侧字段名 / base_url 归一化一旦漂移，★ 会静默失效而测试全绿）。
+#[cfg(unix)]
+#[test]
+fn imported_config_is_recognized_as_in_use() {
+    let dir = temp_dir("import-recognized");
+    let home = dir.join("codex-home");
+    fs::create_dir_all(&home).unwrap();
+    let bin = fake_codex(&dir);
+    import_in(&home, &request_for(&["glm-5"]), Some(&bin)).unwrap();
+
+    let keys = [crate::config::KeyEntry {
+        provider: "ikun".into(),
+        alias: "codex".into(),
+        group: None,
+        token: "sk-placeholder".into(),
+    }];
+    assert_eq!(
+        crate::clients::codex::active::active_key_ids(
+            Some(&home),
+            &keys,
+            &std::collections::HashMap::new()
+        ),
+        vec!["ikun.codex".to_string()],
+        "导入写下的配置，回读现场时必须认出同一把密钥"
+    );
+}
+
 #[test]
 fn reserved_ids_get_prefixed() {
     assert_eq!(provider_key("ikun"), "ikun");

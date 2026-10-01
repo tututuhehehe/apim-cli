@@ -54,6 +54,28 @@ fn import_writes_provider_and_default_model_then_verifies() {
     assert_eq!(settings["defaultModel"], "glm-5");
 }
 
+/// 导入写下的两份配置，回读现场时必须能认出同一把密钥（writer / reader 双向耦合）。
+#[cfg(unix)]
+#[test]
+fn imported_config_is_recognized_as_in_use() {
+    let dir = temp_dir("import-recognized");
+    let bin = fake_pi(&dir);
+    write_model_table(&dir, "apim-ikun", &["glm-5"]);
+    import_in(&dir, &request_for(&["glm-5"]), Some(&bin)).unwrap();
+
+    let keys = [crate::config::KeyEntry {
+        provider: "ikun".into(),
+        alias: "codex".into(),
+        group: None,
+        token: "sk-placeholder".into(),
+    }];
+    assert_eq!(
+        crate::clients::pi::active_key_ids(Some(&dir), &keys, &std::collections::HashMap::new()),
+        vec!["ikun.codex".to_string()],
+        "导入写下的配置，回读现场时必须认出同一把密钥"
+    );
+}
+
 /// provider 键**一律**带 `apim-` 前缀：pi 内置了一大堆同名 provider，
 /// 不加前缀会连带把内置 provider 的 baseUrl 改掉（openai 会被指到我们的中转站）。
 #[cfg(unix)]

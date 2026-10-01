@@ -1,6 +1,6 @@
 # apim
 
-Manage model-provider API keys from the terminal: add, edit, delete, check health, check balance, copy, and one-click import into Codex.
+Manage model-provider API keys from the terminal: add, edit, delete, check health, check balance, copy, and one-click import into Codex or Pi.
 
 **English** | [简体中文](README.zh-CN.md)
 

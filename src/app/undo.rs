@@ -98,6 +98,8 @@ impl App {
             }
         }
         self.rebuild_provider_list();
+        // 撤销可能把「客户端正在用的那把密钥」放回来（或改回去），★ 要跟着重算
+        self.refresh_active_keys();
     }
 
     fn apply_undo(&mut self, action: &UndoAction) -> Result<()> {

@@ -1,6 +1,6 @@
 # apim
 
-终端里管理模型厂商 API Key：增删改查、看状态、看额度、复制密钥、一键导入到 Codex。
+终端里管理模型厂商 API Key：增删改查、看状态、看额度、复制密钥、一键导入到 Codex 或 Pi。
 
 [English](README.md) | **简体中文**
 

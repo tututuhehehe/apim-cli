@@ -267,7 +267,7 @@ fn script_spec(args: &Args) -> Result<Option<ScriptSpec>> {
     if path.is_empty() || path == "none" {
         return Ok(None);
     }
-    let expanded = crate::probe::expand_tilde(path);
+    let expanded = crate::util::expand_tilde(path);
     if !std::path::Path::new(&expanded).is_file() {
         bail!("脚本不存在：{path}");
     }

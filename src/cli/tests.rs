@@ -303,7 +303,7 @@ async fn provider_copy_duplicates_recipe_and_script() -> Result<()> {
         cmd.ends_with("relay-copy-quota.sh"),
         "脚本名跟随新 id: {cmd}"
     );
-    let cmd_file = PathBuf::from(crate::probe::expand_tilde(&cmd));
+    let cmd_file = PathBuf::from(crate::util::expand_tilde(&cmd));
     assert!(cmd_file.is_file(), "新脚本应落盘: {cmd}");
     assert_eq!(fs::read_to_string(&cmd_file)?, body);
     // 原厂商与原脚本不动

@@ -3,7 +3,6 @@
 
 mod script;
 
-pub(crate) use script::expand_tilde;
 use script::run_script_balance;
 
 use std::time::Instant;

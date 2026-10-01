@@ -16,9 +16,35 @@ pub(crate) fn truncate(text: &str, max: usize) -> String {
     out
 }
 
+/// 展开路径开头的前导 `~/`（`~/x` → `$HOME/x`）；没有 HOME 或不是这个形状就原样返回。
+///
+/// 厂商额度脚本路径（recipe / 表单）与 pi 的 `PI_CODING_AGENT_DIR` 都要展开 —— 不展开就会
+/// 去操作一个名字真叫 `~` 的目录。
+pub(crate) fn expand_tilde(path: &str) -> String {
+    if let Some(rest) = path.strip_prefix("~/")
+        && let Some(home) = std::env::var_os("HOME")
+    {
+        return std::path::PathBuf::from(home)
+            .join(rest)
+            .to_string_lossy()
+            .into_owned();
+    }
+    path.to_string()
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn expand_tilde_only_expands_a_leading_home() {
+        let home = std::env::var("HOME").unwrap_or_default();
+        assert_eq!(expand_tilde("~/x.sh"), format!("{home}/x.sh"));
+        // 中间与结尾的 ~ 不动（那是文件名，不是家目录）
+        assert_eq!(expand_tilde("/tmp/~/x"), "/tmp/~/x");
+        assert_eq!(expand_tilde("~x"), "~x");
+        assert_eq!(expand_tilde("relative/x"), "relative/x");
+    }
 
     #[test]
     fn truncate_counts_chars_not_bytes_and_flattens_newlines() {
