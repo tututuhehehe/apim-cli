@@ -35,7 +35,7 @@ git push origin main
 git push origin vX.Y.Z
 ```
 
-`.github/workflows/release.yml` 会：矩阵构建 macOS arm64/x64、Linux x64/arm64、Windows x64 → 打包 `apim-vX.Y.Z-<target>.tar.gz|zip` + `.sha256` → 先建草稿 Release 再上传 → 最后转正标 latest。
+`.github/workflows/release.yml` 会：矩阵构建 macOS arm64/x64、Linux x64/arm64、Windows x64 → 打包 `apim-vX.Y.Z-<target>.tar.gz|zip` + `.sha256` → 先建草稿 Release 再上传 → 最后转正标 latest，并**额外发布 `install.sh.sha256`**（`apim update` 的 install.sh 渠道要靠它校验脚本；缺了它那条渠道会拒绝执行并给手动命令）。
 
 CI（`.github/workflows/ci.yml`）同时在 main 上跑 fmt/clippy/test/JS 语法检查。
 
@@ -51,7 +51,7 @@ shasum -a 256 -c apim-vX.Y.Z-aarch64-apple-darwin.tar.gz.sha256
 tar -xzf apim-vX.Y.Z-aarch64-apple-darwin.tar.gz && ./apim --version
 ```
 
-`install.sh` 与 `cargo binstall` 都跟随 Release，**无需改动**（它们按 tag 拼 URL）。
+`install.sh` 与 `cargo binstall` 都跟随 Release，**无需改动**（它们按 tag 拼 URL）。Release 里现在还有一个 `install.sh.sha256` 资产，同样是 CI 自动生成的，不要手改。
 
 ## 5. 发布到 npm（6 个包）
 
@@ -133,4 +133,4 @@ brew test tututuhehehe/tap/apim
 
 > `cargo install apim` / `cargo binstall apim` 需要 crate 发布到 crates.io（`Cargo.toml` 的 `publish = false` 要先删）。binstall 元数据已配好，发布后即可用。
 
-> `apim update` 只认**三条**自动更新渠道：install.sh（裸二进制，重跑官方脚本 + 钉住原安装目录）、npm（`npm install -g apim-cli@latest`）、Homebrew（`brew upgrade apim`）。**`target/` 下的开发构建与 `~/.cargo/bin` 里的 cargo 副本会被拒绝更新**（返回 None + 给指引），前者免得把开发二进制覆盖成 Release 版，后者是 `cargo install` 留下的多余副本 —— 所以上表里 `cargo install` / `cargo binstall` 那两行**不在** `apim update` 覆盖范围内。新增渠道时同步改 `src/cli/update.rs` 的 `Channel`、单测与本节。
+> `apim update` 只认**三条**自动更新渠道：install.sh（裸二进制：下载**该 tag 的**官方脚本 → 形状校验 + 按 `install.sh.sha256` 校验摘要 → 再执行，钉住原安装目录）、npm（`npm install -g apim-cli@latest`）、Homebrew（`brew upgrade apim`）。**`target/` 下的开发构建与 `~/.cargo/bin` 里的 cargo 副本会被拒绝更新**（返回 None + 给指引），前者免得把开发二进制覆盖成 Release 版，后者是 `cargo install` 留下的多余副本 —— 所以上表里 `cargo install` / `cargo binstall` 那两行**不在** `apim update` 覆盖范围内。新增渠道时同步改 `src/cli/update.rs` 的 `Channel`、单测与本节。

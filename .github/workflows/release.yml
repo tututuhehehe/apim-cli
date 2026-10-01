@@ -109,6 +109,17 @@ jobs:
     needs: build
     runs-on: ubuntu-latest
     steps:
+      - uses: actions/checkout@v4
+      # apim update 的 install.sh 渠道要求这个摘要：拿不到就拒绝执行未校验的脚本
+      - name: 发布 install.sh 摘要
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          # sha256sum 是 Linux runner 自带的（shasum 在部分镜像上不一定有）。
+          # 输出格式 `<hash>␣␣install.sh` 与 macOS 的 `shasum -a 256 -c` 兼容。
+          sha256sum install.sh > install.sh.sha256
+          gh release upload "${GITHUB_REF_NAME}" install.sh.sha256 --clobber --repo "${GITHUB_REPOSITORY}"
       - name: gh release edit --draft=false
         env:
           GH_TOKEN: ${{ github.token }}

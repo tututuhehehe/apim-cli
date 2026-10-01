@@ -611,3 +611,64 @@ fn failed_verify_rolls_back_config_and_catalog() {
     // 目录文件本来不存在 → 还原后也不该存在
     assert!(!home.join(CATALOG_FILE).exists(), "目录文件应被删掉");
 }
+
+/// dotfiles 常把 `~/.codex/config.toml` 做成符号链接。写入必须跟随到真实文件，
+/// 不能把链接本身 rename 成普通文件（否则仓库版本与现场分叉）；
+/// 而备份要留在链接旁边（`~/.codex/`），别把含 token 的备份写进用户的 dotfiles 仓库。
+#[cfg(unix)]
+#[test]
+fn write_follows_symlink_and_keeps_backup_out_of_dotfiles() {
+    use std::os::unix::fs::symlink;
+    let dir = temp_dir("symlink");
+    let dotfiles = dir.join("dotfiles");
+    let codex_home = dir.join("codex-home");
+    fs::create_dir_all(&dotfiles).unwrap();
+    fs::create_dir_all(&codex_home).unwrap();
+
+    let real = dotfiles.join("codex-config.toml");
+    fs::write(&real, "model = \"old\"\n").unwrap();
+    let link = codex_home.join("config.toml");
+    symlink(&real, &link).unwrap();
+
+    let mut doc = config_file::read(&link).unwrap();
+    config_file::apply(
+        &mut doc,
+        &config_file::ProviderWrite {
+            key: "ikun",
+            name: "ikun",
+            base_url: "https://api.ikuncode.cc/v1",
+            api_key: "sk-placeholder",
+            catalog_file: CATALOG_FILE,
+            model: "m1",
+            reasoning_effort: "high",
+        },
+    )
+    .unwrap();
+    let backup = config_file::write(&link, &doc.to_string())
+        .unwrap()
+        .unwrap();
+
+    // 链接还在（没被替换成普通文件），指向的还是那个真实文件
+    assert!(
+        fs::symlink_metadata(&link)
+            .unwrap()
+            .file_type()
+            .is_symlink(),
+        "符号链接被替换成了普通文件"
+    );
+    assert_eq!(fs::read_link(&link).unwrap(), real);
+    // 新内容写进了真实文件
+    assert!(
+        fs::read_to_string(&real)
+            .unwrap()
+            .contains("model = \"m1\"")
+    );
+    // 备份在 codex-home 里（不是 dotfiles 仓库），内容是导入前的旧配置
+    assert_eq!(backup, codex_home.join("config.toml.apim.bak"));
+    assert!(
+        fs::read_to_string(&backup)
+            .unwrap()
+            .contains("model = \"old\"")
+    );
+    assert!(!dotfiles.join("codex-config.toml.apim.bak").exists());
+}

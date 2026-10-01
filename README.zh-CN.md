@@ -140,7 +140,7 @@ TUI 管人，CLI 管机器：`cargo install --path .` 之后所有操作都能�
 | `apim status [<provider>] [--json]` | 真实探活 + 额度（跑绑定的脚本） |
 | `apim copy <厂商.别名> [--base-url]` | 复制密钥 / Base URL 到剪贴板 |
 | `apim use <厂商.别名>` | 输出 `export OPENAI_API_KEY=... OPENAI_BASE_URL=...`（`eval $(apim use x)` 用） |
-| `apim update [--check] [--force] [--json]` | 自动识别当前是从哪条渠道装的（**npm / Homebrew / install.sh**），走同一条渠道更新。`--check` 只报当前/最新版本不动手；`--force` 版本相同时也重装一遍 |
+| `apim update [--check] [--force] [--json]` | 自动识别当前是从哪条渠道装的（**npm / Homebrew / install.sh**），走同一条渠道更新。install.sh 渠道会下载**该 tag 的**官方脚本、校验 sha256 之后才执行（不是 `curl \| sh`）。`--check` 只报当前/最新版本不动手；`--force` 版本相同时也重装一遍 |
 
 **密钥安全**：token 一律走 stdin，不进命令行参数（防 `ps` 和 shell history）：
 
@@ -198,7 +198,7 @@ apim status glm --json
 - **只切换激活项，不删旧配置**。Codex 允许 `config.toml` 里同时存在多个 `[model_providers.*]`，但同一时刻只有 `model_provider` 指向的那一个生效。所以导入新厂商时旧的 provider 块原样保留（想切回去改一下 `model_provider` 就行），你手写的注释、`[projects.*]`、`[tui]` 也不会被重写。
 - **密钥直接写进 `experimental_bearer_token`**。`~/.codex/config.toml` 本来就是 600 权限。在 apim 里轮换这把 key 后，记得重新按一次 `x` 同步。
 - **思考强度不用选**：目录里每个模型都声明 `medium/high/xhigh/max` 四档，顶层 `model_reasoning_effort` 固定写 `high`（面板上不让你逐个挑）。想换档就在 codex 里用 `/model` 选，或直接改 `apim-models.json` / `config.toml`。
-- **每次导入前备份**：改写前把现有内容存成 `~/.codex/config.toml.apim.bak`，想回退直接拿它覆盖回去。备份与改写后的 `config.toml` 都会被设成 600（里面有 token；codex 自己建的 0644 也会被收紧）；如果 codex 校验不过，apim 会用备份把两处改动自动还原。
+- **每次导入前备份**：改写前把现有内容存成 `~/.codex/config.toml.apim.bak`，想回退直接拿它覆盖回去。备份与改写后的 `config.toml` 都会被设成 600（里面有 token；codex 自己建的 0644 也会被收紧）；如果 codex 校验不过，apim 会用备份把两处改动自动还原。`config.toml` 是符号链接（dotfiles 管理）时会写入链接指向的真实文件、不替换链接，而备份始终留在 `~/.codex/` 下。
 - **模型条目是照 codex 官方字段手写的迷你条目**（GLM / DeepSeek 官方 Codex 接入文档 + cc-switch 跨版本实测的最小模板）：`shell_type: "shell_command"`、`apply_patch_tool_type: "freeform"`、一句中性的 `base_instructions`（codex 把它当必填字段），并带 `supports_reasoning_summaries` 与 `supports_parallel_tool_calls` 两个**老版 codex 会当必填**的字段。所以每个模型只要 **~1.5KB**，也**不会**把 GPT 专属的东西（`code_mode_only`、`use_responses_lite`、872k 上下文窗口、62KB 的 GPT harness）塞给第三方模型。上下文窗口用 codex 给未知模型的默认值 272000，想按模型写真实值直接改 `apim-models.json`。
 - **校验用你本机的 codex**：写完让它自己解析一遍新配置（`codex debug models`），勾选的模型都在才算导入成功。
 - **只支持 Responses 协议**：Codex 0.134+ 已经删掉 `wire_api = "chat"`，中转站必须提供 `/v1/responses`，否则一律 400。面板**不替你做端点能力判断** —— 它列出的模型列表和密钥表按 `m` 看到的完全一致（同一个接口、同一份解析），你勾哪些就导哪些。

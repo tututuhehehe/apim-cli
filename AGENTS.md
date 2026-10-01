@@ -107,6 +107,7 @@ recipes/              内置 recipe ×4（deepseek/openai/moonshot/openrouter，
     - **写盘顺序与回滚**：先 `config_file::read/apply`（纯内存，失败时磁盘没动）→ 写目录 → 写 config → 校验；校验不过要用备份把两处改动都还原（否则用户看到「导入失败」，codex 配置其实已切到新厂商）。
     - **密钥落盘权限一律 600，且必须「建文件时就 600」**（`OpenOptions::mode`，不要 `fs::write` + `chmod`：中间有 0644 窗口）。`~/.codex/config.toml` 与它的 `.apim.bak` 备份里都有 `experimental_bearer_token`，用 `fs::write` 会按 umask 摊成 0644 = 密钥副本全机可读。
     - **杀 codex daemon 要能只杀 daemon**：`is_codex_server` 只认「可执行文件名正好是 codex + 第一个参数是 `app-server`」；扫「任意 token」会把 `codex --profile app-server` 这类用户会话也杀掉。只扫描一次、只杀扫描到的 pid（重扫会杀掉刚起、已加载新配置的 daemon）。
+    - **`config.toml` 是符号链接时要跟随写入**（dotfiles 常这么管）：直接在链接路径上 tmp + rename 会把链接替换成普通文件、与仓库版本分叉；但**备份不跟随**，始终放 `~/.codex/` 下，免得含 token 的备份落进用户的 dotfiles 仓库。
     - **导入后必须让 codex 重启才能生效**：codex 的模型目录（`model_catalog_json`）只在 app-server daemon 启动时读一次，之后一直缓存（TUI 和桌面端都挂同一个 daemon）。实测现象：不重启时 `codex exec` 已能用新模型、但 `/model` 里还是旧的内置 GPT 表。cc-switch 的 v3.16.1 release notes 也只是提示用户重启；apim 做得更直接：导入成功后杀在跑的 `codex app-server`（`APIM_NO_RESTART_CODEX=1` 可关）。找进程必须**严格匹配**「可执行文件名正好是 codex + 参数里有 `app-server`」，只按命令行 contains 会把 `ps | grep codex app-server` 这种无关进程也杀掉（已加单测守）。
     - 改写 `~/.codex/config.toml` **必须用 `toml_edit`**（`toml` 序列化会丢注释），写前备份成 `config.toml.apim.bak`，再 tmp + rename。注意加注释要挂在 **key 的 decor**（`leaf_decor_mut`）上，挂到 value 的 decor 会把值挤到下一行、产出非法 TOML。
     - `wire_api` 只接受 `"responses"`（0.134+ 删了 `"chat"`，写了会硬报错）→ 中转站得提供 `/v1/responses`；**导入面板的模型列表必须与 `m` 键完全一致**（同一个 `probe::fetch_models` / `parse_models`，只取模型名）；**不要做端点能力判断** —— `supported_endpoint_types` 是 new-api 后端的端点映射配置而非能力探测，实测会漏报（ikun 把 `gpt-6-sol` 标成只有 `openai`，实际 /responses 完全能用），照它筛会藏掉能用的模型。
@@ -114,7 +115,7 @@ recipes/              内置 recipe ×4（deepseek/openai/moonshot/openrouter，
     - 模型条目照官方字段**手写迷你条目**（GLM / DeepSeek 官方 Codex 文档 + cc-switch 实测模板）：`shell_type: shell_command`、`apply_patch_tool_type: freeform`、中性 `base_instructions`、`input_modalities` fail-open 给 `[text, image]`、上下文窗口用 codex 给未知模型的默认值 272000。**不要克隆 `codex debug models --bundled` 里的 GPT 条目** —— 那会带进 `code_mode_only`、`use_responses_lite`、`max_context_window: 872000` 和 62KB harness 提示词（v1 就是这么错的一版，目录 64KB/模型）。导入完用 `codex debug models` 反向校验勾选的模型都在（校验是硬前提，没装 codex 直接报错）。
     - 厂商 id 撞上保留名（`openai`/`ollama`/`lmstudio`/`amazon-bedrock*`）时加 `apim-` 前缀。
 
-12. **`apim update` 只认三条渠道**（install.sh / npm / Homebrew，见 `docs/RELEASING.md` 的速查表）：`src/cli/update.rs` 按可执行文件路径认渠道（npm 看 `node_modules/apim-cli`、brew 看 `Cellar/apim`，其余当 install.sh 装的裸二进制），裸二进制那条**复用官方 install.sh** 并把 `APIM_INSTALL_DIR` 钉在当前二进制的**真实位置**（先 canonicalize，否则符号链接会被替换掉）保证原地更新。**`target/` 下的开发构建与 `~/.cargo/bin` 里的 cargo 副本一律不更新**（前者会被 Release 覆盖掉开发二进制，后者是 `cargo install` 留下的、被 PATH 遮挡的多余副本）。加渠道要同时改 `Channel`、测试和 RELEASING 的表。
+12. **`apim update` 只认三条渠道**（install.sh / npm / Homebrew，见 `docs/RELEASING.md` 的速查表）：`src/cli/update.rs` 按可执行文件路径认渠道（npm 看 `node_modules/apim-cli`、brew 看 `Cellar/apim`，其余当 install.sh 装的裸二进制），裸二进制那条复用官方 install.sh，但**不是 `curl | sh`**：URL 钉到本次要更新到的 tag、下载到临时文件、先做形状校验（是 shell 脚本 / 是本仓库安装器 / 含 sha256 校验）、再按 Release 发布的 `install.sh.sha256` 校验摘要（**拿不到摘要就拒绝执行**），最后用 `sh <file>` 跑；`APIM_INSTALL_DIR` 钉在当前二进制的**真实位置**（先 canonicalize，否则符号链接会被替换掉）保证原地更新。**`target/` 下的开发构建与 `~/.cargo/bin` 里的 cargo 副本一律不更新**（前者会被 Release 覆盖掉开发二进制，后者是 `cargo install` 留下的、被 PATH 遮挡的多余副本）。加渠道要同时改 `Channel`、测试和 RELEASING 的表。
 
 ## 验证命令速查
 

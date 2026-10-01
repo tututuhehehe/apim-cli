@@ -103,14 +103,34 @@ pub fn backup_path_of(path: &Path) -> PathBuf {
     ))
 }
 
+/// 真正要写进去的那个文件。
+///
+/// 目标若是符号链接（dotfiles 常这么管 `~/.codex`），跟随到真实文件再写：
+/// 直接在链接路径上 tmp + rename 会把**链接本身**替换成普通文件，dotfiles 仓库里的版本
+/// 与现场就此分叉（`chezmoi apply` 之后又会被改回去）。
+/// 链接指向不存在的位置（悬空链接）时 canonicalize 会失败，那就就地问写。
+fn resolve_write_target(path: &Path) -> PathBuf {
+    let is_symlink = std::fs::symlink_metadata(path)
+        .map(|meta| meta.file_type().is_symlink())
+        .unwrap_or(false);
+    if is_symlink {
+        std::fs::canonicalize(path).unwrap_or_else(|_| path.to_path_buf())
+    } else {
+        path.to_path_buf()
+    }
+}
+
 /// 原子写入：先把现有内容备份成 `<config.toml>.apim.bak`，再原子替换。
 /// 返回备份文件路径（原文件不存在时为 None）。
 ///
 /// 备份与正文都走 `config::write_private`：这份配置里有 `experimental_bearer_token`，
 /// 权限必须**建文件时**就是 600 —— `fs::write` 会按 umask 落成 0644，
 /// 等于把密钥复制一份给全机可读（且旧 key 会长期留在备份里，轮换也没用）。
+/// 备份**不**跟随符号链接，始终放在传入路径旁边（`~/.codex/`）：
+/// 否则一个含 token 的备份就会落到用户的 dotfiles 仓库里，反而多一个泄露面。
 pub fn write(path: &Path, text: &str) -> Result<Option<PathBuf>, String> {
-    let backup = match fs::read_to_string(path) {
+    let target = resolve_write_target(path);
+    let backup = match fs::read_to_string(&target) {
         Ok(old) => {
             let backup = backup_path_of(path);
             crate::config::write_private(&backup, &old)
@@ -118,10 +138,10 @@ pub fn write(path: &Path, text: &str) -> Result<Option<PathBuf>, String> {
             Some(backup)
         }
         Err(err) if err.kind() == std::io::ErrorKind::NotFound => None,
-        Err(err) => return Err(format!("读取 {} 失败：{err}", path.display())),
+        Err(err) => return Err(format!("读取 {} 失败：{err}", target.display())),
     };
 
-    crate::config::write_private(path, text)
-        .map_err(|err| format!("写 {} 失败：{err}", path.display()))?;
+    crate::config::write_private(&target, text)
+        .map_err(|err| format!("写 {} 失败：{err}", target.display()))?;
     Ok(backup)
 }
