@@ -217,7 +217,7 @@ apim status glm --json
 
 几个刻意的选择：
 
-- **密钥行上的 ★ 是现场读出来的，不是 apim 记着的**。apim **不存**「上次导入了谁」：启动时、按 `r` 刷新时、每次导入成功后，都重新读一遍 codex 自己的配置（顶层 `model_provider` → 那个 `[model_providers.<id>]` 块），拿里面的 `experimental_bearer_token`（该块用 `env_key` 取 token 时则拿 `base_url`）与 apim 的密钥对账，**真正在用的**那把才带 `★C`（`C` 是客户端的短标，取自 `Agent::badge()`；多个客户端都用同一把时会叠成 `★C,P`）。手改了 codex 配置（换 token、把 `model_provider` 切走、删掉那个块），下次刷新 ★ 就跟着消失，不会骗你。
+- **密钥行上的 ★ 是现场读出来的，不是 apim 记着的**。apim **不存**「上次导入了谁」：启动时、切厂商（`j`/`k`）时、按 `r` 刷新时、5 分钟自动刷新时、每次导入成功后，都重新读一遍 codex 自己的配置（顶层 `model_provider` → 那个 `[model_providers.<id>]` 块），拿里面的 `experimental_bearer_token`（该块用 `env_key` 取 token 时则拿 `base_url`）与 apim 的密钥对账，**真正在用的**那把才带 `★C`（`C` 是客户端的短标，取自 `Agent::badge()`；多个客户端都用同一把时会叠成 `★C,P`）。手改了 codex 配置（换 token、把 `model_provider` 切走、删掉那个块），下次刷新 ★ 就跟着消失，不会骗你。
 - **只切换激活项，不删旧配置**。Codex 允许 `config.toml` 里同时存在多个 `[model_providers.*]`，但同一时刻只有 `model_provider` 指向的那一个生效。所以导入新厂商时旧的 provider 块原样保留（想切回去改一下 `model_provider` 就行），你手写的注释、`[projects.*]`、`[tui]` 也不会被重写。
 - **代价：旧块里的旧 token 也一起留着**。apim 不会清理旧 provider 块，所以切走之后那个厂商的 `experimental_bearer_token` 仍然明文躺在 `~/.codex/config.toml` 里 —— 不打算再用就手动删掉那个块（或在那个厂商侧轮换/吊销这把 key）。
 - **密钥直接写进 `experimental_bearer_token`**。`~/.codex/config.toml` 本来就是 600 权限。在 apim 里轮换这把 key 后，记得重新按一次 `x` 同步。

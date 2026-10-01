@@ -385,8 +385,7 @@ impl App {
         match self.focus {
             Focus::Providers => {
                 if self.selected_provider > 0 {
-                    self.selected_provider -= 1;
-                    self.selected_key = 0;
+                    self.select_provider(self.selected_provider - 1);
                 }
             }
             Focus::Keys => {
@@ -401,8 +400,7 @@ impl App {
         match self.focus {
             Focus::Providers => {
                 if self.selected_provider + 1 < self.provider_ids_filtered().len() {
-                    self.selected_provider += 1;
-                    self.selected_key = 0;
+                    self.select_provider(self.selected_provider + 1);
                 }
             }
             Focus::Keys => {
@@ -412,6 +410,16 @@ impl App {
                 }
             }
         }
+    }
+
+    /// 选中另一个厂商（`j`/`k`/方向键切厂商都走这里）。
+    ///
+    /// 顺手把 ★ 的现场重算一遍：用户常常在另一个窗口/编辑器里手改了客户端配置再切回来，
+    /// 按一下键就该看到真话，不用等 `r` 或 5 分钟的自动刷新（只读一个小文件，无网络）。
+    fn select_provider(&mut self, pos: usize) {
+        self.selected_provider = pos;
+        self.selected_key = 0;
+        self.refresh_active_keys();
     }
 
     pub fn toggle_focus(&mut self) {
@@ -928,6 +936,33 @@ pub(crate) mod tests {
         app.selected_provider = 0;
         app.move_down();
         assert_eq!(app.selected_provider, 0, "过滤后只有一项，不应移动");
+    }
+
+    /// 切厂商（`j`/`k`）时顺手重算 ★ 现场：用户在别的窗口手改了客户端配置，
+    /// 切回来按一下键就该看到真话，不用等 `r` 或 5 分钟自动刷新。
+    #[test]
+    fn switching_provider_rechecks_what_the_clients_use() {
+        let (mut app, _rx, _rx_models) = test_app(&[("alpha", &["a1"]), ("beta", &["b1"])]);
+        app.focus = Focus::Providers;
+        // 启动时读到的现场里没人被用；随后用户在另一个窗口把 codex 切到了 beta
+        assert!(app.agents_using("beta.b1").is_empty());
+        let home = app.agent_homes[&Agent::Codex].clone();
+        std::fs::write(
+            home.join("config.toml"),
+            "model_provider = \"beta\"\n\n[model_providers.beta]\n\
+             base_url = \"https://example.invalid/v1\"\n\
+             experimental_bearer_token = \"sk-test-placeholder\"\n",
+        )
+        .unwrap();
+
+        app.move_down();
+
+        assert_eq!(app.current_provider_id(), Some("beta"), "应切到了 beta");
+        assert_eq!(
+            app.agents_using("beta.b1"),
+            vec![Agent::Codex],
+            "切厂商时应重算 ★，不要等 r 或自动刷新"
+        );
     }
 
     #[test]
