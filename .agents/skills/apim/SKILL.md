@@ -28,6 +28,7 @@ apim status [<provider>] [--json]        # 并发真实探活 + 额度（跑绑�
 apim copy <厂商.别名> [--base-url]       # 复制密钥 / Base URL
 apim use <厂商.别名>                     # 输出 export OPENAI_API_KEY=... OPENAI_BASE_URL=...
 apim update [--check] [--force] [--json] # 认渠道（npm/Homebrew/install.sh）后从原渠道更新自己
+apim uninstall [--yes] [--purge] [--dry-run] [--json]  # 从原渠道卸掉自己（--purge 连配置+密钥一起删）
 ```
 
 要点：

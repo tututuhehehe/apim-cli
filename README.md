@@ -70,7 +70,16 @@ apim uninstall --purge     # also deletes ~/.config/apim (config, recipes, scrip
 apim uninstall --yes       # skip the prompt (scripts / non-interactive)
 ```
 
-Your keys are **not** deleted unless you pass `--purge`, and `--purge` refuses any directory whose name is not `apim`. Two things it deliberately leaves alone: files under `~/.codex/` written by the one-click import (`apim-models.json`, and the `[model_providers.apim-*]` block plus the `model_provider` / `model_catalog_json` pointers in `config.toml`) — they share a file with your hand-written config, so apim only reports them; and anything in your shell rc / `PATH` (install.sh never writes those).
+Your keys are **not** deleted unless you pass `--purge`, and `--purge` refuses any directory whose name is not `apim` (and refuses to recurse into a symlinked config dir, so a dotfiles-managed `~/.config/apim` is left to you). `--dry-run` prints every path it would touch — including the symlink target when apim was installed through one; `--json` has the same shape in every case (on a dev build / `cargo install` copy it reports `channel: null` and exits non-zero instead of silently doing nothing).
+
+What it deliberately leaves alone: anything in your shell rc / `PATH` (install.sh never writes those), and the files under `~/.codex/` written by the [one-click import](#one-click-import-into-codex) — they share a file with your hand-written config, so apim only reports them. To finish that cleanup by hand:
+
+```bash
+rm ~/.codex/apim-models.json              # 1. the model catalog apim generated
+# 2. in ~/.codex/config.toml: drop the [model_providers.apim-*] blocks plus the
+#    top-level model_provider / model_catalog_json pointers
+rm ~/.codex/config.toml.apim.bak          # 3. the pre-edit backup — it holds a bearer token too
+```
 
 ## Usage
 

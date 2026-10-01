@@ -129,13 +129,13 @@ async fn run_channel_update(
             if !json {
                 println!("\n→ npm 渠道：npm install -g apim-cli@latest");
             }
-            run_tool("npm", &["install", "-g", "apim-cli@latest"], "npm")?;
+            run_tool("npm", &["install", "-g", "apim-cli@latest"], "更新")?;
         }
         Channel::Homebrew => {
             if !json {
                 println!("\n→ Homebrew 渠道：brew upgrade apim");
             }
-            run_tool("brew", &["upgrade", "apim"], "brew")?;
+            run_tool("brew", &["upgrade", "apim"], "更新")?;
         }
         Channel::Binary => {
             #[cfg(windows)]
@@ -159,13 +159,23 @@ async fn run_channel_update(
     Ok(())
 }
 
-/// 跑一个外部工具（npm / brew），失败时给出手动命令。
-fn run_tool(tool: &str, args: &[&str], label: &str) -> Result<()> {
+/// 跑一个外部工具（npm / brew），失败时给出手动命令。`action` 是「更新」/「卸载」这类动词 ——
+/// `apim uninstall` 复用这一个实现（两种场景失败后的做法完全一样：报退出码 + 给一条手动命令）。
+pub(crate) fn run_tool(tool: &str, args: &[&str], action: &str) -> Result<()> {
     match run_command(tool, args, None, &[]) {
         Ok(_) => Ok(()),
-        Err(RunError::Exited(code)) => bail!("{label} 更新失败（退出码 {}）", code.unwrap_or(-1)),
+        Err(RunError::Exited(code)) => bail!(
+            "{tool} {action}失败（退出码 {}）；手动执行：{} {}",
+            code.unwrap_or(-1),
+            tool,
+            args.join(" ")
+        ),
         Err(RunError::Spawn(err)) => {
-            bail!("跑不了 {tool}（{err}）；手动执行：{}", args.join(" "))
+            bail!(
+                "跑不了 {tool}（{err}）；手动执行：{} {}",
+                tool,
+                args.join(" ")
+            )
         }
     }
 }

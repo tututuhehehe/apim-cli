@@ -106,10 +106,9 @@ pub(crate) async fn run(argv: &[String]) -> Result<()> {
         Some("status") => query::status(&ctx, rest).await,
         Some("copy") => query::copy(&ctx, rest),
         Some("use") => query::use_env(&ctx, rest),
-        // update / uninstall 不需要配置目录（uninstall 只用默认配置目录路径），
-        // 但共用同一个分发入口（认渠道 → 走同一条渠道更新 / 卸载）
+        // update / uninstall 都靠「认渠道」干活，共用同一个分发入口
         Some("update") | Some("upgrade") => update::run(&Args::parse(rest)?).await,
-        Some("uninstall") => uninstall::run(&Args::parse(rest)?),
+        Some("uninstall") => uninstall::run(&ctx, &Args::parse(rest)?),
         _ => {
             print_help();
             bail!("未知命令，见上方用法");

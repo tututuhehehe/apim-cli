@@ -68,7 +68,16 @@ apim uninstall --purge     # 连 ~/.config/apim（config、recipes、scripts、s
 apim uninstall --yes       # 跳过确认（脚本 / 非交互）
 ```
 
-**密钥不会因为卸载而消失**（不加 `--purge` 就不动配置目录）；`--purge` 也只删目录名正好是 `apim` 的目录。两处故意不碰：一键导入写进 `~/.codex/` 的内容（`apim-models.json`，以及 `config.toml` 里的 `[model_providers.apim-*]` 块和 `model_provider` / `model_catalog_json` 指针）—— 它们和你手写的配置在同一个文件里，只能提示不能代删；以及 shell rc / `PATH`（install.sh 从不写 rc）。
+**密钥不会因为卸载而消失**（不加 `--purge` 就不动配置目录）；`--purge` 只删目录名正好是 `apim` 的目录，而且**不递归删软链**（dotfiles 托管 `~/.config/apim` 的情况留给你自己处理）。`--dry-run` 会把要动的每一个路径都列出来（用软链装的就包括真身）；`--json` 在各种情况下形状一致（开发构建 / cargo 副本会报 `channel: null` 并以非零退出，而不是默默什么都不做）。
+
+两处故意不碰：shell rc / `PATH`（install.sh 从不写 rc），以及一键导入写进 `~/.codex/` 的内容 —— 它们和你手写的配置在同一个文件里，只能提示不能代删。要手动收尾：
+
+```bash
+rm ~/.codex/apim-models.json              # 1. apim 生成的模型目录
+# 2. ~/.codex/config.toml 里：删掉 [model_providers.apim-*] 块，以及顶层的
+#    model_provider / model_catalog_json 指针
+rm ~/.codex/config.toml.apim.bak          # 3. 改写前的备份，里面也有明文密钥
+```
 
 ## 使用
 

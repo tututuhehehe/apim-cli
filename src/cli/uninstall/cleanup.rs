@@ -1,33 +1,53 @@
-//! 卸载时真正落在文件系统上的动作：删程序（含软链）、删配置目录（`--purge`）、
+//! 卸载时真正落在文件系统上的动作：删程序（含软链链）、删配置目录（`--purge`）、
 //! 顺带探一下 `~/.codex` 里的残留。
 //!
 //! 这里的函数都尽量「幂等 + 可解释」：文件已经不在算成功（重复卸载不报错），
-//! 没权限则给 sudo 的出路，目标长得不像 apim 的东西一律拒绝删。
+//! 没权限则给 sudo 的出路，长得不像 apim 的东西一律不删。
 
 use std::fs;
 use std::path::{Path, PathBuf};
 
 use anyhow::{Context, Result, bail};
 
-/// 卸载要动的路径：程序本体，调用路径本身是软链时连真身一起
-/// （只删真身会留下断链 —— `~/.local/bin/apim` → 别处这种布局）。
-/// 必须在删之前调用：删完 `canonicalize` 就解析不出来了。
+/// 跟软链最多跟这么多跳就停（软链成环时不至于死循环）。
+const MAX_LINK_HOPS: usize = 8;
+
+/// 卸载要动的路径：调用路径本身 + 顺着软链一路跟下来的每一跳。
+/// 只删真身会把链留成断链（`~/.local/bin/apim` → 别处这种布局），多级链同理。
+/// 必须在删之前调用：删完 `read_link` 就解析不出来了。
 pub(super) fn binary_targets(exe: &Path) -> Vec<PathBuf> {
     let mut targets = vec![exe.to_path_buf()];
-    let is_link = fs::symlink_metadata(exe)
-        .map(|meta| meta.file_type().is_symlink())
-        .unwrap_or(false);
-    if is_link {
-        if let Ok(real) = exe.canonicalize() {
-            if real != exe {
-                targets.push(real);
-            }
+    let mut current = exe.to_path_buf();
+    for _ in 0..MAX_LINK_HOPS {
+        if !is_symlink(&current) {
+            break;
         }
+        let Ok(next) = fs::read_link(&current) else {
+            break;
+        };
+        // read_link 给的是原样目标：相对路径按「链接所在目录」解析
+        let next = match current.parent() {
+            Some(parent) if next.is_relative() => parent.join(next),
+            _ => next,
+        };
+        if targets.contains(&next) {
+            break; // 成环
+        }
+        targets.push(next.clone());
+        current = next;
     }
     targets
 }
 
-/// install.sh 渠道：删裸二进制。
+fn is_symlink(path: &Path) -> bool {
+    fs::symlink_metadata(path)
+        .map(|meta| meta.file_type().is_symlink())
+        .unwrap_or(false)
+}
+
+/// install.sh 渠道：删裸二进制（链上叫 apim 的每一跳都删）。
+/// 链指向别的名字的程序（用户把 apim 链到自己的脚本）时**不碰那个真身** ——
+/// 那种情况只删链，剩下的留给用户自己处理（`run` 会把仍在磁盘上的路径报出来）。
 pub(super) fn remove_binary(exe: &Path) -> Result<()> {
     if !is_expected_name(exe) {
         bail!(
@@ -47,14 +67,16 @@ pub(super) fn remove_binary(exe: &Path) -> Result<()> {
     #[cfg(not(windows))]
     {
         for path in binary_targets(exe) {
-            remove_file_quietly(&path)?;
+            if is_expected_name(&path) {
+                remove_file_quietly(&path)?;
+            }
         }
         Ok(())
     }
 }
 
 /// 文件名必须是 apim（Windows 下 apim.exe）—— 再兜一层，免得把用户目录里同名的别的东西删了。
-fn is_expected_name(path: &Path) -> bool {
+pub(super) fn is_expected_name(path: &Path) -> bool {
     let name = path
         .file_name()
         .map(|n| n.to_string_lossy().to_ascii_lowercase())
@@ -67,8 +89,10 @@ fn remove_file_quietly(path: &Path) -> Result<()> {
     match fs::remove_file(path) {
         Ok(()) => Ok(()),
         Err(err) if err.kind() == std::io::ErrorKind::NotFound => Ok(()),
+        // 只提示 `sudo rm 这一个文件`：`sudo apim uninstall` 会连 HOME 一起换掉，
+        // --purge 就指到 /var/root 去了，反而给人「已经清干净」的错觉。
         Err(err) if err.kind() == std::io::ErrorKind::PermissionDenied => bail!(
-            "没有权限删除 {}：{err}\n  用 sudo 重跑 `apim uninstall --yes`，或手动：sudo rm {}",
+            "没有权限删除 {}：{err}\n  用管理员身份单独删这个文件：sudo rm {}",
             path.display(),
             path.display()
         ),
@@ -79,7 +103,8 @@ fn remove_file_quietly(path: &Path) -> Result<()> {
 /// 校验 `--purge` 的目标：目录名必须是 `apim`。`APIM_CONFIG_DIR` 指到别处时宁可拒绝，
 /// 也不冒着 `rm -rf` 删错目录的风险。
 pub(super) fn check_purge_target(dir: &Path) -> Result<()> {
-    if !dir.exists() {
+    // 用 symlink_metadata：名字也要管到「断掉的软链」，不能因为链断了就当它不存在
+    if fs::symlink_metadata(dir).is_err() {
         return Ok(());
     }
     let name = dir
@@ -99,10 +124,27 @@ pub(super) fn check_purge_target(dir: &Path) -> Result<()> {
 /// 删配置目录（`--purge`）：config.toml / secrets.toml / recipes / scripts 全在里面。
 pub(super) fn purge_config_dir(dir: &Path) -> Result<Option<String>> {
     check_purge_target(dir)?;
-    if !dir.exists() {
+    if fs::symlink_metadata(dir).is_err() {
         return Ok(None);
     }
-    fs::remove_dir_all(dir).with_context(|| format!("删除配置目录 {}", dir.display()))?;
+    // 配置目录是软链（dotfiles 常这么管）时拒绝：`remove_dir_all` 对软链是删链还是跟进去删
+    // 不值得赌 —— 前者会「报告已删密钥、真身还在」，后者会把用户的 dotfiles 仓库删了。
+    if is_symlink(dir) {
+        bail!(
+            "{} 是软链（指向 {}），apim 不递归删软链。确认要删就自己动手：rm -rf {}",
+            dir.display(),
+            fs::read_link(dir)
+                .map(|target| target.display().to_string())
+                .unwrap_or_else(|_| "?".into()),
+            dir.display()
+        );
+    }
+    fs::remove_dir_all(dir).with_context(|| {
+        format!(
+            "删除配置目录 {}（别用 sudo：sudo 下 HOME 会变，可能指到别的目录）",
+            dir.display()
+        )
+    })?;
     Ok(Some(dir.display().to_string()))
 }
 
@@ -114,6 +156,7 @@ pub(super) fn codex_leftovers() -> Vec<String> {
 pub(super) fn codex_leftovers_in(home: &Path) -> Vec<String> {
     let catalog = home.join("apim-models.json");
     let config = home.join("config.toml");
+    let backup = home.join("config.toml.apim.bak");
     let mut out = Vec::new();
     if catalog.exists() {
         out.push(catalog.display().to_string());
@@ -126,6 +169,13 @@ pub(super) fn codex_leftovers_in(home: &Path) -> Vec<String> {
                 config.display()
             ));
         }
+    }
+    // 约定 11：改写前的备份里同样有 experimental_bearer_token（明文密钥），必须一起报
+    if backup.exists() {
+        out.push(format!(
+            "{}（apim 改写 config.toml 前留的备份，里面也有密钥）",
+            backup.display()
+        ));
     }
     out
 }
