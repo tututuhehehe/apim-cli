@@ -25,8 +25,9 @@ use std::process::{Command, ExitStatus};
 
 use anyhow::{Result, bail};
 
-pub(crate) use channel::Channel;
-use channel::detect_channel;
+// `Channel` / `detect_channel` 也被 `apim uninstall` 复用（卸载同样只认这三条渠道），
+// `run_command` / `RunError` 是两处共用的「跑外部命令」小工具。
+pub(crate) use channel::{Channel, detect_channel};
 use http::latest_tag;
 
 /// 仓库与安装脚本：与 Cargo.toml 的 `repository` / `install.sh` 保持一致。
@@ -171,7 +172,7 @@ fn run_tool(tool: &str, args: &[&str], label: &str) -> Result<()> {
 
 /// 外部命令的两种失败：程序根本没启动起来（没装 / 不在 PATH 里），与启动了但退出码非 0。
 /// 分开返回，让三处调用（npm/brew、install.sh 的 `sh`、校验摘要的 `shasum`）各自给出对用户有用的做法。
-enum RunError {
+pub(crate) enum RunError {
     /// 跑起来了，但退出码非 0（被信号杀掉时没有退出码）。
     Exited(Option<i32>),
     /// 连启动都没成功。
@@ -180,7 +181,7 @@ enum RunError {
 
 /// 跑一个外部命令：只管启动、取退出码与分辨上面两种失败。`cwd` / `envs` 允许为空
 /// （校验摘要在工作目录里跑，install.sh 要注入 `APIM_INSTALL_DIR`）。
-fn run_command<A>(
+pub(crate) fn run_command<A>(
     program: &str,
     args: A,
     cwd: Option<&Path>,

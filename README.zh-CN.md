@@ -57,6 +57,19 @@ cargo install --path .
 
 Rust 用户也可以 `cargo binstall apim` 直接拉预编译二进制（crate 已配好 binstall 元数据，发布到 crates.io 后即可用）。
 
+### 卸载
+
+`apim uninstall` 与 `apim update` 认同一套渠道，从当初装它的那条渠道卸掉：npm 走 `npm uninstall -g apim-cli`、Homebrew 走 `brew uninstall apim`、install.sh 装的裸二进制直接删（是软链就把链一起删，不留断链）。`target/` 下的开发构建与 `~/.cargo/bin` 里的 cargo 副本一律不删。
+
+```bash
+apim uninstall --dry-run   # 只报告会删什么，不动手
+apim uninstall             # 先确认再卸，密钥保留
+apim uninstall --purge     # 连 ~/.config/apim（config、recipes、scripts、secrets）一起删
+apim uninstall --yes       # 跳过确认（脚本 / 非交互）
+```
+
+**密钥不会因为卸载而消失**（不加 `--purge` 就不动配置目录）；`--purge` 也只删目录名正好是 `apim` 的目录。两处故意不碰：一键导入写进 `~/.codex/` 的内容（`apim-models.json`，以及 `config.toml` 里的 `[model_providers.apim-*]` 块和 `model_provider` / `model_catalog_json` 指针）—— 它们和你手写的配置在同一个文件里，只能提示不能代删；以及 shell rc / `PATH`（install.sh 从不写 rc）。
+
 ## 使用
 
 ```bash
@@ -141,6 +154,7 @@ TUI 管人，CLI 管机器：`cargo install --path .` 之后所有操作都能�
 | `apim copy <厂商.别名> [--base-url]` | 复制密钥 / Base URL 到剪贴板 |
 | `apim use <厂商.别名>` | 输出 `export OPENAI_API_KEY=... OPENAI_BASE_URL=...`（`eval $(apim use x)` 用） |
 | `apim update [--check] [--force] [--json]` | 自动识别当前是从哪条渠道装的（**npm / Homebrew / install.sh**），走同一条渠道更新。install.sh 渠道会下载**该 tag 的**官方脚本、校验 sha256 之后才执行（不是 `curl \| sh`）。`--check` 只报当前/最新版本不动手；`--force` 版本相同时也重装一遍 |
+| `apim uninstall [--yes] [--purge] [--dry-run] [--json]` | 从同一条渠道卸载（见[卸载](#卸载)）。不加 `--purge` 密钥照旧保留；`--dry-run` 只报告；`--yes` 跳过确认 |
 
 **密钥安全**：token 一律走 stdin，不进命令行参数（防 `ps` 和 shell history）：
 

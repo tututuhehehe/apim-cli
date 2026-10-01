@@ -4,6 +4,7 @@
 pub(crate) mod keys;
 pub(crate) mod provider;
 pub(crate) mod query;
+pub(crate) mod uninstall;
 pub(crate) mod update;
 
 use std::collections::HashMap;
@@ -105,8 +106,10 @@ pub(crate) async fn run(argv: &[String]) -> Result<()> {
         Some("status") => query::status(&ctx, rest).await,
         Some("copy") => query::copy(&ctx, rest),
         Some("use") => query::use_env(&ctx, rest),
-        // update 不需要配置目录，但共用同一个分发入口（认渠道 → 走同一条渠道更新）
+        // update / uninstall 不需要配置目录（uninstall 只用默认配置目录路径），
+        // 但共用同一个分发入口（认渠道 → 走同一条渠道更新 / 卸载）
         Some("update") | Some("upgrade") => update::run(&Args::parse(rest)?).await,
+        Some("uninstall") => uninstall::run(&Args::parse(rest)?),
         _ => {
             print_help();
             bail!("未知命令，见上方用法");
@@ -135,6 +138,7 @@ pub(crate) fn print_help() {
          \x20 apim use <厂商.别名>                   # 输出 export OPENAI_API_KEY=... （shell eval 用）\n\
          自维护：\n\
          \x20 apim update [--check] [--force] [--json]   # 认安装渠道（npm/Homebrew/install.sh）后从原渠道更新\n\
+         \x20 apim uninstall [--yes] [--purge] [--dry-run] [--json]   # 从原渠道卸载（默认留数据，--purge 连配置+密钥一起删）\n\
          \n\
          apim --version                            # 打印版本\n\
          别名：apim tui = 无参数；apim keys = apim key；provider list/remove = ls/rm；upgrade = update。"

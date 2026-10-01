@@ -59,6 +59,19 @@ cargo install --path .
 
 Rust users can also run `cargo binstall apim` to fetch the prebuilt binary — the crate is configured for it, and it starts working once the crate is published to crates.io.
 
+### Uninstall
+
+`apim uninstall` detects the same three channels as `apim update` and removes apim through the one that installed it — npm calls `npm uninstall -g apim-cli`, Homebrew calls `brew uninstall apim`, a plain install.sh binary is deleted (following a symlink so no dangling link is left behind). Dev builds under `target/` and `cargo install` copies in `~/.cargo/bin` are never deleted.
+
+```bash
+apim uninstall --dry-run   # report what would be removed, touch nothing
+apim uninstall             # asks for confirmation, keeps your keys
+apim uninstall --purge     # also deletes ~/.config/apim (config, recipes, scripts, secrets)
+apim uninstall --yes       # skip the prompt (scripts / non-interactive)
+```
+
+Your keys are **not** deleted unless you pass `--purge`, and `--purge` refuses any directory whose name is not `apim`. Two things it deliberately leaves alone: files under `~/.codex/` written by the one-click import (`apim-models.json`, and the `[model_providers.apim-*]` block plus the `model_provider` / `model_catalog_json` pointers in `config.toml`) — they share a file with your hand-written config, so apim only reports them; and anything in your shell rc / `PATH` (install.sh never writes those).
+
 ## Usage
 
 ```bash
@@ -143,6 +156,7 @@ The TUI is for humans, the CLI is for machines: after `cargo install --path .` e
 | `apim copy <provider.alias> [--base-url]` | Copy the key / base URL to the clipboard |
 | `apim use <provider.alias>` | Print `export OPENAI_API_KEY=... OPENAI_BASE_URL=...` (for `eval $(apim use x)`) |
 | `apim update [--check] [--force] [--json]` | Detects which channel installed this apim (**npm / Homebrew / install.sh**) and updates through the same one. The install.sh channel downloads **that release tag's** script and verifies its published sha256 before running it (no `curl \| sh`). `--check` only reports current-vs-latest; `--force` reinstalls even when versions match |
+| `apim uninstall [--yes] [--purge] [--dry-run] [--json]` | Uninstalls through the same channel detection (see [Uninstall](#uninstall)). Keys survive unless you add `--purge`; `--dry-run` only reports; `--yes` skips the confirmation prompt |
 
 **Key safety**: tokens always come from stdin, never from command-line arguments (so they never leak into `ps` or your shell history):
 

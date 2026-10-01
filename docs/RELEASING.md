@@ -133,4 +133,4 @@ brew test tututuhehehe/tap/apim
 
 > `cargo install apim` / `cargo binstall apim` 需要 crate 发布到 crates.io（`Cargo.toml` 的 `publish = false` 要先删）。binstall 元数据已配好，发布后即可用。
 
-> `apim update` 只认**三条**自动更新渠道：install.sh（裸二进制：下载**该 tag 的**官方脚本 → 形状校验 + 按 `install.sh.sha256` 校验摘要 → 再执行，钉住原安装目录）、npm（`npm install -g apim-cli@latest`）、Homebrew（`brew upgrade apim`）。**`target/` 下的开发构建与 `~/.cargo/bin` 里的 cargo 副本会被拒绝更新**（返回 None + 给指引），前者免得把开发二进制覆盖成 Release 版，后者是 `cargo install` 留下的多余副本 —— 所以上表里 `cargo install` / `cargo binstall` 那两行**不在** `apim update` 覆盖范围内。新增渠道时同步改 `src/cli/update.rs` 的 `Channel`、单测与本节。
+> `apim update` 只认**三条**自动更新渠道：install.sh（裸二进制：下载**该 tag 的**官方脚本 → 形状校验 + 按 `install.sh.sha256` 校验摘要 → 再执行，钉住原安装目录）、npm（`npm install -g apim-cli@latest`）、Homebrew（`brew upgrade apim`）。**`target/` 下的开发构建与 `~/.cargo/bin` 里的 cargo 副本会被拒绝更新**（返回 None + 给指引），前者免得把开发二进制覆盖成 Release 版，后者是 `cargo install` 留下的多余副本 —— 所以上表里 `cargo install` / `cargo binstall` 那两行**不在** `apim update` 覆盖范围内。新增渠道时同步改 `src/cli/update.rs` 的 `Channel`、单测与本节。`apim uninstall` 复用同一套渠道识别（`update::channel::detect_channel`），加渠道时不用单独适配 —— 但新渠道的卸载动作要补到 `src/cli/uninstall.rs` 的 `uninstall_program` 里。
