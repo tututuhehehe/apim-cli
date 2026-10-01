@@ -5,6 +5,22 @@
 
 ## [Unreleased]
 
+## [0.1.3] - 2026-10-01
+
+### 新增
+
+- **`apim uninstall`**：认出安装渠道（npm / Homebrew / install.sh 裸二进制）后从**原渠道**卸掉自己 ——
+  npm 走 `npm uninstall -g apim-cli`、Homebrew 走 `brew uninstall apim`、裸二进制直接删
+  （软链安装会把链一路删干净，链上不叫 `apim` 的真身不碰）。默认**只删程序、保留配置与密钥**；
+  `--purge` 才删 `~/.config/apim`（目录名不是 `apim`、或目录本身是软链时一律拒绝），
+  `--dry-run` 只报告要动的每一个路径，`--yes` 跳过确认，`--json` 给脚本用。
+  `target/` 下的开发构建与 `~/.cargo/bin` 里的 cargo 副本一律拒绝卸载（与 `apim update` 保持一致）
+
+### 变更
+
+- `apim update` 与 `apim uninstall` 共用同一套渠道识别与「跑外部命令」实现
+  （`Channel` / `detect_channel` / `run_tool`）—— 以后加渠道，卸载动作会被穷尽 `match` 拦下
+
 ## [0.1.2] - 2026-10-01
 
 ### 新增
@@ -76,7 +92,8 @@
 - `apim --version` 版本输出（供安装脚本与更新检测使用）
 - MIT 开源协议
 
-[Unreleased]: https://github.com/tututuhehehe/apim-cli/compare/v0.1.2...HEAD
+[Unreleased]: https://github.com/tututuhehehe/apim-cli/compare/v0.1.3...HEAD
+[0.1.3]: https://github.com/tututuhehehe/apim-cli/releases/tag/v0.1.3
 [0.1.2]: https://github.com/tututuhehehe/apim-cli/releases/tag/v0.1.2
 [0.1.1]: https://github.com/tututuhehehe/apim-cli/releases/tag/v0.1.1
 [0.1.0]: https://github.com/tututuhehehe/apim-cli/releases/tag/v0.1.0
