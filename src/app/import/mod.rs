@@ -8,8 +8,7 @@ use std::time::Instant;
 use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 
 use super::{App, Focus, Modal, TaskMsg};
-use crate::clients::codex::RestartReport;
-use crate::clients::{Agent, CodexState, ImportReport, ImportRequest};
+use crate::clients::{Agent, CodexState, ImportReport, ImportRequest, RestartReport};
 use crate::probe;
 
 /// 面板当前停在哪一步。
