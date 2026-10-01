@@ -197,11 +197,11 @@ echo 'your-key' | apim key add glm main
 apim status glm --json
 ```
 
-## One-click import into Codex
+## One-click import into Codex / Pi
 
-Select a key in the key table and press `x` to write "this key + its provider + the models you tick" into your Codex config — no more hand-editing `~/.codex/config.toml`. The panel has three steps: **pick a client** (Codex only for now) → **tick models** (same list as the `m` key; `space` toggles, `a` toggles all, `/` searches, `⏎` advances) → **pick the default model** (one of the models you ticked becomes `config.toml`'s `model`; `j`/`k` move, `h` goes back, `⏎` imports). With a single ticked model the third step is skipped automatically.
+Select a key in the key table and press `x` to write "this key + its provider + the models you tick" into a client config — no more hand-editing `~/.codex/config.toml`. The panel has three steps: **pick a client** (Codex or Pi) → **tick models** (same list as the `m` key; `space` toggles, `a` toggles all, `/` searches, `⏎` advances) → **pick the default model** (one of the models you ticked becomes the client's default; `j`/`k` move, `h` goes back, `⏎` imports). With a single ticked model the third step is skipped automatically.
 
-Before reporting success it makes **codex itself parse the new config** (`codex debug models`) and checks that every ticked model is there; on failure the reason is shown right in the panel.
+Before reporting success it makes **the client itself read the new config** (`codex debug models` / `pi --list-models`) and checks that every ticked model is there; on failure the reason is shown right in the panel.
 
 > **Codex reads the model catalog once, when its daemon starts, so `/model` only refreshes after a restart.** apim **restarts the codex app-server daemon for you** after a successful import (it kills the running one; codex spawns a fresh one on next launch) and says so in the toast. Set `APIM_NO_RESTART_CODEX=1` to disable that, then run `pkill -f "codex app-server"` yourself.
 >
@@ -234,7 +234,28 @@ Deliberate choices:
 
 > Requires `codex` on your machine (it is used to generate and verify the model catalog). apim finds it on `PATH`, or you can point `APIM_CODEX_BIN` at it.
 
-**Codex is the only target for now.** Adding another client (Claude Code / pi …) is a Rust-side change: one `Agent` variant + one `clients/<id>/` submodule + one dispatch arm — the panel needs no changes. There is deliberately **no YAML recipe for clients**: their config formats, auth variable names and reload mechanisms all differ, so they are not the same protocol (see AGENTS.md convention 13).
+### One-click import into Pi
+
+The same `x` panel targets **Pi** — pick `Pi` in step one. Pi takes a third-party provider as pure data (`models.json`), so apim writes:
+
+| Location | Content |
+|---|---|
+| `~/.pi/agent/models.json` → `providers.apim-<provider-id>` | `name` / `baseUrl` (`/v1` appended when missing) / `api = "openai-completions"` / `apiKey` / `models` (the ones you ticked) |
+| `~/.pi/agent/settings.json` | `defaultProvider` = `apim-<provider-id>`, `defaultModel` = the model you picked in step three |
+
+Deliberate choices:
+
+- **The provider key always carries an `apim-` prefix.** Pi ships a large set of built-in providers (`deepseek`, `openai`, `openrouter`, …) and a same-named `models.json` entry **overrides that built-in provider's `baseUrl`** — i.e. it would quietly point your OpenAI models at the relay. A prefix can never collide, and it also tells you at a glance which entries apim wrote.
+- **Only the keys apim owns are touched.** `headers`, `compat`, `modelOverrides`, `authHeader` and every other provider in `models.json`, plus every other setting in `settings.json`, are preserved (there are tests pinning this).
+- **Model entries are minimal** (`id`, `name`, `reasoning: true`, `input: [text, image]`) and let Pi fill in its own conservative defaults (128000 context, 16384 output, zero cost) — apim does not invent numbers. Edit `models.json` if you want the real per-model values.
+- **Mirrors Pi's own default-model save**: besides `defaultProvider`/`defaultModel`, a non-empty `enabledModels` gets `<provider>/<model>` appended — exactly what Pi does when you press `Ctrl+S` on a model. Without it, an import into a scoped setup would look successful but stay unselectable.
+- **Verification uses your installed pi**: after writing, apim runs `pi --list-models` and requires every ticked model to show up **under our provider key**; on failure both files are restored from their `.apim.bak` backups.
+- **Nothing to restart**: unlike Codex, Pi has no long-lived daemon — open `/model` (or relaunch) and the new provider is there.
+- **API keys only.** Pi's other path is subscription auth through `/login` (OAuth, credentials in `auth.json`); apim neither reads nor writes that.
+
+> Requires `pi` on your machine (it is used to verify the result). apim finds it on `PATH`, or you can point `APIM_PI_BIN` at it.
+
+**Adding yet another client** (Claude Code …) is a Rust-side change: one `Agent` variant + one `clients/<id>/` submodule (write / verify / reload / detect) + one dispatch arm — the panel needs no changes. There is deliberately **no YAML recipe for clients**: their config formats, auth variable names and reload mechanisms all differ, so they are not the same protocol (see AGENTS.md convention 13).
 
 ## Where the data lives
 
@@ -242,6 +263,8 @@ Everything lives under `~/.config/apim/`. TUI edits write these two files direct
 
 - `config.toml` — alias and group (no tokens)
 - `secrets.toml` — the actual tokens, keyed by `"provider.alias"`
+
+Import targets live outside that directory: `~/.codex/config.toml` + `~/.codex/apim-models.json` (Codex, backed up as `config.toml.apim.bak`) and `~/.pi/agent/models.json` + `~/.pi/agent/settings.json` (Pi, `PI_CODING_AGENT_DIR` overrides the directory, backups as `<name>.apim.bak`).
 
 Nothing apim-side records the import: the ★ marker on a key row is computed from the client's own config (see above).
 

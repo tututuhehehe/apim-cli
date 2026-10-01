@@ -1,24 +1,26 @@
-//! 导入期间对 codex home 的排他锁（`.apim-import.lock`）。
+//! 导入期间对客户端配置目录的排他锁（`.apim-import.lock`）。
 //!
-//! 锁覆盖「读 → 改 → 写 → 校验」整段：`config.toml` 是 read-modify-write，两个 apim
-//! 同时导入时，后写者会把前者刚加的 `[model_providers.<key>]` 块整段抹掉，而两边都报成功
+//! 锁覆盖「读 → 改 → 写 → 校验」整段：客户端的配置文件都是 read-modify-write
+//! （codex 的 `config.toml`、pi 的 `models.json`/`settings.json`），两个 apim 同时导入时，
+//! 后写者会把前者刚加的那个 provider 块整段抹掉，而两边都报成功
 //! （tmp 名带 pid 只保证不写坏文件，不保证不丢内容）。
 
 use std::path::{Path, PathBuf};
 
-/// 导入期间占住的锁文件名（放在 codex home 里）。
+/// 导入期间占住的锁文件名（放在客户端配置目录里）。
 const LOCK_FILE: &str = ".apim-import.lock";
 
 /// 导入锁。
 ///
 /// 进程崩溃留下的锁（里面记的 pid 已经不在）会被下一个实例认领，不会把用户永久锁在门外。
-pub(super) struct HomeLock {
+pub(crate) struct ImportLock {
     path: PathBuf,
 }
 
-impl HomeLock {
-    pub(super) fn acquire(home: &Path) -> Result<Self, String> {
-        let path = home.join(LOCK_FILE);
+impl ImportLock {
+    /// `label` 只用在报错文案里（“另一个 apim 正在改写 codex 配置”）。
+    pub(crate) fn acquire(dir: &Path, label: &str) -> Result<Self, String> {
+        let path = dir.join(LOCK_FILE);
         match create_lock_file(&path) {
             Ok(()) => Ok(Self { path }),
             Err(err) if err.kind() == std::io::ErrorKind::AlreadyExists => {
@@ -29,7 +31,7 @@ impl HomeLock {
                     }
                 }
                 Err(format!(
-                    "另一个 apim 正在改写 codex 配置（{}）；等它结束再试。\
+                    "另一个 apim 正在改写 {label} 配置（{}）；等它结束再试。\
                      若确认没有其它实例在跑，删掉这个文件即可",
                     path.display()
                 ))
@@ -39,7 +41,7 @@ impl HomeLock {
     }
 }
 
-impl Drop for HomeLock {
+impl Drop for ImportLock {
     fn drop(&mut self) {
         let _ = std::fs::remove_file(&self.path);
     }

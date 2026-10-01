@@ -3,7 +3,7 @@
 use std::fs;
 use std::path::{Path, PathBuf};
 
-use crate::clients::codex::ImportRequest;
+use crate::clients::ImportRequest;
 use crate::clients::codex::catalog::CATALOG_FILE;
 use crate::clients::codex::config_file;
 

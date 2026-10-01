@@ -165,5 +165,9 @@ mod tests {
             None,
             "别的密钥不该被贴上角标"
         );
+
+        // 两个客户端都用同一把：并排成 ★C,P（顺序同 Agent::ALL）
+        app.active_keys.insert(Agent::Pi, vec!["alpha.a1".into()]);
+        assert_eq!(import_badge(&app, "alpha.a1").as_deref(), Some("★C,P"));
     }
 }

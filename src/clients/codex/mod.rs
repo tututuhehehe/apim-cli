@@ -17,8 +17,7 @@
 //! - `lock`：导入期间对 codex home 的排他锁
 //! - `restart`：导入后重启 codex 的 app-server 守护进程
 //!
-//! 下面只再导出**模块外真的在用的**那几条 —— `clients/mod.rs` 经 [`crate::clients::Agent`]
-//! 调它们；测试（在同一个模块树里）直接经子模块路径取内部项（如
+//! 下面只再导出**模块外真的在用的**那几条 —— `clients/mod.rs` 经 [`crate::clients::Agent`]//! 调它们；测试（在同一个模块树里）直接经子模块路径取内部项（如
 //! `codex::import::import_in`），不再往外搬一层（在二进制 crate 里，没人用的 `pub use`
 //! 会被 `unused_imports` 判成警告）。
 
@@ -26,19 +25,14 @@ mod active;
 mod catalog;
 mod config_file;
 mod import;
-mod lock;
 mod restart;
 
 pub(crate) use active::active_key_ids;
 pub use catalog::DEFAULT_EFFORT;
-pub use import::{ImportReport, ImportRequest, import, normalize_base_url, provider_key};
+pub use import::{import, normalize_base_url, provider_key};
 pub use restart::{RestartReport, restart_daemon};
 
 use std::path::PathBuf;
-
-/// 每次导入前把现有 `config.toml` 备份到 `<config.toml>.apim.bak`，作为回滚锚点。
-/// （`config_file` 拼备份路径时用它。）
-const BACKUP_SUFFIX: &str = "apim.bak";
 
 /// 面板上显示的配置文件位置（尊重 `CODEX_HOME`，别写死 `~/.codex/...`）。
 pub fn config_hint() -> String {

@@ -7,7 +7,8 @@ use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 use super::*;
 use crate::app::Focus;
 use crate::app::tests::test_app;
-use crate::clients::{Agent, DEFAULT_EFFORT, ImportReport, RestartReport};
+use crate::clients::codex::DEFAULT_EFFORT;
+use crate::clients::{Agent, ImportReport, RestartReport};
 
 mod apply;
 mod flow;
@@ -82,8 +83,8 @@ fn report(models: &[&str], model: &str) -> ImportReport {
         provider_key: "alpha".into(),
         model: model.into(),
         models: models.iter().map(|name| (*name).to_string()).collect(),
-        reasoning_effort: DEFAULT_EFFORT.into(),
-        backup_path: None,
+        detail: Some(format!("强度 {DEFAULT_EFFORT}")),
+        backups: Vec::new(),
     }
 }
 

@@ -20,14 +20,21 @@ src/
 ├── browser.rs         用默认浏览器打开厂商主页（open/xdg-open，只放行 http(s)）
 ├── clients/           一键导入到外部客户端（agent）
 │   ├── mod.rs         Agent 注册表 + 分派（加客户端：加变体、加子模块、补这个 match）
-│   └── codex/         Codex 适配（mod.rs 只是门面：子模块声明 + 再导出 + codex_home/config_hint）
-│       ├── import.rs  ImportRequest/ImportReport、保留 id 加前缀、base_url 补 /v1、写入编排 + 回滚
-│       ├── lock.rs    codex home 排他锁（并发导入不互相覆盖）
-│       ├── restart.rs RestartReport、按进程表找 codex daemon 并重启（严格匹配 argv[2]）
-│       ├── config_file.rs  ~/.codex/config.toml 读改写（toml_edit 保注释保顺序）+ 备份 + 原子写
-│       ├── catalog.rs 模型目录：手写官方迷你条目（~1KB/模型）+ `codex debug models` 端到端校验
-│       ├── active.rs  回读 ~/.codex/config.toml 现场：现在在用哪把密钥（★ 角标）
-│       └── tests/     沙盒测试（按源码文件分）+ 真机 opt-in（`--ignored codex_real_end_to_end`）
+│   ├── lock.rs        导入期间对客户端配置目录的排他锁（codex/pi 共用）
+│   ├── file_io.rs     客户端配置文件公共落盘件：跟随符号链接 + 写前备份 + 原子 600
+│   ├── codex/         Codex 适配（mod.rs 只是门面：子模块声明 + 再导出 + codex_home/config_hint）
+│   │   ├── import.rs  写入编排 + 回滚（保留名加前缀、base_url 补 /v1）
+│   │   ├── restart.rs RestartReport、按进程表找 codex daemon 并重启（严格匹配 argv[2]）
+│   │   ├── config_file.rs  ~/.codex/config.toml 读改写（toml_edit 保注释保顺序）+ 备份 + 原子写
+│   │   ├── catalog.rs 模型目录：手写官方迷你条目（~1KB/模型）+ `codex debug models` 端到端校验
+│   │   ├── active.rs  回读 ~/.codex/config.toml 现场：现在在用哪把密钥（★ 角标）
+│   │   └── tests/     沙盒测试（按源码文件分）+ 真机 opt-in（`--ignored codex_real_end_to_end`）
+│   └── pi/            Pi 适配
+│       ├── import.rs  ~/.pi/agent 两份 JSON 的写入编排 + 回滚（provider 键一律 `apim-` 前缀）
+│       ├── config.rs  models.json / settings.json 读写（保留未知字段 + 备份 + 原子 600）
+│       ├── verify.rs  跑 `pi --list-models` 让 pi 自己确认勾选的模型都在
+│       ├── active.rs  回读 defaultProvider + apiKey 现场：现在在用哪把密钥（★ 角标）
+│       └── tests/     沙盒测试（假 pi 脚本）+ 真机 opt-in（`--ignored pi_real_end_to_end`）
 ├── cli/               CLI 子命令（AI/脚本的机器接口，与 TUI 共用底层）
 │   ├── mod.rs         Args 解析（--flag 值/布尔）、Ctx（config+recipes 目录，可注入测试）、分发与帮助
 │   ├── provider.rs    provider ls/add/set/rm/copy（--script 绑定/解绑；copy 整份复制含脚本文件）
@@ -90,7 +97,8 @@ recipes/              内置 recipe ×4（deepseek/openai/moonshot/openrouter，
 - `~/.config/apim/config.toml` — 密钥清单（provider/alias/group，无 token）
 - `~/.config/apim/secrets.toml` — token，键名 `"厂商.别名"`，600 权限
 - `~/.config/apim/recipes/*.yaml` — 用户厂商 recipe，同 id 覆盖内置
-- `~/.codex/config.toml`、`~/.codex/apim-models.json` — 一键导入（`x` 键）写的，前者每次改写前备份成 `config.toml.apim.bak`
+- `~/.codex/config.toml`、`~/.codex/apim-models.json` — 一键导入到 Codex（`x` 键）写的，前者每次改写前备份成 `config.toml.apim.bak`
+- `~/.pi/agent/models.json`、`~/.pi/agent/settings.json` — 一键导入到 Pi（`x` 键）写的，各自备份成 `<原名>.apim.bak`；`PI_CODING_AGENT_DIR` 可改整个目录
 - `APIM_CONFIG_DIR` 环境变量可重定向整个配置目录（测试用）
 
 ★ 不落在 apim 自己的文件里：密钥行的 ★ 是**回读各客户端配置现场**算出来的，见约定 11。
@@ -126,12 +134,23 @@ recipes/              内置 recipe ×4（deepseek/openai/moonshot/openrouter，
 12. **`apim update` 只认三条渠道**（install.sh / npm / Homebrew，见 `docs/RELEASING.md` 的速查表）：`src/cli/update.rs` 按可执行文件路径认渠道（npm 看 `node_modules/apim-cli`、brew 看 `Cellar/apim`，其余当 install.sh 装的裸二进制），裸二进制那条复用官方 install.sh，但**不是 `curl | sh`**：URL 钉到本次要更新到的 tag、下载到临时文件、先做形状校验（是 shell 脚本 / 是本仓库安装器 / 含 sha256 校验）、再按 Release 发布的 `install.sh.sha256` 校验摘要（**拿不到摘要就拒绝执行**），最后用 `sh <file>` 跑；`APIM_INSTALL_DIR` 钉在当前二进制的**真实位置**（先 canonicalize，否则符号链接会被替换掉）保证原地更新。**`target/` 下的开发构建与 `~/.cargo/bin` 里的 cargo 副本一律不更新**（前者会被 Release 覆盖掉开发二进制，后者是 `cargo install` 留下的、被 PATH 遮挡的多余副本）。加渠道要同时改 `Channel` 与它的识别规则、测试和 RELEASING 的表；`apim uninstall` 复用同一套 `detect_channel`，新渠道的卸载动作会被 `uninstall_program` 的穷尽 `match` 拦下（编译器逼你补），但提示语与单测仍要手工过一遍。
 
 13. **加一个客户端（Claude Code / pi …）就是三处改动**，别在面板里写客户端专属分支：
-    - `src/clients/mod.rs`：加 `Agent` 变体（所有 `match` 会被编译器强制补全）+ 一条分派；
-    - `src/clients/<id>/`：新子模块，实现「写哪里 / 怎么写 / 写完后怎么校验 / 怎么重新加载 / 怎么从自家配置里认出正在用的密钥」；
-    - `app/import` 与 `ui/import` **不用改**：它们只经 `Agent` 的 `import/reload/label/config_hint/active_key_ids` 调客户端；选择面板只列客户端名，不展开各家说明（要写就写在客户端子模块的文档里）。
-    - 密钥行的 ★ 已经按客户端通用：`Agent::active_key_ids` 各自回读现场，UI 用 `Agent::badge()` 拼角标（`★C`、`★C,P`），加客户端只需补 `active_key_ids` 与 `badge` 两条分派。
+    - `src/clients/mod.rs`：加 `Agent` 变体（所有 `match` 会被编译器强制补全）+ 一条分派（`label/badge/config_hint/reload_hint/default_model_hint/active_key_ids/import/needs_reload/reload`）；`ImportRequest` / `ImportReport` 是共用的（面板只读这两个形状，不认客户端细节）；
+    - `src/clients/<id>/`：新子模块，实现「写哪里 / 怎么写 / 写完后怎么校验 / 怎么重新加载 / 怎么从自家配置里认出正在用的密钥」；公共件在 `clients/file_io.rs`（跟随符号链接 + 写前备份 + 原子 600）与 `clients/lock.rs`（导入排他锁），别重写一遍；
+    - `app/import` 与 `ui/import` **不用改**：它们只经 `Agent` 的这套方法调客户端；选择面板只列客户端名，不展开各家说明（要写就写在客户端子模块的文档里）。
+    - 密钥行的 ★ 已经按客户端通用：`Agent::active_key_ids` 各自回读现场，UI 用 `Agent::badge()` 拼角标（`★C`、`★C,P`），加客户端只需补 `active_key_ids` 与 `badge` 两条分派（`clients/mod.rs` 里有一条注册表自检的测试守着「角标不许撞车」）。
     - **不要**给客户端造 YAML 配方（约定 2 的数据化范围是厂商协议）；客户端之间不是同一套协议，各写 Rust 更直白。
     - 「不需要选模型的客户端」暂时还得先做一步重构：`ImportRequest.models/default_model` 现在是必填，要先改成 `Option` 才能让面板跳过勾选模型两步（见 `DEV-NOTES.local.md`）。
+
+14. **一键导入到 Pi（`x` 键）的硬约束**（都来自 pi 源码 + 真机实测，别凭感觉改）：
+    - **写两处**：`<agent-dir>/models.json`（`providers.<键>`：`name`/`baseUrl`/`api="openai-completions"`/`apiKey`/`models`）与 `<agent-dir>/settings.json`（`defaultProvider`/`defaultModel`）。`<agent-dir>` 默认 `~/.pi/agent`，`PI_CODING_AGENT_DIR` 可改（面板提示也读它）。
+    - **provider 键一律加 `apim-` 前缀**：pi 自带一大批同名 provider（`deepseek`/`openai`/`openrouter` …），`models.json` 里同名的条目会被 `applyModelsJson` 用来**覆盖那个内置 provider 的 baseUrl**（等于把用户的 OpenAI 指到我们的中转站）。加前缀永远不会撞名，`/model` 里也一眼看出是 apim 写的。
+    - **只动我们认识的键**：`providers.<键>` 里的 `headers` / `compat` / `modelOverrides` / `authHeader` 与其它 provider、`settings.json` 里别的设置都原样保留（`pi/tests/import.rs` 有断言守）。
+    - **模型条目用 pi 的默认值兜底**：只写 `id`/`name`/`reasoning: true`/`input: [text, image]`，**不写** `contextWindow`/`maxTokens`/`cost` —— pi 对缺省用自己的保守默认（128000 / 16384 / 零价），apim 不替它编数字（与 codex 那边写 272000 不同：那是 codex 给未知模型的默认值）。
+    - **默认模型镜像 pi 自己的行为**：除写 `defaultProvider`/`defaultModel` 外，`enabledModels` 非空时要把 `<provider>/<model>` 追加进去（pi 存默认模型时就是这么做的），否则用户设了 `enabledModels` 后会「导入成功但选不到」。
+    - **校验靠 `pi --list-models`**（同 codex 的 `codex debug models`）：输出是定宽表，要匹配 `provider` 与 `model` **两列都对**（同名模型挂在别的 provider 下不算）；不通过就用备份把**两处**都还原（原来没有的文件删掉），没装 pi 直接报错。
+    - **pi 没有常驻进程可杀**：`needs_reload()` 返回 false，提示语是「在 Pi 里打开 `/model`（或重开）即可看到新模型」（`Agent::reload_hint`，面板不写客户端分支）。
+    - **★ 只认现场**：`settings.json` 的 `defaultProvider` + `models.json` 里该 provider 的 `apiKey`；`apiKey` 是 `$ENV` / `!cmd`（请求时才求值）时读不到明文，退化成比 `base_url`；键没有 `apim-` 前缀就不算 apim 写的。
+    - **只支持 API key 这一路**：pi 的订阅渠道是 `/login` 的 OAuth（凭据在 `auth.json`），apim 拿不到也不该碰。
 
 ## 验证命令速查
 
@@ -142,8 +161,10 @@ cargo run -- --snapshot-inspector      # 详情弹窗快照：假状态不拉接
 cargo run -- --snapshot-import         # 一键导入面板快照：第一步选客户端
 cargo run -- --snapshot-import-models  # 一键导入面板快照：第二步勾选模型
 cargo run -- --snapshot-import-default # 一键导入面板快照：第三步选默认模型
-cargo test                             # 单测（recipe/表单/CLI 沙盒/codex 适配等）
+cargo test                             # 单测（recipe/表单/CLI 沙盒/codex+pi 适配等）
 cargo test -- codex_real_end_to_end --ignored --nocapture   # 需本机装 codex：真机端到端（生成目录 + 让 codex 校验）
+cargo test -- pi_real_end_to_end --ignored --nocapture      # 需本机装 pi：真机端到端（写两份 JSON + 让 pi 列模型）
+APIM_SNAPSHOT_AGENT=pi cargo run -- --snapshot-import-default  # 换客户端出面板快照（默认第一个）
 cargo run -- update --check                # 认安装渠道 + 报当前/最新（不动手）
 apim provider ls --json                # CLI 冒烟（跑已发布版；本地代码用 cargo run -- provider ls）
 ```

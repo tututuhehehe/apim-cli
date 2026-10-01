@@ -16,6 +16,7 @@ use unicode_width::UnicodeWidthStr;
 use crate::app::{
     App, Focus, ImportFlow, ImportStep, KeyState, Modal, ModelPick, TaskMsg, handle_import_key,
 };
+use crate::clients::Agent;
 use crate::form::{Field, FormEvent};
 use crate::probe::{BalanceSnapshot, Health};
 use crate::ui;
@@ -246,7 +247,9 @@ pub(crate) async fn run_snapshot_provider_form() -> Result<()> {
 pub(crate) async fn run_snapshot_import() -> Result<()> {
     let (mut app, _rx, _rx_task) = App::start()?;
     app.focus = Focus::Keys;
-    app.modal = Modal::Import(ImportFlow::new(snapshot_key_id(&app), 0));
+    let mut flow = ImportFlow::new(snapshot_key_id(&app), 0);
+    flow.agent = snapshot_agent();
+    app.modal = Modal::Import(flow);
     render_snapshot(&app).await
 }
 
@@ -255,6 +258,7 @@ pub(crate) async fn run_snapshot_import_models() -> Result<()> {
     let (mut app, _rx, _rx_task) = App::start()?;
     app.focus = Focus::Keys;
     let mut flow = ImportFlow::new(snapshot_key_id(&app), 0);
+    flow.agent = snapshot_agent();
     flow.step = ImportStep::Models;
     flow.items = vec![
         ModelPick {
@@ -283,6 +287,7 @@ pub(crate) async fn run_snapshot_import_default() -> Result<()> {
     let (mut app, _rx, _rx_task) = App::start()?;
     app.focus = Focus::Keys;
     let mut flow = ImportFlow::new(snapshot_key_id(&app), 0);
+    flow.agent = snapshot_agent();
     flow.step = ImportStep::DefaultModel;
     flow.items = vec![
         ModelPick {
@@ -301,6 +306,17 @@ pub(crate) async fn run_snapshot_import_default() -> Result<()> {
     flow.default_cursor = 1;
     app.modal = Modal::Import(flow);
     render_snapshot(&app).await
+}
+
+/// 快照要摆哪个客户端的面板（`APIM_SNAPSHOT_AGENT=pi`；默认第一个）。
+/// 各客户端的文案（默认模型写哪里、怎么生效）不同，出快照时用它逐个核对。
+fn snapshot_agent() -> Agent {
+    let wanted = std::env::var("APIM_SNAPSHOT_AGENT").unwrap_or_default();
+    Agent::ALL
+        .iter()
+        .copied()
+        .find(|agent| agent.label().eq_ignore_ascii_case(&wanted))
+        .unwrap_or(Agent::ALL[0])
 }
 
 /// 快照用的密钥 id：有真实密钥就用它，没有就用占位（快照不依赖配置目录内容）。

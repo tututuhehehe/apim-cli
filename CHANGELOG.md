@@ -5,6 +5,15 @@
 
 ## [Unreleased]
 
+### 新增
+
+- **一键导入到 Pi**（`x` 键选客户端 Pi）：把密钥 / 厂商 / 勾选的模型写进 `~/.pi/agent/models.json`
+  （`providers.apim-<厂商id>`：OpenAI 兼容端点 + apiKey + 模型）与 `~/.pi/agent/settings.json`
+  （`defaultProvider` / `defaultModel`），写完跑 `pi --list-models` 让 pi 自己确认模型都在，
+  失败用备份把两处都还原。provider 键一律带 `apim-` 前缀（否则会蹭到 pi 内置 provider 的 baseUrl）；
+  只改 apim 负责的键，用户手写的 `headers` / `compat` / `modelOverrides` 与别的设置都保留；
+  不需要重启（打开 `/model` 即可）；`PI_CODING_AGENT_DIR` / `APIM_PI_BIN` 可重定向
+
 ### 变更
 
 - **密钥行 ★ 改成回读客户端现场**：不再写 `~/.config/apim/codex.toml` 台账，而是重算时点

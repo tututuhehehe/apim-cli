@@ -631,7 +631,10 @@ pub(crate) mod tests {
             next_auto_refresh: Instant::now() + AUTO_REFRESH_INTERVAL,
             config_dir: test_config_dir("app"),
             active_keys: HashMap::new(),
-            agent_homes: HashMap::from([(Agent::Codex, test_agent_home())]),
+            agent_homes: HashMap::from([
+                (Agent::Codex, test_agent_home()),
+                (Agent::Pi, test_agent_home()),
+            ]),
             restart_codex_daemon: false,
             next_import_seq: 0,
             import_runner: None,
@@ -963,6 +966,36 @@ pub(crate) mod tests {
             vec![Agent::Codex],
             "切厂商时应重算 ★，不要等 r 或自动刷新"
         );
+    }
+
+    /// 两个客户端都回读各自的现场：pi 认 `settings.json` 的 `defaultProvider`，
+    /// 手改了它的 `apiKey` 也要能掉 ★。
+    #[test]
+    fn pi_is_detected_from_its_own_config_too() {
+        let (mut app, _rx, _rx_models) = test_app(&[("alpha", &["a1"])]);
+        let home = app.agent_homes[&Agent::Pi].clone();
+        std::fs::write(
+            home.join("models.json"),
+            "{\n  \"providers\": {\n    \"apim-alpha\": { \"baseUrl\": \"https://example.invalid/v1\", \"api\": \"openai-completions\", \"apiKey\": \"sk-test-placeholder\" }\n  }\n}\n",
+        )
+        .unwrap();
+        std::fs::write(
+            home.join("settings.json"),
+            "{ \"defaultProvider\": \"apim-alpha\", \"defaultModel\": \"m1\" }",
+        )
+        .unwrap();
+
+        app.refresh_active_keys();
+        assert_eq!(app.agents_using("alpha.a1"), vec![Agent::Pi]);
+
+        // 用户在 pi 里换成了自己手写的 key
+        std::fs::write(
+            home.join("models.json"),
+            "{\n  \"providers\": {\n    \"apim-alpha\": { \"baseUrl\": \"https://example.invalid/v1\", \"api\": \"openai-completions\", \"apiKey\": \"sk-hand-written\" }\n  }\n}\n",
+        )
+        .unwrap();
+        app.refresh_active_keys();
+        assert!(app.agents_using("alpha.a1").is_empty());
     }
 
     #[test]

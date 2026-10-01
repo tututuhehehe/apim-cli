@@ -195,11 +195,11 @@ echo '你的key' | apim key add glm main
 apim status glm --json
 ```
 
-## 一键导入到 Codex
+## 一键导入到 Codex / Pi
 
-密钥表里选中一把密钥按 `x`，把「这把密钥 + 它的厂商 + 勾选的模型」写进 Codex 配置，不用再手改 `~/.codex/config.toml`。面板三步：**选客户端**（目前只有 Codex）→ **勾选模型**（列表与 `m` 键一致；`空格` 勾选、`a` 全选/清空、`/` 搜索，`⏎` 下一步）→ **选默认模型**（从刚勾的那些里挑一个当 `config.toml` 的 `model`，`j/k` 移动、`h` 返回上一步、`⏎` 导入）。只勾了一个模型时第三步自动跳过。
+密钥表里选中一把密钥按 `x`，把「这把密钥 + 它的厂商 + 勾选的模型」写进某个客户端的配置，不用再手改 `~/.codex/config.toml`。面板三步：**选客户端**（Codex 或 Pi）→ **勾选模型**（列表与 `m` 键一致；`空格` 勾选、`a` 全选/清空、`/` 搜索，`⏎` 下一步）→ **选默认模型**（从刚勾的那些里挑一个当客户端的默认模型，`j/k` 移动、`h` 返回上一步、`⏎` 导入）。只勾了一个模型时第三步自动跳过。
 
-导入完成前它会**让 codex 自己解析一遍新配置**（`codex debug models`）确认勾选的模型都在，然后给一条成功提示；不成功会当场把原因显示在面板里。
+导入完成前它会**让客户端自己读一遍新配置**（`codex debug models` / `pi --list-models`）确认勾选的模型都在，然后给一条成功提示；不成功会当场把原因显示在面板里。
 
 > **codex 只在守护进程启动时读一次模型目录，导入后必须重启 codex 才能让 `/model` 刷新。** apim 导入成功后会**自动重启 codex 的 app-server 守护进程**（杀掉在跑的，codex 下次启动自动起新的），toast 里会告知；不想让它动进程就设 `APIM_NO_RESTART_CODEX=1`，那时手动 `pkill -f "codex app-server"` 即可。
 >
@@ -232,7 +232,28 @@ apim status glm --json
 
 > 需要本机装好 `codex`（用它生成并校验模型目录）；apim 从 `PATH` 找它，也可以用 `APIM_CODEX_BIN` 指定路径。
 
-**暂时只支持 Codex。** 加一个客户端（Claude Code / pi …）是 Rust 侧的事：一个 `Agent` 变体 + 一个 `clients/<id>/` 子模块 + 一条分派，面板不用改；**不做 YAML 配方** —— 各家配置格式、鉴权变量名、生效方式都不一样，不是同一套协议（详见 AGENTS.md 约定 13）。
+### 一键导入到 Pi
+
+同一个 `x` 面板也能导到 **Pi**（第一步选 `Pi`）。Pi 加第三方 provider 是纯数据的事（`models.json`），所以 apim 写两处：
+
+| 位置 | 内容 |
+|---|---|
+| `~/.pi/agent/models.json` 的 `providers.apim-<厂商id>` | `name` / `baseUrl`（缺 `/v1` 自动补）/ `api = "openai-completions"` / `apiKey` / `models`（勾选的那几个） |
+| `~/.pi/agent/settings.json` | `defaultProvider = apim-<厂商id>`、`defaultModel = 第三步选的那个模型` |
+
+几个刻意的选择：
+
+- **provider 键一律带 `apim-` 前缀**。Pi 自带一大批内置 provider（`deepseek` / `openai` / `openrouter` …），而 `models.json` 里同名的条目会**覆盖那个内置 provider 的 `baseUrl`** —— 等于悄悄把你的 OpenAI 模型指到中转站。加前缀永远不会撞名，`/model` 里也一眼看出是 apim 写的。
+- **只动 apim 负责的那几个键**：`models.json` 里别的 provider 与用户手写的 `headers` / `compat` / `modelOverrides` / `authHeader`、`settings.json` 里别的设置，全部原样保留（有测试守着）。
+- **模型条目留最小集合**（`id` / `name` / `reasoning: true` / `input: [text, image]`），其余交给 pi 自己的保守默认（128000 上下文 / 16384 输出 / 零价）—— apim 不替它编数字。想按模型写真值就自己改 `models.json`。
+- **默认模型镜像 pi 自己的行为**：除写 `defaultProvider` / `defaultModel` 外，`enabledModels` 非空时会把 `<provider>/<model>` 追加进去 —— 与你在 pi 里按 `Ctrl+S` 存默认模型时一致。不这么做的话，设了 `enabledModels` 的用户会「导入成功但选不到」。
+- **校验用你本机的 pi**：写完跑 `pi --list-models`，勾选的每个模型都要**挂在我们的 provider 键下**出现；不过就用 `.apim.bak` 备份把两处都还原。
+- **不需要重启**：pi 没有常驻进程，打开 `/model`（或重开）就能看到新 provider。
+- **只走 API key 这一路**：pi 的订阅是 `/login` 的 OAuth（凭据在 `auth.json`），apim 既不读也不写。
+
+> 需要本机装好 `pi`（用它校验结果）；apim 从 `PATH` 找它，也可以用 `APIM_PI_BIN` 指定路径。
+
+**以后再加客户端**（Claude Code …）是 Rust 侧的事：一个 `Agent` 变体 + 一个 `clients/<id>/` 子模块（写哪里 / 怎么写 / 怎么校验 / 怎么重载 / 怎么认出正在用的密钥）+ 一条分派，面板不用改；**不做 YAML 配方** —— 各家配置格式、鉴权变量名、生效方式都不一样，不是同一套协议（详见 AGENTS.md 约定 13）。
 
 ## 数据存哪
 
@@ -240,6 +261,8 @@ apim status glm --json
 
 - `config.toml`：别名、分组（不含 token）
 - `secrets.toml`：真正的 token，键名是 `"厂商.别名"`
+
+导入目标在别处：`~/.codex/config.toml` + `~/.codex/apim-models.json`（Codex，备份为 `config.toml.apim.bak`）与 `~/.pi/agent/models.json` + `~/.pi/agent/settings.json`（Pi，`PI_CODING_AGENT_DIR` 可改整个目录，备份为 `<原名>.apim.bak`）。
 
 apim 侧**不存**导入记录：密钥行上的 ★ 是按客户端自己的配置现场算出来的（见上文）。
 

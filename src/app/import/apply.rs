@@ -115,16 +115,21 @@ impl App {
                 // ★ 回读客户端现场得出（不存 apim 侧的台账）：这里刚写完配置，重算一定准
                 self.refresh_active_keys();
                 let mut note = format!(
-                    "已导入 {}：{} · {} 个模型 · 默认 {} · 强度 {} · 表名 {}",
+                    "已导入 {}：{} · {} 个模型 · 默认 {} · 表名 {}",
                     outcome.agent.label(),
                     outcome.key_id,
                     report.models.len(),
                     report.model,
-                    report.reasoning_effort,
                     report.provider_key
                 );
-                if let Some(backup) = &report.backup_path {
-                    note.push_str(&format!(" · 旧配置备份为 {}", file_name(backup)));
+                // 客户端自己报的补充（codex：思考强度；pi 没有）：客户端才知道自己写了什么
+                if let Some(detail) = &report.detail {
+                    note.push_str(&format!(" · {detail}"));
+                }
+                if !report.backups.is_empty() {
+                    let names: Vec<String> =
+                        report.backups.iter().map(|path| file_name(path)).collect();
+                    note.push_str(&format!(" · 旧配置备份为 {}", names.join(" / ")));
                 }
                 // 客户端的配置只在进程启动时读一次，必须重新加载才能让它的选择器刷新
                 if outcome.restart.killed > 0 {
@@ -141,10 +146,7 @@ impl App {
                         outcome.restart.ambiguous
                     ));
                 } else {
-                    note.push_str(&format!(
-                        " · 重启 {} 后才会列出新模型",
-                        outcome.agent.label()
-                    ));
+                    note.push_str(&format!(" · {}", outcome.agent.reload_hint()));
                 }
                 self.toast = Some((note, Instant::now()));
                 if waiting {

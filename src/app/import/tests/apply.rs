@@ -20,7 +20,7 @@ async fn successful_import_toasts_and_marks_the_key_codex_now_uses() {
     assert_eq!(
         app.toast_text(),
         Some(
-            "已导入 Codex：alpha.a1 · 1 个模型 · 默认 gpt-6-sol · 强度 high · 表名 alpha · 重启 Codex 后才会列出新模型"
+            "已导入 Codex：alpha.a1 · 1 个模型 · 默认 gpt-6-sol · 表名 alpha · 强度 high · 重启 Codex 后才会列出新模型"
         )
     );
     assert_eq!(

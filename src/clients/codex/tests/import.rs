@@ -57,10 +57,7 @@ fn import_end_to_end_writes_config_catalog_and_verifies() {
 
     assert_eq!(report.provider_key, "ikun");
     assert_eq!(report.model, "glm-5");
-    assert_eq!(
-        report.backup_path.as_deref(),
-        Some(home.join("config.toml.apim.bak").as_path())
-    );
+    assert_eq!(report.backups, vec![home.join("config.toml.apim.bak")]);
     assert!(home.join("config.toml.apim.bak").exists(), "改写前应留备份");
 
     let text = fs::read_to_string(home.join("config.toml")).unwrap();

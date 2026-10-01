@@ -10,12 +10,16 @@
 //! 顺序上有两条硬要求：**先纯内存改配置（失败时磁盘一点没动）**，**校验不过要把两处改动
 //! 都还原**（否则用户看到「导入失败」，`~/.codex/config.toml` 其实已经切到新厂商 + 新目录）。
 
-use std::path::{Path, PathBuf};
+use std::path::Path;
 
 use super::catalog::{self, CATALOG_FILE, DEFAULT_EFFORT};
 use super::codex_home;
 use super::config_file;
-use super::lock::HomeLock;
+use crate::clients::lock::ImportLock;
+use crate::clients::{ImportReport, ImportRequest};
+
+/// 厂商 id → codex 的 API 根地址（两个客户端都要带 `/v1`，实现见 `clients::normalize_base_url`）。
+pub use crate::clients::normalize_base_url;
 
 /// Codex 保留的内置 provider id：用户自定义 provider 不能占用这些名字。
 const RESERVED_PROVIDER_IDS: &[&str] = &[
@@ -25,37 +29,6 @@ const RESERVED_PROVIDER_IDS: &[&str] = &[
     "amazon-bedrock",
     "amazon-bedrock-runtime",
 ];
-
-/// 一次一键导入的输入。
-#[derive(Debug, Clone)]
-pub struct ImportRequest {
-    /// apim 的厂商 id（recipe id）。
-    pub provider_id: String,
-    /// 厂商显示名，写进 `[model_providers.*].name`。
-    pub provider_name: String,
-    /// recipe 的 base_url；不带 `/v1` 时写入前补齐。
-    pub base_url: String,
-    /// 写进 `experimental_bearer_token` 的密钥。
-    pub api_key: String,
-    /// 勾选导入的模型（至少 1 个）。
-    pub models: Vec<String>,
-    /// 默认模型，必须是 `models` 之一。
-    pub default_model: String,
-}
-
-/// 导入成功后的结果，用于 TUI 反馈。
-#[derive(Debug, Clone)]
-pub struct ImportReport {
-    /// 实际写进 `[model_providers.<key>]` 的表名。
-    pub provider_key: String,
-    /// 默认模型（codex 顶层 `model`）。
-    pub model: String,
-    pub models: Vec<String>,
-    /// 写进顶层 `model_reasoning_effort` 的思考强度（固定值，见 [`DEFAULT_EFFORT`]）。
-    pub reasoning_effort: String,
-    /// 写入前的备份文件；原本没有 config.toml 时为 None。
-    pub backup_path: Option<PathBuf>,
-}
 
 /// 一键导入：定位本机 codex → 生成目录 → 改写 config.toml → 端到端校验。
 pub fn import(request: &ImportRequest) -> Result<ImportReport, String> {
@@ -87,7 +60,7 @@ pub fn import_in(
 
     std::fs::create_dir_all(home).map_err(|err| format!("创建 {} 失败：{err}", home.display()))?;
     // 整段「读 → 改 → 写 → 校验」都在锁里：否则两个实例会互相抹掉对方的 provider 块
-    let _lock = HomeLock::acquire(home)?;
+    let _lock = ImportLock::acquire(home, "codex")?;
 
     let config_path = home.join("config.toml");
     // 先把配置读进来、改好（纯内存）：这一步失败时磁盘还一点没动
@@ -136,8 +109,8 @@ pub fn import_in(
         provider_key: key,
         model: request.default_model.clone(),
         models: request.models.clone(),
-        reasoning_effort: effort.to_string(),
-        backup_path,
+        detail: Some(format!("强度 {effort}")),
+        backups: backup_path.into_iter().collect(),
     })
 }
 
@@ -176,16 +149,5 @@ pub fn provider_key(provider_id: &str) -> String {
         format!("apim-{provider_id}")
     } else {
         provider_id.to_string()
-    }
-}
-
-/// codex 的 `base_url` 是 API 根地址（要带 `/v1`），recipe 的 base_url 不一定带，
-/// 这里统一补齐（已经是 `/v1` 结尾的原样返回）。
-pub fn normalize_base_url(base_url: &str) -> String {
-    let trimmed = base_url.trim_end_matches('/');
-    if trimmed.ends_with("/v1") || trimmed.ends_with("/v1beta") {
-        trimmed.to_string()
-    } else {
-        format!("{trimmed}/v1")
     }
 }
