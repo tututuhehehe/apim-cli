@@ -60,14 +60,32 @@ pub(crate) fn tmp_path(path: &Path) -> PathBuf {
 /// 原子私有写入（tmp 带 pid + 600 权限 + rename）。密钥类文件统一走它。
 pub(crate) fn write_private(path: &Path, contents: &str) -> Result<()> {
     let tmp = tmp_path(path);
-    fs::write(&tmp, contents).with_context(|| format!("write {}", tmp.display()))?;
+    write_new_private(&tmp, contents).with_context(|| format!("write {}", tmp.display()))?;
+    fs::rename(&tmp, path).with_context(|| format!("rename {}", path.display()))?;
+    Ok(())
+}
+
+/// 新建/覆盖一个私有文件：unix 上**建文件时就带 0600**。
+///
+/// 不能写成「先 `fs::write` 再 `chmod`」：那中间有一个「文件已存在但仍是 0644」的窗口，
+/// 进程在这时被 Ctrl-C / 杀软中断，就会把密钥文件永久留成全局可读。
+fn write_new_private(path: &Path, contents: &str) -> Result<()> {
     #[cfg(unix)]
     {
-        use std::os::unix::fs::PermissionsExt;
-        fs::set_permissions(&tmp, fs::Permissions::from_mode(0o600))
-            .with_context(|| format!("chmod {}", tmp.display()))?;
+        use std::io::Write;
+        use std::os::unix::fs::OpenOptionsExt;
+        let mut file = fs::OpenOptions::new()
+            .write(true)
+            .create(true)
+            .truncate(true)
+            .mode(0o600)
+            .open(path)?;
+        file.write_all(contents.as_bytes())?;
     }
-    fs::rename(&tmp, path).with_context(|| format!("rename {}", path.display()))?;
+    #[cfg(not(unix))]
+    {
+        fs::write(path, contents)?;
+    }
     Ok(())
 }
 

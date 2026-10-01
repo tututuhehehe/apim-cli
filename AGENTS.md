@@ -61,7 +61,7 @@ src/
 │   ├── mod.rs         KeyEntry、读取 config.toml + secrets.toml（严格版给 TUI，宽松版 load_keys_lenient 给 CLI 自救）
 │   └── store.rs       原子写入（tmp+rename，tmp 名带 pid，600 权限）
 └── probe/             并发探活（health + balance 并发，tokio::join!）
-    ├── mod.rs         Health/ProbeResult/ModelEntry、client、http 一路（探活 + 模型列表拉取的鉴权请求）
+    ├── mod.rs         Health/ProbeResult、client、http 一路（探活 + 模型列表拉取的鉴权请求）
     └── script.rs      脚本执行器（env 注入/超时 kill/stderr 截断 200/stdout 50 行上限）+ expand_tilde
 docs/
 ├── quota-script-prompt.md  额度脚本代写提示词（整体复制给 AI Agent 用）
@@ -104,6 +104,9 @@ recipes/              内置 recipe ×4（deepseek/openai/moonshot/openrouter，
 11. **一键导入到 Codex（`x` 键）的硬约束**（都来自 codex 源码 + 真机实测，别凭感觉改）：
     - Codex 允许 `config.toml` 里同时定义多个 `[model_providers.*]`，但同一时刻只有顶层 `model_provider` 指向的那个激活 → apim **只切换激活项，旧 provider 块一律保留**（用户手写的注释 / `[projects]` / `[tui]` 也不能丢），不做整体重写。
     - **模型不在 `config.toml` 里**：写在 `model_catalog_json` 指向的独立 JSON（`~/.codex/apim-models.json`），config.toml 只有指针（GLM / DeepSeek 官方 Codex 文档也是这个写法）。**思考强度是顶层 `model_reasoning_effort`**，不写就等于没有；apim 固定写 `high`，四档（medium/high/xhigh/max）声明在每个目录条目上让 codex 的 `/model` 去选，**面板不做逐个选择**（用户明确要求）。
+    - **写盘顺序与回滚**：先 `config_file::read/apply`（纯内存，失败时磁盘没动）→ 写目录 → 写 config → 校验；校验不过要用备份把两处改动都还原（否则用户看到「导入失败」，codex 配置其实已切到新厂商）。
+    - **密钥落盘权限一律 600，且必须「建文件时就 600」**（`OpenOptions::mode`，不要 `fs::write` + `chmod`：中间有 0644 窗口）。`~/.codex/config.toml` 与它的 `.apim.bak` 备份里都有 `experimental_bearer_token`，用 `fs::write` 会按 umask 摊成 0644 = 密钥副本全机可读。
+    - **杀 codex daemon 要能只杀 daemon**：`is_codex_server` 只认「可执行文件名正好是 codex + 第一个参数是 `app-server`」；扫「任意 token」会把 `codex --profile app-server` 这类用户会话也杀掉。只扫描一次、只杀扫描到的 pid（重扫会杀掉刚起、已加载新配置的 daemon）。
     - **导入后必须让 codex 重启才能生效**：codex 的模型目录（`model_catalog_json`）只在 app-server daemon 启动时读一次，之后一直缓存（TUI 和桌面端都挂同一个 daemon）。实测现象：不重启时 `codex exec` 已能用新模型、但 `/model` 里还是旧的内置 GPT 表。cc-switch 的 v3.16.1 release notes 也只是提示用户重启；apim 做得更直接：导入成功后杀在跑的 `codex app-server`（`APIM_NO_RESTART_CODEX=1` 可关）。找进程必须**严格匹配**「可执行文件名正好是 codex + 参数里有 `app-server`」，只按命令行 contains 会把 `ps | grep codex app-server` 这种无关进程也杀掉（已加单测守）。
     - 改写 `~/.codex/config.toml` **必须用 `toml_edit`**（`toml` 序列化会丢注释），写前备份成 `config.toml.apim.bak`，再 tmp + rename。注意加注释要挂在 **key 的 decor**（`leaf_decor_mut`）上，挂到 value 的 decor 会把值挤到下一行、产出非法 TOML。
     - `wire_api` 只接受 `"responses"`（0.134+ 删了 `"chat"`，写了会硬报错）→ 中转站得提供 `/v1/responses`；**导入面板的模型列表必须与 `m` 键完全一致**（同一个 `probe::fetch_models` / `parse_models`，只取模型名）；**不要做端点能力判断** —— `supported_endpoint_types` 是 new-api 后端的端点映射配置而非能力探测，实测会漏报（ikun 把 `gpt-6-sol` 标成只有 `openai`，实际 /responses 完全能用），照它筛会藏掉能用的模型。
@@ -111,7 +114,7 @@ recipes/              内置 recipe ×4（deepseek/openai/moonshot/openrouter，
     - 模型条目照官方字段**手写迷你条目**（GLM / DeepSeek 官方 Codex 文档 + cc-switch 实测模板）：`shell_type: shell_command`、`apply_patch_tool_type: freeform`、中性 `base_instructions`、`input_modalities` fail-open 给 `[text, image]`、上下文窗口用 codex 给未知模型的默认值 272000。**不要克隆 `codex debug models --bundled` 里的 GPT 条目** —— 那会带进 `code_mode_only`、`use_responses_lite`、`max_context_window: 872000` 和 62KB harness 提示词（v1 就是这么错的一版，目录 64KB/模型）。导入完用 `codex debug models` 反向校验勾选的模型都在（校验是硬前提，没装 codex 直接报错）。
     - 厂商 id 撞上保留名（`openai`/`ollama`/`lmstudio`/`amazon-bedrock*`）时加 `apim-` 前缀。
 
-12. **`apim update` 只认三条渠道**（install.sh / npm / Homebrew，见 `docs/RELEASING.md` 的速查表）：`src/cli/update.rs` 按可执行文件路径认渠道（npm 看 `node_modules/apim-cli`、brew 看 `Cellar/apim`，其余当 install.sh 装的裸二进制），裸二进制那条**复用官方 install.sh** 并钉住 `APIM_INSTALL_DIR` 保证原地更新。**`target/` 下的本地开发构建一律不更新**（否则会拿 Release 覆盖开发二进制）。加渠道要同时改 `Channel`、测试和 RELEASING 的表。
+12. **`apim update` 只认三条渠道**（install.sh / npm / Homebrew，见 `docs/RELEASING.md` 的速查表）：`src/cli/update.rs` 按可执行文件路径认渠道（npm 看 `node_modules/apim-cli`、brew 看 `Cellar/apim`，其余当 install.sh 装的裸二进制），裸二进制那条**复用官方 install.sh** 并把 `APIM_INSTALL_DIR` 钉在当前二进制的**真实位置**（先 canonicalize，否则符号链接会被替换掉）保证原地更新。**`target/` 下的开发构建与 `~/.cargo/bin` 里的 cargo 副本一律不更新**（前者会被 Release 覆盖掉开发二进制，后者是 `cargo install` 留下的、被 PATH 遮挡的多余副本）。加渠道要同时改 `Channel`、测试和 RELEASING 的表。
 
 ## 验证命令速查
 

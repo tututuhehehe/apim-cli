@@ -92,39 +92,36 @@ fn set_string_with_hint(doc: &mut DocumentMut, key: &str, text: &str, hint: &str
     }
 }
 
-/// 原子写入：先把现有内容备份成 `<config.toml>.apim.bak`，再 tmp + rename。
+/// `<config.toml>` 对应的备份路径（`write` 就是写到这里）。
+pub fn backup_path_of(path: &Path) -> PathBuf {
+    path.with_file_name(format!(
+        "{}.{}",
+        path.file_name()
+            .and_then(|name| name.to_str())
+            .unwrap_or("config.toml"),
+        super::BACKUP_SUFFIX
+    ))
+}
+
+/// 原子写入：先把现有内容备份成 `<config.toml>.apim.bak`，再原子替换。
 /// 返回备份文件路径（原文件不存在时为 None）。
+///
+/// 备份与正文都走 `config::write_private`：这份配置里有 `experimental_bearer_token`，
+/// 权限必须**建文件时**就是 600 —— `fs::write` 会按 umask 落成 0644，
+/// 等于把密钥复制一份给全机可读（且旧 key 会长期留在备份里，轮换也没用）。
 pub fn write(path: &Path, text: &str) -> Result<Option<PathBuf>, String> {
     let backup = match fs::read_to_string(path) {
         Ok(old) => {
-            let backup = path.with_file_name(format!(
-                "{}.{}",
-                path.file_name()
-                    .and_then(|n| n.to_str())
-                    .unwrap_or("config.toml"),
-                super::BACKUP_SUFFIX
-            ));
-            fs::write(&backup, old).map_err(|err| format!("写备份失败：{err}"))?;
+            let backup = backup_path_of(path);
+            crate::config::write_private(&backup, &old)
+                .map_err(|err| format!("写备份 {} 失败：{err}", backup.display()))?;
             Some(backup)
         }
         Err(err) if err.kind() == std::io::ErrorKind::NotFound => None,
         Err(err) => return Err(format!("读取 {} 失败：{err}", path.display())),
     };
 
-    let tmp = path.with_file_name(format!(
-        "{}.{}.tmp",
-        path.file_name()
-            .and_then(|n| n.to_str())
-            .unwrap_or("config.toml"),
-        std::process::id()
-    ));
-    fs::write(&tmp, text).map_err(|err| format!("写 {} 失败：{err}", tmp.display()))?;
-    #[cfg(unix)]
-    {
-        use std::os::unix::fs::PermissionsExt;
-        // config.toml 里有 token，新建时给 600（覆盖已有的不动权限）
-        let _ = fs::set_permissions(&tmp, fs::Permissions::from_mode(0o600));
-    }
-    fs::rename(&tmp, path).map_err(|err| format!("替换 {} 失败：{err}", path.display()))?;
+    crate::config::write_private(path, text)
+        .map_err(|err| format!("写 {} 失败：{err}", path.display()))?;
     Ok(backup)
 }

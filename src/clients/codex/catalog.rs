@@ -13,7 +13,7 @@
 //!
 //! 两条来自 codex 源码的硬约束：
 //! - 条目必须有 `base_instructions` 或 `model_messages.instructions_template`，两样都缺会让
-//!   整个目录解析失败；这里给 `base_instructions: ""`（与 GLM 官方文档一致）。
+//!   整个目录解析失败；这里给一句中性的 Codex 身份说明（不能给空串，见 `BASE_INSTRUCTIONS`）。
 //! - `shell_type` / `apply_patch_tool_type` 决定 codex 往请求里塞哪种工具，用官方文档的
 //!   `shell_command` + `freeform`。
 
@@ -23,10 +23,11 @@ use std::process::Command;
 use serde_json::{Value, json};
 
 /// 勾选模型一律给这四档思考等级（不按模型差异化）。
-/// 顶层 `model_reasoning_effort` 也只用这四个值，面板按 `e` 循环切换。
+/// 顶层 `model_reasoning_effort` 固定 [`DEFAULT_EFFORT`]，**面板不提供逐个选择**：
+/// 想换档就在 codex 里用 `/model` 选，或直接改 `apim-models.json`。
 pub const EFFORTS: [&str; 4] = ["medium", "high", "xhigh", "max"];
 
-/// 默认思考强度；面板没选时用它。
+/// 默认思考强度：目录条目的 `default_reasoning_level` 与顶层 `model_reasoning_effort` 都用它。
 pub const DEFAULT_EFFORT: &str = "high";
 
 /// 上下文窗口：用 codex 自己给「未知模型」的默认值（`models-manager` 的
@@ -149,8 +150,8 @@ fn model_entry(slug: &str, effort: &str, priority: i64) -> Value {
         "context_window": CONTEXT_WINDOW,
         "max_context_window": CONTEXT_WINDOW,
         "effective_context_window_percent": 95,
-        // fail-open（与 DeepSeek 官方目录、cc-switch 模板一致）：不声称图文，
-        // 免得粘图片时被 codex 直接拦下
+        // fail-open：未知模型也声明支持图片输入（与 DeepSeek 官方目录、cc-switch 模板一致）。
+        // 声明得保守（比如只给 text）反而会让用户粘图片时被 codex 直接拦下
         "input_modalities": ["text", "image"],
         "experimental_supported_tools": [],
         // 下面几个是 OpenAI 专属的迁移/加速档提示，显式清空，别让 codex 弹升级提示

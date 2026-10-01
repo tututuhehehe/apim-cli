@@ -63,8 +63,11 @@ pub(crate) fn detect_channel(exe: &Path) -> Option<Channel> {
     let real = canonical.to_string_lossy().replace('\\', "/");
     let has = |needle: &str| raw.contains(needle) || real.contains(needle);
 
-    // 本地开发构建（`cargo run` / `cargo build` 的产物）：不属于任何发布渠道
-    if has("/target/debug/") || has("/target/release/") {
+    // 不属于三条发布渠道的，一律不更新：
+    // - `target/` 下是 `cargo run` / `cargo build` 的产物，覆盖掉就把开发二进制换成 Release 版；
+    // - `~/.cargo/bin` 是 `cargo install` 留下的副本（项目明确不推荐这条路，本机 PATH 里
+    //   还有一份被它遮挡的 npm 版），install.sh 往那儿装只会多一份版本不一致的二进制。
+    if has("/target/debug/") || has("/target/release/") || has("/.cargo/bin/") {
         return None;
     }
     // npm 全局包：二进制在 node_modules/apim-cli-<平台>/bin/ 下
@@ -183,20 +186,9 @@ fn run_channel_update(channel: Channel, exe: &Path, json: bool) -> Result<()> {
             }
         }
         Channel::Binary => {
-            // 复用官方安装脚本，并把 APIM_INSTALL_DIR 钉在当前二进制所在目录
-            let dir = exe
-                .parent()
-                .map(Path::to_path_buf)
-                .unwrap_or_else(|| PathBuf::from("."));
-            if !json {
-                println!(
-                    "\n→ 裸二进制渠道：重跑官方 install.sh（装到 {}）",
-                    dir.display()
-                );
-                println!("  {INSTALL_SH_URL}");
-            }
             #[cfg(windows)]
             {
+                // 先判平台再打印：否则会先输出「重跑官方 install.sh」再报「Windows 没有这条渠道」
                 bail!(
                     "Windows 没有 install.sh 渠道；请从 Release 下载 .zip 手动替换，或改用 npm：\n  \
                      npm install -g apim-cli\n  https://github.com/{REPO}/releases"
@@ -204,6 +196,22 @@ fn run_channel_update(channel: Channel, exe: &Path, json: bool) -> Result<()> {
             }
             #[cfg(not(windows))]
             {
+                // 复用官方安装脚本，并把 APIM_INSTALL_DIR 钉在当前二进制的**真实**位置。
+                // 必须 canonicalize：若 PATH 里的 apim 是指向真实安装的符号链接，
+                // 用未解析的路径会让 install.sh 把链接本身 mv 掉，真实安装点留旧版本。
+                let dir = exe
+                    .canonicalize()
+                    .unwrap_or_else(|_| exe.to_path_buf())
+                    .parent()
+                    .map(Path::to_path_buf)
+                    .unwrap_or_else(|| PathBuf::from("."));
+                if !json {
+                    println!(
+                        "\n→ 裸二进制渠道：重跑官方 install.sh（装到 {}）",
+                        dir.display()
+                    );
+                    println!("  {INSTALL_SH_URL}");
+                }
                 let status = Command::new("sh")
                     .arg("-c")
                     .arg(format!("curl -fsSL '{INSTALL_SH_URL}' | sh"))
@@ -247,16 +255,18 @@ async fn latest_tag() -> Result<String> {
         bail!("HTTP {}", response.status().as_u16());
     }
     // 不读 body（HTML 很大），只要重定向后的 URL
-    let tag = response
-        .url()
-        .path_segments()
-        .and_then(|mut segments| segments.rfind(|segment| !segment.is_empty()))
-        .map(str::to_string)
-        .unwrap_or_default();
-    if tag.is_empty() || tag == "latest" {
-        bail!("GitHub 没给出 tag（可能还没有 Release）");
+    tag_from_url(response.url().as_str())
+        .ok_or_else(|| anyhow::anyhow!("GitHub 没给出 tag（可能还没有 Release）"))
+}
+
+/// 从 `…/releases/tag/vX.Y.Z` 这类 URL 里取 tag。
+/// 取不到、或最终还停在 `…/releases/latest`（说明没有 Release）时返回 None。
+fn tag_from_url(url: &str) -> Option<String> {
+    let tail = url.trim_end_matches('/').rsplit('/').next()?;
+    if tail.is_empty() || tail == "latest" {
+        return None;
     }
-    Ok(tag)
+    Some(tail.to_string())
 }
 
 #[cfg(test)]
@@ -320,12 +330,37 @@ mod tests {
         );
     }
 
-    /// 源码目录名里带 apim-cli 不能误判成 npm（必须同时有 node_modules）。
+    /// 路径里带 apim-cli 但**不含 node_modules** 时不能误判成 npm（两者要同时满足）。
     #[test]
     fn repo_path_alone_is_not_npm() {
         assert_eq!(
-            detect_channel(Path::new("/usr/local/bin/apim")),
+            detect_channel(Path::new("/Users/me/apim-cli/bin/apim")),
             Some(Channel::Binary)
         );
+    }
+
+    /// `~/.cargo/bin` 是 cargo install 留下的副本（本机 PATH 里还有一份被它遮挡的
+    /// npm 版），跟 target/ 一样不属于发布渠道 —— install.sh 往那儿装只会多一份版本不一致的二进制。
+    #[test]
+    fn cargo_install_is_not_a_release_channel() {
+        assert_eq!(detect_channel(Path::new("/Users/me/.cargo/bin/apim")), None);
+    }
+
+    #[test]
+    fn tag_from_release_url() {
+        assert_eq!(
+            tag_from_url("https://github.com/tututuhehehe/apim-cli/releases/tag/v0.1.1"),
+            Some("v0.1.1".to_string())
+        );
+        assert_eq!(
+            tag_from_url("https://github.com/tututuhehehe/apim-cli/releases/tag/v0.1.1/"),
+            Some("v0.1.1".to_string())
+        );
+        // 没有 Release 时重定向会停在 …/releases/latest
+        assert_eq!(
+            tag_from_url("https://github.com/tututuhehehe/apim-cli/releases/latest"),
+            None
+        );
+        assert_eq!(tag_from_url(""), None);
     }
 }

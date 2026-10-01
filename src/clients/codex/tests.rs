@@ -153,7 +153,8 @@ screen_reader_detection_done = true
             api_key: "sk-placeholder",
             catalog_file: CATALOG_FILE,
             model: "gpt-6-sol",
-            reasoning_effort: "high",
+            // 特意传一个与原文件里 "high" 不同的值，下面断言才能证明"被改写"
+            reasoning_effort: "xhigh",
         },
     )
     .unwrap();
@@ -166,14 +167,18 @@ screen_reader_detection_done = true
     assert!(text.contains("# 顶栏注释：别丢"), "{text}");
     assert!(text.contains("# 手写的行尾注释"), "{text}");
     // 用户自己的键与旧 provider 块一个都没丢
-    assert!(text.contains("model_reasoning_effort = \"high\""));
+    // （`model_reasoning_effort` 的值由 apim 接管，键本身必须还在 —— 值见下面）
+    assert!(text.contains("model_reasoning_effort = "));
     assert!(text.contains("[model_providers.custom]"));
     assert!(text.contains("https://old.example/v1"));
     assert!(text.contains("[projects.\"/tmp/demo\"]"));
     assert!(text.contains("screen_reader_detection_done = true"));
-    // 新内容写进去了（model_reasoning_effort 被改成本次导入选的思考强度）
+    // 新内容写进去了（model_reasoning_effort 被写成请求里的强度，原值是 high）
     assert!(text.contains("model_provider = \"ikun\""));
-    assert!(text.contains("model_reasoning_effort = \"high\""));
+    assert!(
+        text.contains("model_reasoning_effort = \"xhigh\""),
+        "{text}"
+    );
     assert!(text.contains("model_catalog_json = \"apim-models.json\""));
     // 新建 model_catalog_json 时带一行「模型在哪个文件」的注释，且不能把值挤到下一行
     assert!(text.contains("# 勾选的模型写在这个文件里"), "{text}");
@@ -299,7 +304,14 @@ fn import_end_to_end_writes_config_catalog_and_verifies() {
         .map(|entry| entry["slug"].as_str().unwrap())
         .collect();
     assert_eq!(slugs, ["glm-5", "gpt-6-sol"]);
-    assert!(!dir.join("codex-home").join("catalog.json.tmp").exists());
+    // 目录与配置都写完、正常收尾后不该留任何 tmp
+    let leftovers: Vec<String> = fs::read_dir(&home)
+        .unwrap()
+        .filter_map(|entry| entry.ok())
+        .map(|entry| entry.file_name().to_string_lossy().into_owned())
+        .filter(|name| name.ends_with(".tmp"))
+        .collect();
+    assert!(leftovers.is_empty(), "残留 tmp: {leftovers:?}");
 }
 
 #[cfg(unix)]
@@ -493,4 +505,109 @@ fn codex_server_matching_is_strict() {
     assert!(!is_codex_server(
         " 8272 /Users/x/.codex/packages/app-server-daemon/releases/0.159.2-aarch64-apple-darwin/bin/codex-code-mode-host"
     ));
+    // 用户自己的会话里恰好出现 app-server 这个词 → 绝不能杀（子命令位不是它）
+    assert!(!is_codex_server(
+        " 100 /opt/homebrew/bin/codex --profile app-server"
+    ));
+    assert!(!is_codex_server(
+        " 101 /opt/homebrew/bin/codex exec app-server"
+    ));
+    assert!(!is_codex_server(
+        " 102 /opt/homebrew/bin/codex -c model_provider=app-server"
+    ));
+    // 反向：真实守护形态（子命令就在 argv[2]）必须命中
+    assert!(is_codex_server(
+        " 103 /Users/x/.codex/packages/app-server-daemon/releases/0.159.2-aarch64-apple-darwin/bin/codex app-server --listen unix://"
+    ));
+}
+
+// ---- 权限与回滚（review 修的两条 P0/P1 的回归守卫）-------------------------
+
+/// 备份里装着原 config.toml（**含 API key**），权限必须建文件时就是 600。
+/// 之前的 `fs::write` 会按 umask 落成 0644 = 把密钥复制一份给全机可读。
+#[cfg(unix)]
+#[test]
+fn backup_and_config_are_private() {
+    use std::os::unix::fs::PermissionsExt;
+    let dir = temp_dir("perms");
+    let path = dir.join("config.toml");
+    fs::write(
+        &path,
+        "model = \"a\"\nexperimental_bearer_token = \"sk-old\"\n",
+    )
+    .unwrap();
+
+    let mut doc = config_file::read(&path).unwrap();
+    config_file::apply(
+        &mut doc,
+        &config_file::ProviderWrite {
+            key: "ikun",
+            name: "ikun",
+            base_url: "https://api.ikuncode.cc/v1",
+            api_key: "sk-new",
+            catalog_file: CATALOG_FILE,
+            model: "m1",
+            reasoning_effort: "high",
+        },
+    )
+    .unwrap();
+    let backup = config_file::write(&path, &doc.to_string())
+        .unwrap()
+        .unwrap();
+
+    let mode = |p: &Path| fs::metadata(p).unwrap().permissions().mode() & 0o777;
+    assert_eq!(mode(&path), 0o600, "config.toml 必须 600");
+    assert_eq!(mode(&backup), 0o600, "备份里有旧 token，必须 600");
+    assert!(fs::read_to_string(&backup).unwrap().contains("sk-old"));
+    // 收尾不留 tmp
+    let leftovers: Vec<String> = fs::read_dir(&dir)
+        .unwrap()
+        .filter_map(|entry| entry.ok())
+        .map(|entry| entry.file_name().to_string_lossy().into_owned())
+        .filter(|name| name.ends_with(".tmp"))
+        .collect();
+    assert!(leftovers.is_empty(), "残留 tmp: {leftovers:?}");
+}
+
+/// 校验失败必须把两处改动都还原：config.toml 回到导入前，目录文件删掉（原本来没有）。
+#[cfg(unix)]
+#[test]
+fn failed_verify_rolls_back_config_and_catalog() {
+    let dir = temp_dir("rollback");
+    let home = dir.join("codex-home");
+    fs::create_dir_all(&home).unwrap();
+    let original = "model = \"old-model\"\nmodel_provider = \"old\"\n\n[model_providers.old]\nname = \"old\"\nbase_url = \"https://old.example/v1\"\n";
+    fs::write(home.join("config.toml"), original).unwrap();
+
+    // 假 codex：`debug models` 永远吐空目录 → 校验必然失败
+    use std::os::unix::fs::PermissionsExt;
+    let bin = dir.join("codex");
+    fs::write(
+        &bin,
+        "#!/bin/sh\n\
+         if [ \"$1\" = \"debug\" ] && [ \"$2\" = \"models\" ]; then echo '{\"models\":[]}'; exit 0; fi\n\
+         exit 1\n",
+    )
+    .unwrap();
+    fs::set_permissions(&bin, fs::Permissions::from_mode(0o755)).unwrap();
+
+    let request = ImportRequest {
+        provider_id: "ikun".into(),
+        provider_name: "ikun".into(),
+        base_url: "https://api.ikuncode.cc".into(),
+        api_key: "sk-placeholder".into(),
+        alias: "codex".into(),
+        models: vec!["gpt-6-sol".into()],
+        default_model: "gpt-6-sol".into(),
+    };
+    let err = import_in(&home, &request, Some(&bin)).unwrap_err();
+    assert!(err.contains("未识别"), "{err}");
+    assert!(err.contains("已还原"), "错误里应说明已还原：{err}");
+    // config.toml 逐字节回到导入前
+    assert_eq!(
+        fs::read_to_string(home.join("config.toml")).unwrap(),
+        original
+    );
+    // 目录文件本来不存在 → 还原后也不该存在
+    assert!(!home.join(CATALOG_FILE).exists(), "目录文件应被删掉");
 }

@@ -8,3 +8,5 @@ secrets.toml
 .npmrc
 # pi 后台任务输出（本地运行产物，不进仓库）
 /.pi/
+# 开发者本地笔记：已知问题/推迟项、评审结论。只在本机，不进仓库、不上传
+/DEV-NOTES.local.md

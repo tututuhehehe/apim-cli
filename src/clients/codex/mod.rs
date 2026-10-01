@@ -16,8 +16,8 @@
 //! 2. `model_catalog_json` 的条目必须有 `base_instructions` 或
 //!    `model_messages.instructions_template`，两样都缺会解析报错 —— 见 `catalog`。
 //!
-//! 目录条目一律从**本机安装的 codex**（`codex debug models --bundled`）克隆，不内嵌
-//! 任何模板文本，因此永远跟 codex 版本一致。
+//! 目录条目照 codex 官方字段**手写迷你条目**（GLM / DeepSeek 官方接入文档同款），
+//! 不克隆内置的 GPT 条目，也不内嵌大段模板文本。
 
 mod catalog;
 mod config_file;
@@ -112,11 +112,8 @@ pub fn import_in(
     let entries = catalog::build(&request.models, &request.default_model)
         .map_err(|err| format!("生成模型目录失败：{err}"))?;
 
-    std::fs::create_dir_all(home).map_err(|err| format!("创建 {} 失败：{err}", home.display()))?;
-    let catalog_path = home.join(CATALOG_FILE);
-    catalog::write_catalog(&catalog_path, &entries)?;
-
     let config_path = home.join("config.toml");
+    // 先把配置读进来、改好（纯内存）：这一步失败时磁盘还一点没动
     let mut doc = config_file::read(&config_path)?;
     config_file::apply(
         &mut doc,
@@ -130,10 +127,34 @@ pub fn import_in(
             reasoning_effort: effort,
         },
     )?;
+
+    std::fs::create_dir_all(home).map_err(|err| format!("创建 {} 失败：{err}", home.display()))?;
+    let catalog_path = home.join(CATALOG_FILE);
+    // 留一份旧目录：校验不过时要能还原回去
+    let previous_catalog = std::fs::read_to_string(&catalog_path).ok();
+    catalog::write_catalog(&catalog_path, &entries)?;
     let backup_path = config_file::write(&config_path, &doc.to_string())?;
 
     // 端到端校验：让 codex 自己解析这份配置 + 目录，勾选的模型必须都在。
-    catalog::verify(bin, home, &request.models)?;
+    // 失败就把两处改动都还原 —— 否则用户看到「导入失败」，而 ~/.codex/config.toml
+    // 其实已经指向新厂商 + 新目录，codex 侧读不通。
+    if let Err(err) = catalog::verify(bin, home, &request.models) {
+        let rolled_back = rollback(
+            &config_path,
+            backup_path.as_deref(),
+            &catalog_path,
+            previous_catalog.as_deref(),
+        );
+        return Err(if rolled_back {
+            format!("{err}（已还原到导入前的配置）")
+        } else {
+            format!(
+                "{err}（自动还原失败，请手动把 {} 覆盖回 {}）",
+                config_file::backup_path_of(&config_path).display(),
+                config_path.display()
+            )
+        });
+    }
 
     Ok(ImportReport {
         provider_key: key,
@@ -142,6 +163,35 @@ pub fn import_in(
         reasoning_effort: effort.to_string(),
         backup_path,
     })
+}
+
+/// 校验失败时把这次导入写下去的两处改动还原：
+/// config.toml 用备份回写（备份为 None = 原来没有这个文件 → 删掉刚写的），
+/// 目录恢复成之前的内容（没有则删掉）。返回是否全部还原成功。
+fn rollback(
+    config_path: &Path,
+    backup: Option<&Path>,
+    catalog_path: &Path,
+    previous_catalog: Option<&str>,
+) -> bool {
+    let config_ok = match backup {
+        // fs::copy 会连权限一起复制（备份是 600），不会把配置摊成 644
+        Some(backup) => std::fs::copy(backup, config_path).is_ok(),
+        None => remove_if_exists(config_path),
+    };
+    let catalog_ok = match previous_catalog {
+        Some(text) => std::fs::write(catalog_path, text).is_ok(),
+        None => remove_if_exists(catalog_path),
+    };
+    config_ok && catalog_ok
+}
+
+/// 删文件；本来就不存在也算成功。
+fn remove_if_exists(path: &Path) -> bool {
+    match std::fs::remove_file(path) {
+        Ok(()) => true,
+        Err(err) => err.kind() == std::io::ErrorKind::NotFound,
+    }
 }
 
 /// 导入成功后记录 apim 侧的「当前导入项」（TUI 打 ★ / 面板提示用）。
@@ -177,27 +227,26 @@ pub fn current_state(config_dir: &Path) -> Option<CodexState> {
 /// 提示用户重启 Codex（v3.16.1 release notes）。
 ///
 /// 这里直接把在跑的 `codex app-server` 杀掉（codex 下次启动会自动起新的）。
-/// 返回杀掉的进程数；0 = 当时没有 daemon 在跑。不想让它动进程就设 `APIM_NO_RESTART_CODEX=1`。
-/// 重启 codex 的 app-server 守护进程。
+/// 返回成功杀掉的进程数；0 = 当时没有 daemon 在跑。不想让它动进程就设 `APIM_NO_RESTART_CODEX=1`。
 pub fn restart_daemon() -> Result<usize, String> {
     if std::env::var_os("APIM_NO_RESTART_CODEX").is_some() {
         return Ok(0);
     }
+    // 只扫描一次、只杀「这次调用开始前就在跑」的那批：
+    // 重扫再杀会连带杀掉刚被拉起、已经加载了新配置的 daemon，
+    // 甚至杀掉用户此刻新开的会话 —— 既无必要又有害。
     let mut killed = 0;
-    // 杀两轮：`daemon pid-update-loop` 会把主 daemon 拉回来，第一轮之后可能有新的
-    for _ in 0..2 {
-        let pids = codex_server_pids()?;
-        if pids.is_empty() {
-            break;
-        }
-        for pid in pids {
-            let _ = std::process::Command::new("kill")
-                .arg("-TERM")
-                .arg(pid.to_string())
-                .status();
+    for pid in codex_server_pids()? {
+        let ok = std::process::Command::new("kill")
+            .arg("-TERM")
+            .arg(pid.to_string())
+            .status()
+            .map(|status| status.success())
+            .unwrap_or(false);
+        // 只统计真的杀成功的，别把 EPERM 也算进「已重启 N 个」
+        if ok {
             killed += 1;
         }
-        std::thread::sleep(std::time::Duration::from_millis(400));
     }
     Ok(killed)
 }
@@ -228,7 +277,7 @@ fn codex_server_pids() -> Result<Vec<u32>, String> {
 }
 
 /// 一行 `ps -eo pid=,command=` 输出是不是 codex 的 app-server（守护）进程。
-/// 可执行文件名必须正好是 `codex`，且参数里要有 `app-server` 子命令。
+/// 可执行文件名必须正好是 `codex`，且**第一个参数**必须是 `app-server` 子命令。
 #[cfg(unix)]
 pub(crate) fn is_codex_server(line: &str) -> bool {
     let mut tokens = line.split_whitespace();
@@ -240,7 +289,10 @@ pub(crate) fn is_codex_server(line: &str) -> bool {
     if name != "codex" && name != "codex.exe" {
         return false;
     }
-    tokens.any(|token| token == "app-server")
+    // 只认子命令位（argv[2]）：`codex app-server [--listen … | daemon pid-update-loop]`。
+    // 不能扫「任意 token == app-server」—— 那会把 `codex --profile app-server`、
+    // `codex exec "app-server"` 这类用户自己的会话也算进来，杀掉就是误杀。
+    matches!(tokens.next(), Some("app-server"))
 }
 
 /// `~/.codex`（尊重 `CODEX_HOME`）。

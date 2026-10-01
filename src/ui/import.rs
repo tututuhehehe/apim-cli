@@ -88,15 +88,17 @@ fn draw_agent(frame: &mut Frame, app: &App, flow: &ImportFlow, area: Rect) {
 /// 面板上那句「当前 Codex 用的是谁 / 这次要导入谁」。
 fn flow_note(app: &App, flow: &ImportFlow) -> String {
     match &app.codex {
+        // 数据源是 ~/.config/apim/codex.toml（apim 自记），不是回读 codex 的配置，
+        // 所以文案说「apim 上次导入」而不是断言 codex 里现在是什么
         Some(state) if state.key_id() == flow.key_id => {
             format!(
-                "当前：{} 已在 Codex（{} 个模型）",
+                "apim 上次导入的也是 {}（{} 个模型）",
                 state.key_id(),
                 state.models.len()
             )
         }
         Some(state) => format!(
-            "将导入：{}（当前是 {}，它的配置块会保留）",
+            "将导入：{}（apim 上次导入的是 {}，它的配置块会保留）",
             flow.key_id,
             state.key_id()
         ),
