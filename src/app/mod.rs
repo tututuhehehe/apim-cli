@@ -299,11 +299,6 @@ impl App {
             .is_some_and(|record| record.key_id == key_id)
     }
 
-    /// 某个客户端「上次导入」的摘要（面板提示用）。
-    pub fn last_import_of(&self, agent: Agent) -> Option<&LastImport> {
-        self.last_imports.get(&agent)
-    }
-
     pub(crate) fn rebuild_provider_list(&mut self) {
         let mut ids: Vec<String> = Vec::new();
         for key in &self.keys {

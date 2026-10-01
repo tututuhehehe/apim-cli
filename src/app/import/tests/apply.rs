@@ -41,7 +41,7 @@ async fn failed_import_keeps_panel_open_with_reason() {
     assert_eq!(flow(&app).step, ImportStep::Failed);
     assert_eq!(flow(&app).error.as_deref(), Some("codex 未识别这些模型：x"));
     assert!(
-        app.last_import_of(Agent::Codex).is_none(),
+        !app.is_active(Agent::Codex, "alpha.a1"),
         "失败不能留下 ★ 状态"
     );
 }

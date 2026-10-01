@@ -7,15 +7,15 @@ use ratatui::text::{Line, Span};
 use ratatui::widgets::{Clear, Paragraph, Wrap};
 
 use super::{centered, draw_search_box, pane_block, scroll_offset, theme};
-use crate::app::{App, ImportFlow, ImportStep};
+use crate::app::{ImportFlow, ImportStep};
 use crate::clients::Agent;
 
 /// 模型列表最多显示的行数，超出靠滚动。
 const VISIBLE_ROWS: usize = 14;
 
-pub(crate) fn draw_import(frame: &mut Frame, app: &App, flow: &ImportFlow, area: Rect) {
+pub(crate) fn draw_import(frame: &mut Frame, flow: &ImportFlow, area: Rect) {
     match flow.step {
-        ImportStep::Agent => draw_agent(frame, app, flow, area),
+        ImportStep::Agent => draw_agent(frame, flow, area),
         ImportStep::Models => draw_model_picker(frame, flow, area),
         ImportStep::DefaultModel => draw_default_picker(frame, flow, area),
         ImportStep::Working => draw_message(
@@ -43,10 +43,10 @@ pub(crate) fn draw_import(frame: &mut Frame, app: &App, flow: &ImportFlow, area:
 
 // ---- 第一步：选客户端 --------------------------------------------------
 
-fn draw_agent(frame: &mut Frame, app: &App, flow: &ImportFlow, area: Rect) {
-    // 一行一个客户端（显示名）+ 空行 + 将导入 + 快捷键，再加 2 行边框。
-    // 光标行的说明一律不展开：客户端细节写进各自的 README，面板只负责选谁。
-    let height = (Agent::ALL.len() + 5) as u16;
+fn draw_agent(frame: &mut Frame, flow: &ImportFlow, area: Rect) {
+    // 一行一个客户端（显示名）+ 空行 + 快捷键，再加 2 行边框。
+    // 光标行的说明一律不展开：这一屏只负责选谁，客户端细节写在各自子模块的文档里。
+    let height = (Agent::ALL.len() + 4) as u16;
     let rect = centered(76, height, area);
     frame.render_widget(Clear, rect);
     let block = pane_block(" 一键导入 · 选择客户端 ", true);
@@ -69,31 +69,10 @@ fn draw_agent(frame: &mut Frame, app: &App, flow: &ImportFlow, area: Rect) {
     }
     lines.push(Line::from(""));
     lines.push(Line::from(Span::styled(
-        flow_note(app, flow),
-        Style::new().fg(theme::GOLD),
-    )));
-    lines.push(Line::from(Span::styled(
         " j/k 移动   ⏎ 下一步   Esc 取消 ",
         Style::new().fg(theme::MUTED),
     )));
     frame.render_widget(Paragraph::new(lines).wrap(Wrap { trim: false }), inner);
-}
-
-/// 面板上那句「上次导入的是谁 / 这次要导入谁」。
-///
-/// 数据源是 apim 自己记的摘要（`Agent::last_import`），不是回读客户端配置，
-/// 所以文案说「apim 上次导入」而不是断言客户端里现在是什么。
-fn flow_note(app: &App, flow: &ImportFlow) -> String {
-    match app.last_import_of(flow.agent) {
-        Some(record) if record.key_id == flow.key_id => {
-            format!("apim 上次导入的也是 {}：{}", record.key_id, record.summary)
-        }
-        Some(record) => format!(
-            "将导入：{}（apim 上次导入的是 {}）",
-            flow.key_id, record.key_id
-        ),
-        None => format!("将导入：{}", flow.key_id),
-    }
 }
 
 // ---- 第二步：勾选模型 --------------------------------------------------
