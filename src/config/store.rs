@@ -81,6 +81,9 @@ fn write_new_private(path: &Path, contents: &str) -> Result<()> {
             .mode(0o600)
             .open(path)?;
         file.write_all(contents.as_bytes())?;
+        // 先把内容刷到盘再让调用方 rename：否则崩溃后可能留下「文件在、内容是空的」
+        // 的密钥文件（ext4 等会暴露 rename 之后但数据未落盘的窗口）。
+        file.sync_all()?;
     }
     #[cfg(not(unix))]
     {

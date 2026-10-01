@@ -497,3 +497,63 @@ async fn browse_modal_ignores_generation() {
         other => panic!("浏览弹窗应落到 Done，实际 {other:?}"),
     }
 }
+
+// ---- 「导入面板列表 == m 键列表」（原来地笔记 2.7）------------------------
+
+/// 用户明确要求：导入面板列出的模型必须和 `m` 键看到的完全一致。
+/// 这条断言的作用是「有人以后给某一边加筛选/排序时立刻红」。
+#[tokio::test]
+async fn import_panel_lists_exactly_what_the_browse_modal_lists() {
+    let (mut app, _rx, _rx_task) = test_app(&[("alpha", &["a1"])]);
+    app.focus = Focus::Keys;
+    let payload = mixed_entries();
+
+    // 导入面板（选完客户端 → 模型列表落地）
+    app.open_import();
+    app.import_choose_agent();
+    app.import_receive_models("alpha.a1".into(), seq_of(&app), Ok(payload.clone()));
+    let from_import = visible_names(&app);
+
+    // `m` 键浏览弹窗（同一份 payload）
+    app.modal = Modal::None;
+    app.open_models();
+    app.apply_models("alpha.a1".into(), 0, Ok(payload.clone()));
+    let from_browse = match &app.modal {
+        Modal::Models {
+            status: crate::app::ModelsStatus::Done { items, .. },
+            ..
+        } => items.clone(),
+        other => panic!("浏览弹窗应为 Done，实际 {other:?}"),
+    };
+
+    assert_eq!(
+        from_import, from_browse,
+        "导入面板与 m 键的模型列表必须一致"
+    );
+    assert_eq!(from_import, payload, "两边都应是原样（不筛不排）");
+}
+
+/// 防御性：即使 DefaultModel 步在「一个都没勾」的状态下被按了 Enter（UI 到不了这里，
+/// 但将来改动可能放开），也只能原地不动，不能 panic 或写盘。
+#[tokio::test]
+async fn confirm_default_with_nothing_checked_is_a_no_op() {
+    let (mut app, _rx, _rx_task) = test_app(&[("alpha", &["a1"])]);
+    let mut import_flow = ImportFlow::new("alpha.a1".into(), 1);
+    import_flow.step = ImportStep::DefaultModel;
+    import_flow.items = mixed_entries()
+        .into_iter()
+        .map(|name| ModelPick {
+            name,
+            checked: false,
+        })
+        .collect();
+    app.modal = Modal::Import(import_flow);
+
+    app.import_confirm_default();
+    assert_eq!(seq_of(&app), 1, "不该重新发号");
+    assert_eq!(
+        flow(&app).step,
+        ImportStep::DefaultModel,
+        "没可选项时保持原状"
+    );
+}

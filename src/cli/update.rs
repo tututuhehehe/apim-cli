@@ -472,6 +472,17 @@ mod tests {
         assert_eq!(tag_from_url(""), None);
     }
 
+    /// 联网检查 `latest_tag` 能拿到 tag（默认忽略：CI/离线环境不跑）。
+    /// 手动：`cargo test -- --ignored latest_tag_live`
+    #[tokio::test]
+    #[ignore = "需要联网；用 cargo test -- --ignored 手动跑"]
+    async fn latest_tag_live() {
+        let tag = latest_tag()
+            .await
+            .expect("应能从 releases/latest 的重定向拿到 tag");
+        assert!(tag.starts_with('v'), "tag 形如 vX.Y.Z，实际 {tag}");
+    }
+
     /// 摘要校验真跑一遍（会调 shasum/sha256sum）：正确摘要放行、被改过的脚本拦住。
     /// 这是全仓唯一一处把校验交给系统工具的地方，必须有真测试兜着。
     #[cfg(not(windows))]
