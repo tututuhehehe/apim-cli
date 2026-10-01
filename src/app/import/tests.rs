@@ -16,7 +16,12 @@ fn mixed_entries() -> Vec<String> {
 }
 
 fn open(app: &mut App, key_id: &str) {
-    app.modal = Modal::Import(ImportFlow::new(key_id.to_string()));
+    app.modal = Modal::Import(ImportFlow::new(key_id.to_string(), 1));
+}
+
+/// 当前面板的代际号（测试里几乎总是要传它给 apply/import_receive）。
+fn seq_of(app: &App) -> u64 {
+    flow(app).seq
 }
 
 fn flow(app: &App) -> &ImportFlow {
@@ -87,9 +92,9 @@ async fn choosing_agent_fetches_models_and_leaves_selection_empty() {
     // 进入 Models 步骤并在等结果
     assert_eq!(flow(&app).step, ImportStep::Models);
     assert!(flow(&app).loading);
-    assert!(app.import_awaiting("alpha.a1", ImportStep::Models));
+    assert!(app.import_awaiting("alpha.a1", seq_of(&app), ImportStep::Models));
 
-    app.import_receive_models("alpha.a1".into(), Ok(mixed_entries()));
+    app.import_receive_models("alpha.a1".into(), seq_of(&app), Ok(mixed_entries()));
     let flow = flow(&app);
     assert!(!flow.loading);
     assert_eq!(flow.step, ImportStep::Models);
@@ -108,7 +113,7 @@ async fn late_model_result_for_another_key_is_dropped() {
     app.open_import();
     app.import_choose_agent();
 
-    app.import_receive_models("alpha.a2".into(), Ok(mixed_entries()));
+    app.import_receive_models("alpha.a2".into(), seq_of(&app), Ok(mixed_entries()));
     assert!(
         flow(&app).items.is_empty(),
         "别的密钥的结果不能填进当前面板"
@@ -121,7 +126,11 @@ async fn model_fetch_error_lands_in_failed_step() {
     app.focus = Focus::Keys;
     app.open_import();
     app.import_choose_agent();
-    app.import_receive_models("alpha.a1".into(), Err("HTTP 401 未授权".into()));
+    app.import_receive_models(
+        "alpha.a1".into(),
+        seq_of(&app),
+        Err("HTTP 401 未授权".into()),
+    );
     assert_eq!(flow(&app).step, ImportStep::Failed);
     assert_eq!(flow(&app).error.as_deref(), Some("HTTP 401 未授权"));
 }
@@ -132,7 +141,7 @@ fn picker_app() -> App {
     let (mut app, _rx, _rx_task) = test_app(&[("alpha", &["a1"])]);
     app.focus = Focus::Keys;
     open(&mut app, "alpha.a1");
-    let mut app_flow = ImportFlow::new("alpha.a1".into());
+    let mut app_flow = ImportFlow::new("alpha.a1".into(), 1);
     app_flow.step = ImportStep::Models;
     app_flow.items = mixed_entries()
         .into_iter()
@@ -257,6 +266,7 @@ fn report(models: &[&str], model: &str) -> ImportReport {
 fn outcome(key_id: &str, result: Result<ImportReport, String>) -> ImportOutcome {
     ImportOutcome {
         key_id: key_id.into(),
+        seq: 1,
         result,
         state: None,
         state_error: None,
@@ -279,6 +289,7 @@ async fn successful_import_toasts_marks_key_and_closes_panel() {
         default_model: "gpt-6-sol".into(),
         reasoning_effort: DEFAULT_EFFORT.into(),
     });
+    result.seq = seq_of(&app);
     app.import_result(result);
 
     assert!(matches!(app.modal, Modal::None), "成功后应关面板");
@@ -297,7 +308,9 @@ async fn failed_import_keeps_panel_open_with_reason() {
     let mut app = picker_app();
     app.import_toggle();
     app.import_confirm_models();
-    app.import_result(outcome("alpha.a1", Err("codex 未识别这些模型：x".into())));
+    let mut failed = outcome("alpha.a1", Err("codex 未识别这些模型：x".into()));
+    failed.seq = seq_of(&app);
+    app.import_result(failed);
 
     assert_eq!(flow(&app).step, ImportStep::Failed);
     assert_eq!(flow(&app).error.as_deref(), Some("codex 未识别这些模型：x"));
@@ -398,5 +411,89 @@ fn flow_mut(app: &mut App) -> &mut ImportFlow {
     match &mut app.modal {
         Modal::Import(flow) => flow,
         other => panic!("期望导入面板，实际 {other:?}"),
+    }
+}
+
+// ---- 请求代际（原来地笔记 2.3）--------------------------------------------
+
+/// 面板关掉再为**同一把密钥**重开时，上一代的模型列表不能落到新面板里。
+#[tokio::test]
+async fn stale_model_list_from_an_earlier_generation_is_dropped() {
+    let (mut app, _rx, _rx_task) = test_app(&[("alpha", &["a1"])]);
+    app.focus = Focus::Keys;
+
+    // 第一代：发起请求后关掉面板
+    app.open_import();
+    let first_seq = seq_of(&app);
+    app.import_choose_agent();
+    app.cancel_modal();
+
+    // 第二代：同一把密钥重开并重新请求
+    app.open_import();
+    let second_seq = seq_of(&app);
+    assert_ne!(first_seq, second_seq, "每次打开面板都应是新的一代");
+    app.import_choose_agent();
+
+    // 第一代的结果迟到 → 必须被丢弃（面板仍是 loading）
+    app.import_receive_models("alpha.a1".into(), first_seq, Ok(mixed_entries()));
+    assert!(flow(&app).items.is_empty(), "旧代际的列表不能落到新面板");
+    assert!(flow(&app).loading, "面板应仍在等自己那一代的结果");
+
+    // 第二代的结果才落地
+    app.import_receive_models("alpha.a1".into(), second_seq, Ok(mixed_entries()));
+    assert_eq!(visible_names(&app), mixed_entries());
+}
+
+/// 上一代的导入回执不能关掉新面板（同一把密钥重来时）。
+#[tokio::test]
+async fn stale_import_outcome_does_not_close_a_newer_panel() {
+    let (mut app, _rx, _rx_task) = test_app(&[("alpha", &["a1"])]);
+    app.focus = Focus::Keys;
+
+    app.open_import();
+    let first_seq = seq_of(&app);
+    app.cancel_modal();
+
+    // 新面板停在 Waiting
+    app.open_import();
+    let mut stale = outcome("alpha.a1", Ok(report(&["gpt-6-sol"], "gpt-6-sol")));
+    stale.seq = first_seq;
+    stale.state = Some(CodexState {
+        provider: "alpha".into(),
+        provider_name: "alpha".into(),
+        alias: "a1".into(),
+        provider_key: "alpha".into(),
+        models: vec!["gpt-6-sol".into()],
+        default_model: "gpt-6-sol".into(),
+        reasoning_effort: DEFAULT_EFFORT.into(),
+    });
+    app.import_result(stale);
+
+    assert!(
+        matches!(app.modal, Modal::Import(_)),
+        "旧代际的回执不该关掉新面板"
+    );
+    assert!(app.toast_text().is_some(), "但要给一条提示");
+    assert!(app.codex.is_some(), "导入本身是成功的，★ 记录应更新");
+}
+
+/// `m` 键浏览弹窗不参与代际（固定 seq=0），仍要能正常落地。
+#[tokio::test]
+async fn browse_modal_ignores_generation() {
+    let (mut app, _rx, _rx_task) = test_app(&[("alpha", &["a1"])]);
+    app.focus = Focus::Keys;
+    app.modal = crate::app::Modal::Models {
+        key_id: "alpha.a1".into(),
+        status: crate::app::ModelsStatus::Loading,
+        filter: String::new(),
+        searching: false,
+    };
+    app.apply_models("alpha.a1".into(), 0, Ok(mixed_entries()));
+    match &app.modal {
+        crate::app::Modal::Models {
+            status: crate::app::ModelsStatus::Done { items, .. },
+            ..
+        } => assert_eq!(items, &mixed_entries()),
+        other => panic!("浏览弹窗应落到 Done，实际 {other:?}"),
     }
 }

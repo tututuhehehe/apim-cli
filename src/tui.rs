@@ -77,7 +77,7 @@ async fn loop_tui(
                 if let Some(msg) = msg {
                     // 弹窗可能已被关掉/换了把密钥打开：两边都按 key_id 匹配，不匹配丢弃
                     match msg {
-                        TaskMsg::Models(key_id, result) => app.apply_models(key_id, result),
+                        TaskMsg::Models(key_id, seq, result) => app.apply_models(key_id, seq, result),
                         TaskMsg::Import(outcome) => app.import_result(*outcome),
                     }
                 }
@@ -255,7 +255,7 @@ pub(crate) async fn run_snapshot_import() -> Result<()> {
         default_model: "gpt-6-sol".into(),
         reasoning_effort: crate::clients::DEFAULT_EFFORT.into(),
     });
-    app.modal = Modal::Import(ImportFlow::new(snapshot_key_id(&app)));
+    app.modal = Modal::Import(ImportFlow::new(snapshot_key_id(&app), 0));
     render_snapshot(&app).await
 }
 
@@ -263,7 +263,7 @@ pub(crate) async fn run_snapshot_import() -> Result<()> {
 pub(crate) async fn run_snapshot_import_models() -> Result<()> {
     let (mut app, _rx, _rx_task) = App::start()?;
     app.focus = Focus::Keys;
-    let mut flow = ImportFlow::new(snapshot_key_id(&app));
+    let mut flow = ImportFlow::new(snapshot_key_id(&app), 0);
     flow.step = ImportStep::Models;
     flow.items = vec![
         ModelPick {
@@ -291,7 +291,7 @@ pub(crate) async fn run_snapshot_import_models() -> Result<()> {
 pub(crate) async fn run_snapshot_import_default() -> Result<()> {
     let (mut app, _rx, _rx_task) = App::start()?;
     app.focus = Focus::Keys;
-    let mut flow = ImportFlow::new(snapshot_key_id(&app));
+    let mut flow = ImportFlow::new(snapshot_key_id(&app), 0);
     flow.step = ImportStep::DefaultModel;
     flow.items = vec![
         ModelPick {

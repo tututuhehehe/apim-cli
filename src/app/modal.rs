@@ -401,16 +401,17 @@ impl App {
         let tx = self.tx_task.clone();
         tokio::spawn(async move {
             let result = probe::fetch_models(&client, &recipe, &key.token).await;
-            let _ = tx.send(TaskMsg::Models(key_id, result));
+            // 浏览弹窗不关心代际（0 = 不做代际校验）
+            let _ = tx.send(TaskMsg::Models(key_id, 0, result));
         });
     }
 
     /// 模型列表拉取结果落地：一键导入面板优先（它打开时会顶掉浏览弹窗），
     /// 否则交给模型浏览弹窗；两边都按 key_id 匹配，不匹配就丢弃
     /// （弹窗可能已被关掉或换了把密钥打开）。
-    pub fn apply_models(&mut self, key_id: String, result: Result<Vec<String>, String>) {
-        if self.import_awaiting(&key_id, ImportStep::Models) {
-            self.import_receive_models(key_id, result);
+    pub fn apply_models(&mut self, key_id: String, seq: u64, result: Result<Vec<String>, String>) {
+        if self.import_awaiting(&key_id, seq, ImportStep::Models) {
+            self.import_receive_models(key_id, seq, result);
             return;
         }
         let Modal::Models {
@@ -586,6 +587,7 @@ mod tests {
             config_dir: crate::app::tests::test_config_dir("modal"),
             codex: None,
             restart_codex_daemon: false,
+            next_import_seq: 0,
             undo_stack: std::collections::VecDeque::new(),
         };
         app.rebuild_provider_list();
@@ -703,6 +705,7 @@ mod tests {
         app.modal = models_loading("alpha.a1");
         app.apply_models(
             "alpha.a1".into(),
+            0,
             Ok(entries(&["claude-4", "gpt-5", "Claude-3"])),
         );
         assert!(!app.models_is_searching());
@@ -754,7 +757,7 @@ mod tests {
     fn models_copy_uses_filtered_selection() {
         let (mut app, _rx, _rx_models) = crate::app::tests::test_app(&[("alpha", &["a1"])]);
         app.modal = models_loading("alpha.a1");
-        app.apply_models("alpha.a1".into(), Ok(entries(&["claude-4", "gpt-5"])));
+        app.apply_models("alpha.a1".into(), 0, Ok(entries(&["claude-4", "gpt-5"])));
         app.models_start_search();
         app.models_search_char('g');
         // 只断言「选中哪一个」，不碰真实剪贴板（CI / Linux 无显示环境会失败）
@@ -770,22 +773,22 @@ mod tests {
         let (mut app, _rx, _rx_models) = crate::app::tests::test_app(&[("alpha", &["a1"])]);
         app.modal = models_loading("alpha.a1");
         // key_id 匹配：Loading → Done，选中从 0 开始
-        app.apply_models("alpha.a1".into(), Ok(entries(&["m1", "m2"])));
+        app.apply_models("alpha.a1".into(), 0, Ok(entries(&["m1", "m2"])));
         let (id, status) = models_modal(&app);
         assert_eq!(id, "alpha.a1");
         assert_eq!(status, &done(&["m1", "m2"]));
         // key_id 不匹配（迟到结果）：丢弃，状态不变
-        app.apply_models("alpha.b2".into(), Err("late".into()));
+        app.apply_models("alpha.b2".into(), 0, Err("late".into()));
         assert_eq!(models_modal(&app).1, &done(&["m1", "m2"]));
         // 匹配的错误结果：转 Error
-        app.apply_models("alpha.a1".into(), Err("HTTP 401".into()));
+        app.apply_models("alpha.a1".into(), 0, Err("HTTP 401".into()));
         assert!(
             matches!(models_modal(&app).1, ModelsStatus::Error { .. }),
             "错误结果应落地 Error"
         );
         // 弹窗已关：结果丢弃，不复活
         app.modal = Modal::None;
-        app.apply_models("alpha.a1".into(), Ok(entries(&["m1"])));
+        app.apply_models("alpha.a1".into(), 0, Ok(entries(&["m1"])));
         assert!(matches!(app.modal, Modal::None));
     }
 
@@ -802,12 +805,12 @@ mod tests {
             .await
             .expect("应收到模型拉取结果")
             .expect("channel 不应关闭");
-        let TaskMsg::Models(back_id, result) = msg else {
+        let TaskMsg::Models(back_id, _seq, result) = msg else {
             panic!("本该是模型列表消息");
         };
         assert_eq!(back_id, "alpha.a1");
         assert!(result.is_err(), "假厂商拉模型应失败: {result:?}");
-        app.apply_models(back_id, result);
+        app.apply_models(back_id, 0, result);
         assert!(
             matches!(models_modal(&app).1, ModelsStatus::Error { .. }),
             "错误结果应落地 Error"

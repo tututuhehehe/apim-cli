@@ -38,6 +38,8 @@ pub struct ModelPick {
 #[derive(Debug, Clone)]
 pub struct ImportFlow {
     pub key_id: String,
+    /// 本次面板的请求代际（App 单调发号）。迟到的模型列表/导入回执代际不匹配就丢弃。
+    pub seq: u64,
     pub step: ImportStep,
     /// Agent 步骤的选中下标。
     pub agent: usize,
@@ -55,9 +57,10 @@ pub struct ImportFlow {
 }
 
 impl ImportFlow {
-    pub fn new(key_id: String) -> Self {
+    pub fn new(key_id: String, seq: u64) -> Self {
         Self {
             key_id,
+            seq,
             step: ImportStep::Agent,
             agent: 0,
             loading: false,
@@ -109,6 +112,8 @@ impl ImportFlow {
 #[derive(Debug)]
 pub struct ImportOutcome {
     pub key_id: String,
+    /// 发起这次导入时面板的代际号（面板换了一代就不再关它、只落一条提示）。
+    pub seq: u64,
     pub result: Result<ImportReport, String>,
     /// 成功后记录的状态（用于 ★ 标记与面板提示）。
     pub state: Option<CodexState>,
@@ -140,10 +145,16 @@ impl App {
         }
     }
 
-    /// 面板正在等这个密钥的模型列表 / 导入结果（迟到结果据此丢弃）。
-    pub fn import_awaiting(&self, key_id: &str, step: ImportStep) -> bool {
+    /// 面板正在等这把密钥（且是这一代）的模型列表 / 导入结果（迟到结果据此丢弃）。
+    pub fn import_awaiting(&self, key_id: &str, seq: u64, step: ImportStep) -> bool {
         self.import_flow()
-            .is_some_and(|flow| flow.key_id == key_id && flow.step == step)
+            .is_some_and(|flow| flow.key_id == key_id && flow.seq == seq && flow.step == step)
+    }
+
+    /// 取一个新的导入代际号。
+    fn next_import_seq(&mut self) -> u64 {
+        self.next_import_seq += 1;
+        self.next_import_seq
     }
 
     /// 密钥栏按 `x`：打开面板第一步（选客户端）。
@@ -163,7 +174,8 @@ impl App {
             ));
             return;
         }
-        self.modal = Modal::Import(ImportFlow::new(key.id()));
+        let seq = self.next_import_seq();
+        self.modal = Modal::Import(ImportFlow::new(key.id(), seq));
     }
 
     pub fn import_move_agent(&mut self, delta: isize) {
@@ -179,6 +191,7 @@ impl App {
             return;
         };
         let key_id = flow.key_id.clone();
+        let seq = flow.seq;
         let Some(key) = self.keys.iter().find(|key| key.id() == key_id).cloned() else {
             self.toast = Some(("这把密钥已不存在".into(), Instant::now()));
             self.modal = Modal::None;
@@ -206,16 +219,22 @@ impl App {
         let tx = self.tx_task.clone();
         tokio::spawn(async move {
             let result = probe::fetch_models(&client, &recipe, &key.token).await;
-            let _ = tx.send(TaskMsg::Models(key_id, result));
+            let _ = tx.send(TaskMsg::Models(key_id, seq, result));
         });
     }
 
     /// 模型列表落地。
-    pub fn import_receive_models(&mut self, key_id: String, result: Result<Vec<String>, String>) {
+    pub fn import_receive_models(
+        &mut self,
+        key_id: String,
+        seq: u64,
+        result: Result<Vec<String>, String>,
+    ) {
         let Some(flow) = self.import_flow_mut() else {
             return;
         };
-        if flow.key_id != key_id || flow.step != ImportStep::Models {
+        // 代际不匹配 = 上一个面板（同一把密钥）发的请求，迟到结果直接丢
+        if flow.key_id != key_id || flow.seq != seq || flow.step != ImportStep::Models {
             return;
         }
         flow.loading = false;
@@ -383,6 +402,7 @@ impl App {
         };
         let request_key_id = request.key_id();
         let fallback_key_id = request_key_id.clone();
+        let import_seq = self.import_flow().map(|flow| flow.seq).unwrap_or_default();
         let config_dir = self.config_dir.clone();
         let restart_daemon = self.restart_codex_daemon;
         let tx = self.tx_task.clone();
@@ -405,6 +425,7 @@ impl App {
                 };
                 ImportOutcome {
                     key_id: request_key_id,
+                    seq: import_seq,
                     result,
                     state,
                     state_error,
@@ -414,6 +435,7 @@ impl App {
             .await
             .unwrap_or_else(|err| ImportOutcome {
                 key_id: fallback_key_id,
+                seq: import_seq,
                 result: Err(format!("导入任务异常终止：{err}")),
                 state: None,
                 state_error: None,
@@ -425,9 +447,10 @@ impl App {
 
     /// 导入结果落地：成功就给成功反馈并关面板，失败留下面板显示原因。
     pub fn import_result(&mut self, outcome: ImportOutcome) {
+        // 代际也要对上：面板关掉再开、对同一把密钥重来时，旧回执不该关掉新面板
         let waiting = self
             .import_flow()
-            .is_some_and(|flow| flow.key_id == outcome.key_id);
+            .is_some_and(|flow| flow.key_id == outcome.key_id && flow.seq == outcome.seq);
         match outcome.result {
             Ok(report) => {
                 if let Some(state) = outcome.state {

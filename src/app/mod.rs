@@ -55,8 +55,10 @@ pub const AUTO_REFRESH_INTERVAL: Duration = Duration::from_secs(5 * 60);
 /// 后台任务回执：模型列表拉取 / 一键导入结果。两者共用一条通道，
 /// 因为同一时刻只会有一个弹窗在等结果，消费端按 key_id 匹配即可。
 pub enum TaskMsg {
-    /// (key_id, 该密钥可见的模型列表)
-    Models(String, std::result::Result<Vec<String>, String>),
+    /// (key_id, 请求代际, 该密钥可见的模型列表)。
+    /// 代际来自 App 的单调计数器：面板关掉再开、对同一把密钥重新发请求时，旧结果代际不匹配
+    /// 就会被丢弃（否则旧列表会盖掉新列表）。浏览弹窗（`m` 键）不关心代际，固定传 0。
+    Models(String, u64, std::result::Result<Vec<String>, String>),
     /// 一键导入到客户端的结果
     Import(Box<ImportOutcome>),
 }
@@ -99,6 +101,9 @@ pub struct App {
     /// 导入成功后是否自动重启 codex 守护进程（codex 只在 daemon 启动时读一次模型目录）。
     /// 测试里一律关掉，免得 `cargo test` 去杀用户机器上正在跑的 codex。
     pub(crate) restart_codex_daemon: bool,
+    /// 导入面板的请求代际发号器（单调递增）：面板关掉再开、对同一把密钥重发请求时，
+    /// 靠它把旧结果丢掉。
+    pub(crate) next_import_seq: u64,
     /// 本次打开面板后的写操作历史（Ctrl+Z 逐步回退），只存可逆的写操作。
     pub(crate) undo_stack: VecDeque<UndoAction>,
 }
@@ -133,6 +138,7 @@ impl App {
             config_dir,
             codex,
             restart_codex_daemon: true,
+            next_import_seq: 0,
             undo_stack: VecDeque::new(),
         };
         app.rebuild_provider_list();
@@ -594,6 +600,7 @@ pub(crate) mod tests {
             config_dir: test_config_dir("app"),
             codex: None,
             restart_codex_daemon: false,
+            next_import_seq: 0,
             undo_stack: VecDeque::new(),
         };
         app.rebuild_provider_list();
