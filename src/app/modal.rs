@@ -585,7 +585,11 @@ mod tests {
             client: crate::probe::client().expect("client"),
             next_auto_refresh: Instant::now() + std::time::Duration::from_secs(300),
             config_dir: crate::app::tests::test_config_dir("modal"),
-            last_imports: HashMap::new(),
+            active_keys: HashMap::new(),
+            agent_homes: std::collections::HashMap::from([(
+                crate::clients::Agent::Codex,
+                crate::app::tests::test_agent_home(),
+            )]),
             restart_codex_daemon: false,
             next_import_seq: 0,
             import_runner: None,

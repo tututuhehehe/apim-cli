@@ -45,14 +45,12 @@ pub(crate) fn draw_keys(frame: &mut Frame, app: &App, area: Rect) {
         .map(|(i, idx)| {
             let key = &app.keys[idx];
             let (style, label) = status_label(app, key);
-            // ★ = 这把密钥是 apim 上次导入给该客户端的那把
-            let alias = if app.is_active(crate::clients::Agent::Codex, &key.id()) {
-                Cell::from(Span::styled(
-                    format!("★ {}", key.alias),
+            let alias = match import_badge(app, &key.id()) {
+                Some(badge) => Cell::from(Span::styled(
+                    format!("{badge} {}", key.alias),
                     Style::new().fg(theme::GOLD).add_modifier(Modifier::BOLD),
-                ))
-            } else {
-                Cell::from(key.alias.clone())
+                )),
+                None => Cell::from(key.alias.clone()),
             };
             Row::new([
                 Cell::from(format!("{}", i + 1)),
@@ -112,6 +110,17 @@ pub(crate) fn draw_keys(frame: &mut Frame, app: &App, area: Rect) {
     }
 }
 
+/// 密钥行别名前面的 ★ 角标：`★C`（被 Codex 用）/ `★C,P`（多个客户端都用）。
+/// 角标字母来自 `Agent::badge()`；没被任何客户端用 → None（就是普通别名）。
+fn import_badge(app: &App, key_id: &str) -> Option<String> {
+    let using = app.agents_using(key_id);
+    if using.is_empty() {
+        return None;
+    }
+    let badges: Vec<&str> = using.iter().map(|agent| agent.badge()).collect();
+    Some(format!("★{}", badges.join(",")))
+}
+
 fn status_label(app: &App, key: &KeyEntry) -> (Style, String) {
     if app.is_checking(&key.id()) {
         return (Style::new().fg(theme::MUTED), "… 检查中".into());
@@ -129,5 +138,32 @@ fn status_label(app: &App, key: &KeyEntry) -> (Style, String) {
             (Style::new().fg(theme::ERR), short)
         }
         Health::Live { .. } => (Style::new().fg(theme::OK), "● 可用".into()),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::app::tests::test_app;
+    use crate::clients::Agent;
+
+    /// ★ 角标只反映「这个客户端现在真的在用这把密钥」。
+    #[test]
+    fn badge_shows_the_clients_that_actually_use_the_key() {
+        let (mut app, _rx, _rx_task) = test_app(&[("alpha", &["a1", "a2"])]);
+        assert_eq!(
+            import_badge(&app, "alpha.a1"),
+            None,
+            "没被任何客户端用就没有角标"
+        );
+
+        app.active_keys
+            .insert(Agent::Codex, vec!["alpha.a1".into()]);
+        assert_eq!(import_badge(&app, "alpha.a1").as_deref(), Some("★C"));
+        assert_eq!(
+            import_badge(&app, "alpha.a2"),
+            None,
+            "别的密钥不该被贴上角标"
+        );
     }
 }

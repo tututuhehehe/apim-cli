@@ -16,7 +16,6 @@ use super::catalog::{self, CATALOG_FILE, DEFAULT_EFFORT};
 use super::codex_home;
 use super::config_file;
 use super::lock::HomeLock;
-use super::store::{self, CodexState};
 
 /// Codex 保留的内置 provider id：用户自定义 provider 不能占用这些名字。
 const RESERVED_PROVIDER_IDS: &[&str] = &[
@@ -38,19 +37,10 @@ pub struct ImportRequest {
     pub base_url: String,
     /// 写进 `experimental_bearer_token` 的密钥。
     pub api_key: String,
-    /// apim 的密钥别名，只进状态文件（用于 TUI 的 ★ 标记）。
-    pub alias: String,
     /// 勾选导入的模型（至少 1 个）。
     pub models: Vec<String>,
     /// 默认模型，必须是 `models` 之一。
     pub default_model: String,
-}
-
-impl ImportRequest {
-    /// 与 `KeyEntry::id()` 同构，用来把结果对应回某把密钥。
-    pub fn key_id(&self) -> String {
-        format!("{}.{}", self.provider_id, self.alias)
-    }
 }
 
 /// 导入成功后的结果，用于 TUI 反馈。
@@ -178,31 +168,6 @@ fn remove_if_exists(path: &Path) -> bool {
         Ok(()) => true,
         Err(err) => err.kind() == std::io::ErrorKind::NotFound,
     }
-}
-
-/// 导入成功后记录 apim 侧的「当前导入项」（TUI 打 ★ / 面板提示用）。
-/// 返回值第二项是状态文件写失败的说明（导入本身已成功）。
-pub fn remember(
-    config_dir: &Path,
-    request: &ImportRequest,
-    report: &ImportReport,
-) -> (CodexState, Option<String>) {
-    let state = CodexState {
-        provider: request.provider_id.clone(),
-        provider_name: request.provider_name.clone(),
-        alias: request.alias.clone(),
-        provider_key: report.provider_key.clone(),
-        models: report.models.clone(),
-        default_model: report.model.clone(),
-        reasoning_effort: report.reasoning_effort.clone(),
-    };
-    let error = store::save(config_dir, &state).err();
-    (state, error)
-}
-
-/// 读 apim 侧记录的「当前导入项」（面板/★ 标记用）。
-pub fn current_state(config_dir: &Path) -> Option<CodexState> {
-    store::load(config_dir)
 }
 
 /// 写进 `config.toml` 的 provider 表名：保留 id 会被 codex 拒绝，加前缀躲开。

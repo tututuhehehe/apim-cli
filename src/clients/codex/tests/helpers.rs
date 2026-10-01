@@ -3,10 +3,9 @@
 use std::fs;
 use std::path::{Path, PathBuf};
 
+use crate::clients::codex::ImportRequest;
 use crate::clients::codex::catalog::CATALOG_FILE;
 use crate::clients::codex::config_file;
-use crate::clients::codex::store::CodexState;
-use crate::clients::codex::{DEFAULT_EFFORT, ImportRequest};
 
 /// 本次测试专用的临时目录（`target/` 下，名字带测试名 + pid，每次重建）。
 pub(super) fn temp_dir(name: &str) -> PathBuf {
@@ -30,14 +29,13 @@ pub(super) fn assert_no_tmp(dir: &Path) {
     assert!(leftovers.is_empty(), "残留 tmp: {leftovers:?}");
 }
 
-/// 测试用的导入请求：厂商固定 ikun，别名与模型由调用方给（第一个 = 默认模型）。
-pub(super) fn request_for(alias: &str, models: &[&str]) -> ImportRequest {
+/// 测试用的导入请求：厂商固定 ikun，模型由调用方给（第一个 = 默认模型）。
+pub(super) fn request_for(models: &[&str]) -> ImportRequest {
     ImportRequest {
         provider_id: "ikun".into(),
         provider_name: "ikun".into(),
         base_url: "https://api.ikuncode.cc".into(),
         api_key: "sk-placeholder".into(),
-        alias: alias.into(),
         models: models.iter().map(|m| (*m).to_string()).collect(),
         default_model: models[0].to_string(),
     }
@@ -57,19 +55,6 @@ pub(super) fn provider_write<'a>(
         catalog_file: CATALOG_FILE,
         model,
         reasoning_effort: effort,
-    }
-}
-
-/// 测试用的 apim 侧状态（导入记录）。
-pub(super) fn state_for(provider: &str, alias: &str, models: &[&str]) -> CodexState {
-    CodexState {
-        provider: provider.into(),
-        provider_name: provider.into(),
-        alias: alias.into(),
-        provider_key: provider.into(),
-        models: models.iter().map(|m| (*m).to_string()).collect(),
-        default_model: models[0].to_string(),
-        reasoning_effort: DEFAULT_EFFORT.into(),
     }
 }
 

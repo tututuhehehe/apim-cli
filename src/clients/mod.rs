@@ -1,9 +1,11 @@
-//! 客户端（agent）适配：把 apim 里的密钥 + 厂商 + 模型一键写进外部 CLI 的配置。
+//! 客户端（agent）适配：把 apim 里的密钥 + 厂商 + 模型一键写进外部 CLI 的配置，
+//! 以及**回读客户端现场**回答「它现在真正在用哪把密钥」（密钥行的 ★ 角标）。
 //!
 //! 现在只有 Codex。**加一个新客户端（Claude Code / pi …）要动的地方是固定的三处**：
 //!
 //! 1. 下面给 [`Agent`] 加一个变体（所有 `match` 都会被编译器强制补全）；
-//! 2. 加一个 `clients/<id>/` 子模块，实现「写哪里 / 怎么写 / 怎么写完后校验 / 怎么重新加载」；
+//! 2. 加一个 `clients/<id>/` 子模块，实现「写哪里 / 怎么写 / 怎么写完后校验 / 怎么重新加载 /
+//!    怎么从自家配置里认出正在用的密钥」；
 //! 3. `Agent` 的新方法里加一条分派（通常一行）。
 //!
 //! 面板（`app/import`、`ui/import`）**不需要改**：它只经 `Agent` 的这些方法调客户端，
@@ -19,7 +21,10 @@ pub mod codex;
 pub use codex::{DEFAULT_EFFORT, ImportReport, ImportRequest, RestartReport};
 
 use std::collections::HashMap;
-use std::path::Path;
+use std::path::{Path, PathBuf};
+
+use crate::config::KeyEntry;
+use crate::recipe::Recipe;
 
 /// 一键导入的目标客户端。
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
@@ -27,15 +32,20 @@ pub enum Agent {
     Codex,
 }
 
-/// 「上次导入」的摘要：面板用它显示「上次导入的是谁」，密钥栏用它打 ★。
+/// 客户端配置里**现在真正生效**的 provider（各客户端子模块读自家配置得出）。
 ///
-/// 由各客户端适配层自己产出（它才知道自家配置里写了什么），面板不解析客户端细节。
+/// apim **不记**「上次导入了谁」：★ 只认客户端现场 —— 每次检测都回读客户端的配置文件，
+/// 再拿里面的 token / 地址和 apim 的密钥对账。所以用户手改了客户端配置（换 token、
+/// 把 `model_provider` 切走、删掉那个 provider 块），★ 会跟着变，而不是留在旧密钥上。
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub struct LastImport {
-    /// apim 的密钥 id（`厂商.别名`）。
-    pub key_id: String,
-    /// 一句话摘要（模型数 / 默认模型 / 思考强度 / 配置表名…）。
-    pub summary: String,
+pub struct ActiveProvider {
+    /// 客户端配置里激活的 provider 表名（codex：顶层 `model_provider` 指向的
+    /// `[model_providers.<key>]`）。
+    pub provider_key: String,
+    /// 该 provider 的 API 根地址（原样，未归一化）。
+    pub base_url: String,
+    /// 写在该 provider 上的 bearer token；客户端改用环境变量取 token（`env_key`）时为 None。
+    pub token: Option<String>,
 }
 
 impl Agent {
@@ -49,6 +59,13 @@ impl Agent {
         }
     }
 
+    /// ★ 角标上的短标。多个客户端同时用同一把密钥时并排显示（`★C`、`★C,P`）。
+    pub fn badge(self) -> &'static str {
+        match self {
+            Agent::Codex => "C",
+        }
+    }
+
     /// 目标配置文件位置，面板上给用户看的提示。
     ///
     /// 返回 `String` 而不是字面量：有些客户端的位置由环境变量决定（`CODEX_HOME`），
@@ -59,39 +76,38 @@ impl Agent {
         }
     }
 
+    /// 这个客户端**现在真正在用**的 apim 密钥 id（对不上 → 空数组）。
+    pub fn active_key_ids(
+        self,
+        keys: &[KeyEntry],
+        recipes: &HashMap<String, Recipe>,
+        home: Option<&Path>,
+    ) -> Vec<String> {
+        match self {
+            Agent::Codex => codex::active_key_ids(home, keys, recipes),
+        }
+    }
+
+    /// 读全部客户端的现场 → `{客户端: 正在用的密钥 id}`。TUI 启动/刷新时算一次。
+    pub fn detect_active_keys(
+        keys: &[KeyEntry],
+        recipes: &HashMap<String, Recipe>,
+        homes: &HashMap<Agent, PathBuf>,
+    ) -> HashMap<Agent, Vec<String>> {
+        Agent::ALL
+            .iter()
+            .map(|agent| {
+                let ids =
+                    agent.active_key_ids(keys, recipes, homes.get(agent).map(PathBuf::as_path));
+                (*agent, ids)
+            })
+            .collect()
+    }
+
     /// 真正写盘：把请求落到客户端配置（各家自己实现格式与校验）。
     pub fn import(self, request: &ImportRequest) -> Result<ImportReport, String> {
         match self {
             Agent::Codex => codex::import(request),
-        }
-    }
-
-    /// 导入成功后记录 apim 侧状态（各客户端写自己的文件）。返回写失败的说明（不影响导入结果）。
-    pub fn remember(
-        self,
-        config_dir: &Path,
-        request: &ImportRequest,
-        report: &ImportReport,
-    ) -> Option<String> {
-        match self {
-            Agent::Codex => codex::remember(config_dir, request, report).1,
-        }
-    }
-
-    /// 读「上次导入」的摘要（面板与 ★ 用）。
-    pub fn last_import(self, config_dir: &Path) -> Option<LastImport> {
-        match self {
-            Agent::Codex => codex::current_state(config_dir).map(|state| LastImport {
-                key_id: state.key_id(),
-                summary: format!(
-                    "{}（表名 {}）· 默认 {} · 强度 {} · {} 个模型",
-                    state.provider_name,
-                    state.provider_key,
-                    state.default_model,
-                    state.reasoning_effort,
-                    state.models.len()
-                ),
-            }),
         }
     }
 
@@ -107,13 +123,5 @@ impl Agent {
         match self {
             Agent::Codex => codex::restart_daemon(),
         }
-    }
-
-    /// 一次性读全部客户端的「上次导入」——`App` 启动时用它填面板状态。
-    pub fn load_all_last_imports(config_dir: &Path) -> HashMap<Agent, LastImport> {
-        Agent::ALL
-            .iter()
-            .filter_map(|agent| agent.last_import(config_dir).map(|record| (*agent, record)))
-            .collect()
     }
 }

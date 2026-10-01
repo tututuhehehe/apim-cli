@@ -10,27 +10,28 @@
 //!    `model_messages.instructions_template`，两样都缺会解析报错 —— 见 `catalog`。
 //!
 //! 子模块分工：
+//! - `active`：回读 `config.toml` 现场，回答「现在在用哪把密钥」（★ 角标）
 //! - `catalog`：模型目录的生成与校验（照官方字段手写迷你条目）+ 本机 codex 可执行文件定位
 //! - `config_file`：`config.toml` 的保注释读写（toml_edit + 备份 + 原子写）
-//! - `import`：一次导入的编排（锁 → 改配置 → 写目录 → 校验 → 回滚 → 记录）
+//! - `import`：一次导入的编排（锁 → 改配置 → 写目录 → 校验 → 回滚）
 //! - `lock`：导入期间对 codex home 的排他锁
 //! - `restart`：导入后重启 codex 的 app-server 守护进程
-//! - `store`：apim 侧的「当前导入项」状态文件
 //!
 //! 下面只再导出**模块外真的在用的**那几条 —— `clients/mod.rs` 经 [`crate::clients::Agent`]
 //! 调它们；测试（在同一个模块树里）直接经子模块路径取内部项（如
 //! `codex::import::import_in`），不再往外搬一层（在二进制 crate 里，没人用的 `pub use`
 //! 会被 `unused_imports` 判成警告）。
 
+mod active;
 mod catalog;
 mod config_file;
 mod import;
 mod lock;
 mod restart;
-mod store;
 
+pub(crate) use active::active_key_ids;
 pub use catalog::DEFAULT_EFFORT;
-pub use import::{ImportReport, ImportRequest, current_state, import, remember};
+pub use import::{ImportReport, ImportRequest, import, normalize_base_url, provider_key};
 pub use restart::{RestartReport, restart_daemon};
 
 use std::path::PathBuf;

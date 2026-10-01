@@ -26,7 +26,7 @@ src/
 │       ├── restart.rs RestartReport、按进程表找 codex daemon 并重启（严格匹配 argv[2]）
 │       ├── config_file.rs  ~/.codex/config.toml 读改写（toml_edit 保注释保顺序）+ 备份 + 原子写
 │       ├── catalog.rs 模型目录：手写官方迷你条目（~1KB/模型）+ `codex debug models` 端到端校验
-│       ├── store.rs   ~/.config/apim/codex.toml（★ 标记用的「当前导入项」）
+│       ├── active.rs  回读 ~/.codex/config.toml 现场：现在在用哪把密钥（★ 角标）
 │       └── tests/     沙盒测试（按源码文件分）+ 真机 opt-in（`--ignored codex_real_end_to_end`）
 ├── cli/               CLI 子命令（AI/脚本的机器接口，与 TUI 共用底层）
 │   ├── mod.rs         Args 解析（--flag 值/布尔）、Ctx（config+recipes 目录，可注入测试）、分发与帮助
@@ -90,9 +90,10 @@ recipes/              内置 recipe ×4（deepseek/openai/moonshot/openrouter，
 - `~/.config/apim/config.toml` — 密钥清单（provider/alias/group，无 token）
 - `~/.config/apim/secrets.toml` — token，键名 `"厂商.别名"`，600 权限
 - `~/.config/apim/recipes/*.yaml` — 用户厂商 recipe，同 id 覆盖内置
-- `~/.config/apim/codex.toml` — apim 最后一次一键导入到 Codex 的记录（只用于 ★ 标记与面板提示，不反向决定写什么）
 - `~/.codex/config.toml`、`~/.codex/apim-models.json` — 一键导入（`x` 键）写的，前者每次改写前备份成 `config.toml.apim.bak`
 - `APIM_CONFIG_DIR` 环境变量可重定向整个配置目录（测试用）
+
+★ 不落在 apim 自己的文件里：密钥行的 ★ 是**回读各客户端配置现场**算出来的，见约定 11。
 
 ## 核心约定
 
@@ -119,15 +120,16 @@ recipes/              内置 recipe ×4（deepseek/openai/moonshot/openrouter，
     - `wire_api` 只接受 `"responses"`（0.134+ 删了 `"chat"`，写了会硬报错）→ 中转站得提供 `/v1/responses`；**导入面板的模型列表必须与 `m` 键完全一致**（同一个 `probe::fetch_models` / `parse_models`，只取模型名）；**不要做端点能力判断** —— `supported_endpoint_types` 是 new-api 后端的端点映射配置而非能力探测，实测会漏报（ikun 把 `gpt-6-sol` 标成只有 `openai`，实际 /responses 完全能用），照它筛会藏掉能用的模型。
     - `model_catalog_json` 相对路径按 `CODEX_HOME` 解析；它是**整表替换**（不是合并）；条目必须带 `base_instructions`（不能缺也不能给空串）；`supports_reasoning_summaries`（codex ≥0.144.5）与 `supports_parallel_tool_calls`（0.144.5~0.148.0-alpha.15）也被部分版本当必填 —— 两个字段名都给最安全（cc-switch v3.18.0 / v3.20.2 release notes 记了这两个坑）。
     - 模型条目照官方字段**手写迷你条目**（GLM / DeepSeek 官方 Codex 文档 + cc-switch 实测模板）：`shell_type: shell_command`、`apply_patch_tool_type: freeform`、中性 `base_instructions`、`input_modalities` fail-open 给 `[text, image]`、上下文窗口用 codex 给未知模型的默认值 272000。**不要克隆 `codex debug models --bundled` 里的 GPT 条目** —— 那会带进 `code_mode_only`、`use_responses_lite`、`max_context_window: 872000` 和 62KB harness 提示词（v1 就是这么错的一版，目录 64KB/模型）。导入完用 `codex debug models` 反向校验勾选的模型都在（校验是硬前提，没装 codex 直接报错）。
+    - **★ 不存 apim 侧台账**：密钥行的 ★ 是**回读客户端现场**算出来的 —— codex 读 `config.toml` 的顶层 `model_provider` → `[model_providers.<key>]`，拿 `experimental_bearer_token`（或只有 `env_key` 时用 `base_url`）与 apim 密钥对账（表名 + token 都一致才算），所以用户手改了 codex 配置 ★ 会跟着变、不会留在旧密钥上。多个客户端都用同一把时并排成角标 `★C`（字母取自 `Agent::badge()`）。写入成功后重算一次，`r`/自动刷新时也重算。
     - 厂商 id 撞上保留名（`openai`/`ollama`/`lmstudio`/`amazon-bedrock*`）时加 `apim-` 前缀。
 
 12. **`apim update` 只认三条渠道**（install.sh / npm / Homebrew，见 `docs/RELEASING.md` 的速查表）：`src/cli/update.rs` 按可执行文件路径认渠道（npm 看 `node_modules/apim-cli`、brew 看 `Cellar/apim`，其余当 install.sh 装的裸二进制），裸二进制那条复用官方 install.sh，但**不是 `curl | sh`**：URL 钉到本次要更新到的 tag、下载到临时文件、先做形状校验（是 shell 脚本 / 是本仓库安装器 / 含 sha256 校验）、再按 Release 发布的 `install.sh.sha256` 校验摘要（**拿不到摘要就拒绝执行**），最后用 `sh <file>` 跑；`APIM_INSTALL_DIR` 钉在当前二进制的**真实位置**（先 canonicalize，否则符号链接会被替换掉）保证原地更新。**`target/` 下的开发构建与 `~/.cargo/bin` 里的 cargo 副本一律不更新**（前者会被 Release 覆盖掉开发二进制，后者是 `cargo install` 留下的、被 PATH 遮挡的多余副本）。加渠道要同时改 `Channel` 与它的识别规则、测试和 RELEASING 的表；`apim uninstall` 复用同一套 `detect_channel`，新渠道的卸载动作会被 `uninstall_program` 的穷尽 `match` 拦下（编译器逼你补），但提示语与单测仍要手工过一遍。
 
 13. **加一个客户端（Claude Code / pi …）就是三处改动**，别在面板里写客户端专属分支：
     - `src/clients/mod.rs`：加 `Agent` 变体（所有 `match` 会被编译器强制补全）+ 一条分派；
-    - `src/clients/<id>/`：新子模块，实现「写哪里 / 怎么写 / 写完后怎么校验 / 怎么重新加载」；
-    - `app/import` 与 `ui/import` **不用改**：它们只经 `Agent` 的 `import/remember/reload/last_import/label/config_hint` 调客户端；选择面板只列客户端名，不展开各家说明（要写就写在客户端子模块的文档里）。
-    - 例外（已知）：密钥行的 ★ 目前读 `App::last_imports` 里 Codex 那一条，`Agent::last_import` 已经通用，加客户端时只需确认 ★ 是否要一起显示多客户端。
+    - `src/clients/<id>/`：新子模块，实现「写哪里 / 怎么写 / 写完后怎么校验 / 怎么重新加载 / 怎么从自家配置里认出正在用的密钥」；
+    - `app/import` 与 `ui/import` **不用改**：它们只经 `Agent` 的 `import/reload/label/config_hint/active_key_ids` 调客户端；选择面板只列客户端名，不展开各家说明（要写就写在客户端子模块的文档里）。
+    - 密钥行的 ★ 已经按客户端通用：`Agent::active_key_ids` 各自回读现场，UI 用 `Agent::badge()` 拼角标（`★C`、`★C,P`），加客户端只需补 `active_key_ids` 与 `badge` 两条分派。
     - **不要**给客户端造 YAML 配方（约定 2 的数据化范围是厂商协议）；客户端之间不是同一套协议，各写 Rust 更直白。
     - 「不需要选模型的客户端」暂时还得先做一步重构：`ImportRequest.models/default_model` 现在是必填，要先改成 `Option` 才能让面板跳过勾选模型两步（见 `DEV-NOTES.local.md`）。
 

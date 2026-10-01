@@ -34,7 +34,7 @@ fn codex_real_end_to_end() {
         fs::write(home.join("config.toml"), text).unwrap();
     }
 
-    let request = request_for("codex", &["deepseek-flash", "deepseek-chat"]);
+    let request = request_for(&["deepseek-flash", "deepseek-chat"]);
     let report = import_in(&home, &request, Some(&bin)).expect("真机导入应成功");
 
     let written = fs::read_to_string(home.join("config.toml")).unwrap();

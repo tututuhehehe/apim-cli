@@ -17,7 +17,7 @@ use std::time::{Duration, Instant};
 use anyhow::Result;
 use tokio::sync::mpsc::{self, UnboundedReceiver, UnboundedSender};
 
-use crate::clients::{Agent, LastImport};
+use crate::clients::Agent;
 use crate::clipboard;
 use crate::config::{self, KeyEntry};
 use crate::probe::{self, BalanceSnapshot, Health, ProbeResult};
@@ -96,9 +96,11 @@ pub struct App {
     /// 配置根目录（`~/.config/apim` 或 `APIM_CONFIG_DIR`）。落盘都经它，
     /// 测试注入临时目录，不碰真实配置。
     pub(crate) config_dir: PathBuf,
-    /// 各客户端「上次导入」的摘要（★ 标记与面板提示）。启动时读一次，导入成功后刷新。
-    /// 内容由客户端适配层产出（`Agent::last_import`），面板不解析客户端细节。
-    pub last_imports: HashMap<Agent, LastImport>,
+    /// 各客户端**现在真正在用**的密钥 id（客户端配置现场读出来的，密钥行 ★ 角标用）。
+    /// 启动时算一次，导入成功后与刷新时重算 —— 客户端配置可能被用户手改，所以不信自己的记忆。
+    pub active_keys: HashMap<Agent, Vec<String>>,
+    /// 客户端配置目录的测试注入（生产为空：各客户端按自身规则解析，如 codex 认 `CODEX_HOME`）。
+    pub(crate) agent_homes: HashMap<Agent, PathBuf>,
     /// 导入成功后是否自动重启 codex 守护进程（codex 只在 daemon 启动时读一次模型目录）。
     /// 测试里一律关掉，免得 `cargo test` 去杀用户机器上正在跑的 codex。
     pub(crate) restart_codex_daemon: bool,
@@ -119,7 +121,8 @@ impl App {
         let (tx, rx) = mpsc::unbounded_channel();
         let (tx_task, rx_task) = mpsc::unbounded_channel();
         let config_dir = config::config_dir();
-        let last_imports = Agent::load_all_last_imports(&config_dir);
+        let agent_homes = HashMap::new();
+        let active_keys = Agent::detect_active_keys(&keys, &recipes, &agent_homes);
         let mut app = App {
             recipes,
             keys,
@@ -140,7 +143,8 @@ impl App {
             client: probe::client()?,
             next_auto_refresh: Instant::now() + AUTO_REFRESH_INTERVAL,
             config_dir,
-            last_imports,
+            active_keys,
+            agent_homes,
             restart_codex_daemon: true,
             next_import_seq: 0,
             import_runner: None,
@@ -292,11 +296,23 @@ impl App {
         self.states.get(&key.id()).cloned().unwrap_or_default()
     }
 
-    /// 这把密钥是不是 apim 上次导入给 `agent` 的那把（密钥行打 ★）。
-    pub fn is_active(&self, agent: Agent, key_id: &str) -> bool {
-        self.last_imports
-            .get(&agent)
-            .is_some_and(|record| record.key_id == key_id)
+    /// 这把密钥**现在正被哪些**客户端用（密钥行的 ★ 角标；顺序同 `Agent::ALL`）。
+    pub fn agents_using(&self, key_id: &str) -> Vec<Agent> {
+        Agent::ALL
+            .iter()
+            .copied()
+            .filter(|agent| {
+                self.active_keys
+                    .get(agent)
+                    .is_some_and(|ids| ids.iter().any(|id| id == key_id))
+            })
+            .collect()
+    }
+
+    /// 重读各客户端配置，刷新「哪把密钥现在正被谁用」（★ 角标）。
+    /// 客户端配置可能被用户手改，所以导入成功后、刷新时都要重算，而不是信 apim 自己的记忆。
+    pub(crate) fn refresh_active_keys(&mut self) {
+        self.active_keys = Agent::detect_active_keys(&self.keys, &self.recipes, &self.agent_homes);
     }
 
     pub(crate) fn rebuild_provider_list(&mut self) {
@@ -460,6 +476,8 @@ impl App {
 
     /// 全量刷新：所有厂商的所有密钥（启动一次 + 每 AUTO_REFRESH_INTERVAL 一次）。
     pub fn refresh_all_keys(&mut self) {
+        // 用户可能手改了客户端的 config（切 provider / 换 token），顺手把 ★ 重算一遍
+        self.refresh_active_keys();
         for idx in 0..self.keys.len() {
             self.spawn_probe(idx);
         }
@@ -468,6 +486,7 @@ impl App {
 
     /// 手动刷新（`r`）：当前厂商。切换厂商不触发刷新，只读缓存。
     pub fn refresh_current_provider(&mut self) {
+        self.refresh_active_keys();
         let idxs = self.keys_in_provider();
         for idx in idxs {
             self.spawn_probe(idx);
@@ -603,7 +622,8 @@ pub(crate) mod tests {
             client: probe::client().expect("构建测试用 reqwest client"),
             next_auto_refresh: Instant::now() + AUTO_REFRESH_INTERVAL,
             config_dir: test_config_dir("app"),
-            last_imports: HashMap::new(),
+            active_keys: HashMap::new(),
+            agent_homes: HashMap::from([(Agent::Codex, test_agent_home())]),
             restart_codex_daemon: false,
             next_import_seq: 0,
             import_runner: None,
@@ -619,6 +639,23 @@ pub(crate) mod tests {
             .join("target")
             .join(format!("apim-app-{name}-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&dir);
+        dir
+    }
+
+    /// 每个测试 App 一个**空**的客户端配置目录：★ 检测默认什么都读不到，
+    /// 不碰开发者本机的 `~/.codex`。要测「codex 现在在用哪把密钥」就往里写 config.toml。
+    pub(crate) fn test_agent_home() -> PathBuf {
+        use std::sync::atomic::{AtomicUsize, Ordering};
+        static NEXT: AtomicUsize = AtomicUsize::new(0);
+        let dir = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+            .join("target")
+            .join(format!(
+                "apim-agent-home-{}-{}",
+                std::process::id(),
+                NEXT.fetch_add(1, Ordering::Relaxed)
+            ));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).expect("建测试用的客户端配置目录");
         dir
     }
 

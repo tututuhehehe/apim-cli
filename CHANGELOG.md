@@ -5,6 +5,18 @@
 
 ## [Unreleased]
 
+### 变更
+
+- **密钥行 ★ 改成回读客户端现场**：不再写 `~/.config/apim/codex.toml` 台账，而是每次启动 / 刷新 /
+  导入成功后读一遍 codex 的 `config.toml`（顶层 `model_provider` → `[model_providers.<id>]` 的
+  `experimental_bearer_token`，或只有 `env_key` 时用 `base_url`）与 apim 的密钥对账 ——
+  手改了客户端配置，★ 会跟着消失，不再留在旧密钥上。多个客户端都用同一把时叠成角标（`★C`、`★C,P`）
+
+### 移除
+
+- `~/.config/apim/codex.toml`（apim 侧的「上次导入了谁」记录）—— 升级后可以手删；
+  `ImportRequest` 不再需要 `alias`
+
 ## [0.1.3] - 2026-10-01
 
 ### 新增

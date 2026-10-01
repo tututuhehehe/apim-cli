@@ -202,9 +202,9 @@ apim status <id> --json
 
 ## 一键导入到 Codex（TUI `x` 键，暂无 CLI）
 
-密钥表里选中一把密钥按 `x`：把「这把密钥 + 它的厂商 + 勾选的模型」写进 Codex 配置（`~/.codex/config.toml`）。面板三步：选客户端（目前只有 Codex）→ 勾选模型（列表与 `m` 键一致；`空格` 勾选、`a` 全选、`/` 搜索、`⏎` 下一步）→ 选默认模型（从已勾选里挑一个写进 `config.toml` 的 `model`；只勾一个时自动跳过）。导入后会跑 `codex debug models` 让 codex 自己解析一遍新配置来确认成功，密钥行上会打 ★ 标出当前导入的那把。
+密钥表里选中一把密钥按 `x`：把「这把密钥 + 它的厂商 + 勾选的模型」写进 Codex 配置（`~/.codex/config.toml`）。面板三步：选客户端（目前只有 Codex）→ 勾选模型（列表与 `m` 键一致；`空格` 勾选、`a` 全选、`/` 搜索、`⏎` 下一步）→ 选默认模型（从已勾选里挑一个写进 `config.toml` 的 `model`；只勾一个时自动跳过）。导入后会跑 `codex debug models` 让 codex 自己解析一遍新配置来确认成功，密钥行上会打 ★ 角标（`★C`）标出**当前真正在用**的那把 —— 它是回读 codex 配置现场算出来的，你手改了 `~/.codex/config.toml`（换 token / 切走 `model_provider`）下次刷新 ★ 就消失。
 
-**模型不在 `config.toml` 里**（Codex 的机制，GLM / DeepSeek 官方 Codex 文档也是这个写法）：顶层只写 `model_provider` / `model` / `model_reasoning_effort` / `model_catalog_json="apim-models.json"`，模型元数据（每模型都带 medium/high/xhigh/max 四档思考等级，默认档固定 high；面板不让人挑）在 `~/.codex/apim-models.json`。apim 侧记在 `~/.config/apim/codex.toml`。
+**模型不在 `config.toml` 里**（Codex 的机制，GLM / DeepSeek 官方 Codex 文档也是这个写法）：顶层只写 `model_provider` / `model` / `model_reasoning_effort` / `model_catalog_json="apim-models.json"`，模型元数据（每模型都带 medium/high/xhigh/max 四档思考等级，默认档固定 high；面板不让人挑）在 `~/.codex/apim-models.json`。apim 侧**不存**导入记录（★ 是回读 codex 配置现场算的）。
 
 **导入完 apim 会自动重启 codex 的 app-server 守护进程**（`APIM_NO_RESTART_CODEX=1` 可关）：codex 只在 daemon 启动时读一次模型目录，不重启时 `codex exec` 已能用新模型、但 `/model` 里还是旧表。判断方法：`ps -o pid,lstart,command -p $(pgrep -f "app-server" | tr '\n' ',')` 看 daemon 启动时间是否早于导入时间。
 

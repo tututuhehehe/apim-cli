@@ -563,7 +563,11 @@ mod tests {
             client: reqwest::Client::new(),
             next_auto_refresh: Instant::now(),
             config_dir: crate::app::tests::test_config_dir("inspector"),
-            last_imports: HashMap::new(),
+            active_keys: HashMap::new(),
+            agent_homes: HashMap::from([(
+                crate::clients::Agent::Codex,
+                crate::app::tests::test_agent_home(),
+            )]),
             restart_codex_daemon: false,
             next_import_seq: 0,
             import_runner: None,

@@ -52,7 +52,7 @@ fn import_end_to_end_writes_config_catalog_and_verifies() {
     .unwrap();
     let bin = fake_codex(&dir);
 
-    let request = request_for("codex", &["glm-5", "gpt-6-sol"]);
+    let request = request_for(&["glm-5", "gpt-6-sol"]);
     let report = import_in(&home, &request, Some(&bin)).unwrap();
 
     assert_eq!(report.provider_key, "ikun");
@@ -95,14 +95,14 @@ fn import_fails_when_codex_does_not_recognize_a_model() {
     // 假 codex 的 `debug models` 永远吐空目录 → 校验必须失败
     let bin = fake_codex_with_empty_catalog(&dir);
 
-    let err = import_in(&home, &request_for("codex", &["gpt-6-sol"]), Some(&bin)).unwrap_err();
+    let err = import_in(&home, &request_for(&["gpt-6-sol"]), Some(&bin)).unwrap_err();
     assert!(err.contains("未识别"), "{err}");
 }
 
 #[test]
 fn import_without_codex_binary_reports_actionable_error() {
     let dir = temp_dir("import-no-codex");
-    let err = import_in(&dir, &request_for("codex", &["m1"]), None).unwrap_err();
+    let err = import_in(&dir, &request_for(&["m1"]), None).unwrap_err();
     assert!(err.contains("APIM_CODEX_BIN"), "{err}");
     // 失败时不能留下半截配置
     assert!(!dir.join("config.toml").exists());
@@ -121,7 +121,7 @@ fn failed_verify_rolls_back_config_and_catalog() {
     // 假 codex：`debug models` 永远吐空目录 → 校验必然失败
     let bin = fake_codex_with_empty_catalog(&dir);
 
-    let err = import_in(&home, &request_for("codex", &["gpt-6-sol"]), Some(&bin)).unwrap_err();
+    let err = import_in(&home, &request_for(&["gpt-6-sol"]), Some(&bin)).unwrap_err();
     assert!(err.contains("未识别"), "{err}");
     assert!(err.contains("已还原"), "错误里应说明已还原：{err}");
     // config.toml 逐字节回到导入前
@@ -152,14 +152,14 @@ fn concurrent_import_is_locked_out() {
     )
     .unwrap();
 
-    let err = import_in(&home, &request_for("codex", &["m1"]), Some(&bin)).unwrap_err();
+    let err = import_in(&home, &request_for(&["m1"]), Some(&bin)).unwrap_err();
     assert!(err.contains("另一个 apim"), "应提示被锁挡住：{err}");
     assert!(!home.join("config.toml").exists(), "被挡住时不该写任何东西");
     assert!(!home.join(CATALOG_FILE).exists(), "被挡住时不该写目录");
 
     // 释放后能正常导入，且导入结束要把锁清掉（否则下一次永远进不来）
     fs::remove_file(home.join(".apim-import.lock")).unwrap();
-    import_in(&home, &request_for("codex", &["m1"]), Some(&bin)).unwrap();
+    import_in(&home, &request_for(&["m1"]), Some(&bin)).unwrap();
     assert!(!home.join(".apim-import.lock").exists(), "导入结束要清除锁");
 }
 
@@ -174,7 +174,7 @@ fn stale_lock_is_taken_over() {
     // 999_999 基本不可能是活着的进程
     fs::write(home.join(".apim-import.lock"), "999999\n").unwrap();
 
-    import_in(&home, &request_for("codex", &["m1"]), Some(&bin)).expect("陈旧锁应被认领");
+    import_in(&home, &request_for(&["m1"]), Some(&bin)).expect("陈旧锁应被认领");
     assert!(home.join("config.toml").exists());
     assert!(!home.join(".apim-import.lock").exists());
 }
@@ -189,6 +189,6 @@ fn corrupt_lock_is_treated_as_stale() {
     let bin = fake_codex(&dir);
     fs::write(home.join(".apim-import.lock"), "not-a-pid").unwrap();
 
-    import_in(&home, &request_for("codex", &["m1"]), Some(&bin)).expect("坏锁应被认领");
+    import_in(&home, &request_for(&["m1"]), Some(&bin)).expect("坏锁应被认领");
     assert!(!home.join(".apim-import.lock").exists());
 }

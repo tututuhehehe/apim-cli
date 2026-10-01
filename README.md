@@ -216,10 +216,10 @@ Before reporting success it makes **codex itself parse the new config** (`codex 
 | `~/.codex/config.toml` top level | `model_provider` = provider id, `model` = default model, `model_reasoning_effort` = default reasoning effort, `model_catalog_json = "apim-models.json"` |
 | `~/.codex/config.toml` → `[model_providers.<provider-id>]` | `name` / `base_url` (`/v1` appended when missing) / `wire_api = "responses"` / `experimental_bearer_token` |
 | `~/.codex/apim-models.json` | Metadata for the ticked models: each carries the `medium/high/xhigh/max` reasoning levels plus the default one. This is what `/model` reads |
-| `~/.config/apim/codex.toml` | apim's record of "what is currently imported" (key, models, effort), used for the ★ marker on the key row |
 
 Deliberate choices:
 
+- **The ★ next to a key is read live, never remembered.** apim keeps **no** record of "what it last imported": on start, on `r`, and after every import it re-reads Codex's own config (top-level `model_provider` → that `[model_providers.<id>]` block) and matches the `experimental_bearer_token` in it (or `base_url`, when the block gets its token from `env_key`) against your keys. The key that is **actually in use** gets `★C` (`C` = client initial from `Agent::badge()`; several clients can stack as `★C,P`). Hand-edit Codex's config — swap the token, point `model_provider` elsewhere, delete the block — and the ★ follows on the next refresh instead of lying to you.
 - **Switch the active provider, never rewrite the file.** Codex happily keeps several `[model_providers.*]` blocks at once but only activates the one named by `model_provider`. Importing therefore leaves the previous provider block intact (change `model_provider` back to switch), and your comments, `[projects.*]` and `[tui]` are preserved.
 - **The price: the old block keeps its old token.** apim never prunes previous provider blocks, so the token you switched away from stays in plaintext in `~/.codex/config.toml`. Delete that block when you are done with the provider (or rotate/revoke the key on the provider side).
 - **The key goes into `experimental_bearer_token`.** `~/.codex/config.toml` is already mode 600. If you rotate the key in apim, press `x` again to sync.
@@ -242,7 +242,8 @@ Everything lives under `~/.config/apim/`. TUI edits write these two files direct
 
 - `config.toml` — alias and group (no tokens)
 - `secrets.toml` — the actual tokens, keyed by `"provider.alias"`
-- `codex.toml` — what apim last imported into Codex (used by the `x` key for the ★ marker and panel hints)
+
+Nothing apim-side records the import: the ★ marker on a key row is computed from the client's own config (see above).
 
 Hand-edit example:
 

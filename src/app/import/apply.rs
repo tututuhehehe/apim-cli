@@ -4,7 +4,7 @@
 use std::time::Instant;
 
 use crate::app::{App, Modal, TaskMsg};
-use crate::clients::{Agent, ImportReport, ImportRequest, LastImport, RestartReport};
+use crate::clients::{Agent, ImportReport, ImportRequest, RestartReport};
 
 use super::ImportStep;
 
@@ -18,16 +18,12 @@ pub(crate) type ImportRunner =
 /// 后台导入任务的结果回执。
 #[derive(Debug)]
 pub struct ImportOutcome {
-    /// 这次导入交给哪个客户端（提示文案与 ★ 记录都按它来）。
+    /// 这次导入交给哪个客户端（提示文案按它来；★ 则回读客户端现场得出）。
     pub agent: Agent,
     pub key_id: String,
     /// 发起这次导入时面板的代际号（面板换了一代就不再关它、只落一条提示）。
     pub seq: u64,
     pub result: Result<ImportReport, String>,
-    /// 成功后该客户端「上次导入」的摘要（★ 标记与面板提示用）。
-    pub last_import: Option<LastImport>,
-    /// 状态文件写失败时的说明（导入本身是成功的）。
-    pub state_error: Option<String>,
     /// 让客户端重新加载的结果（`killed=0` 表示当时没在跑或已被禁用）。
     pub restart: RestartReport,
 }
@@ -63,7 +59,6 @@ impl App {
             provider_name: recipe.name.clone(),
             base_url: recipe.base_url.clone(),
             api_key: key.token.clone(),
-            alias: key.alias.clone(),
             models,
             default_model,
         };
@@ -71,10 +66,8 @@ impl App {
             .import_flow()
             .map(|flow| flow.agent)
             .unwrap_or(Agent::Codex);
-        let request_key_id = request.key_id();
-        let fallback_key_id = request_key_id.clone();
+        let fallback_key_id = key_id.clone();
         let import_seq = self.import_flow().map(|flow| flow.seq).unwrap_or_default();
-        let config_dir = self.config_dir.clone();
         let restart_daemon = self.restart_codex_daemon;
         let runner = self.import_runner.clone();
         let tx = self.tx_task.clone();
@@ -85,13 +78,6 @@ impl App {
                     Some(runner) => runner(agent, &request),
                     None => agent.import(&request),
                 };
-                let (last_import, state_error) = match &result {
-                    Ok(report) => {
-                        let error = agent.remember(&config_dir, &request, report);
-                        (agent.last_import(&config_dir), error)
-                    }
-                    Err(_) => (None, None),
-                };
                 // 写成功才重新加载：客户端只在进程启动时读一次配置
                 let restart = if result.is_ok() && restart_daemon && agent.needs_reload() {
                     agent.reload().unwrap_or_default()
@@ -100,11 +86,9 @@ impl App {
                 };
                 ImportOutcome {
                     agent,
-                    key_id: request_key_id,
+                    key_id,
                     seq: import_seq,
                     result,
-                    last_import,
-                    state_error,
                     restart,
                 }
             })
@@ -114,8 +98,6 @@ impl App {
                 key_id: fallback_key_id,
                 seq: import_seq,
                 result: Err(format!("导入任务异常终止：{err}")),
-                last_import: None,
-                state_error: None,
                 restart: RestartReport::default(),
             });
             let _ = tx.send(TaskMsg::Import(Box::new(outcome)));
@@ -130,9 +112,8 @@ impl App {
             .is_some_and(|flow| flow.key_id == outcome.key_id && flow.seq == outcome.seq);
         match outcome.result {
             Ok(report) => {
-                if let Some(record) = outcome.last_import {
-                    self.last_imports.insert(outcome.agent, record);
-                }
+                // ★ 回读客户端现场得出（不存 apim 侧的台账）：这里刚写完配置，重算一定准
+                self.refresh_active_keys();
                 let mut note = format!(
                     "已导入 {}：{} · {} 个模型 · 默认 {} · 强度 {} · 表名 {}",
                     outcome.agent.label(),
@@ -164,9 +145,6 @@ impl App {
                         " · 重启 {} 后才会列出新模型",
                         outcome.agent.label()
                     ));
-                }
-                if let Some(error) = outcome.state_error {
-                    note.push_str(&format!("（状态未记录：{error}）"));
                 }
                 self.toast = Some((note, Instant::now()));
                 if waiting {

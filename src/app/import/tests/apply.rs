@@ -6,12 +6,13 @@ use super::*;
 // ---- 结果反馈 ----------------------------------------------------------
 
 #[tokio::test]
-async fn successful_import_toasts_marks_key_and_closes_panel() {
+async fn successful_import_toasts_and_marks_the_key_codex_now_uses() {
     let mut app = picker_app();
+    // 导入刚写完后的现场：codex 的 config.toml 里已经是 alpha.a1 这把密钥
+    codex_uses(&app, "sk-test-placeholder");
     app.import_toggle();
     app.import_confirm_models();
     let mut result = outcome("alpha.a1", Ok(report(&["gpt-6-sol"], "gpt-6-sol")));
-    result.last_import = Some(last_import("alpha.a1"));
     result.seq = seq_of(&app);
     app.import_result(result);
 
@@ -22,11 +23,30 @@ async fn successful_import_toasts_marks_key_and_closes_panel() {
             "已导入 Codex：alpha.a1 · 1 个模型 · 默认 gpt-6-sol · 强度 high · 表名 alpha · 重启 Codex 后才会列出新模型"
         )
     );
-    assert!(
-        app.is_active(Agent::Codex, "alpha.a1"),
+    assert_eq!(
+        app.agents_using("alpha.a1"),
+        vec![Agent::Codex],
         "★ 应打在这把密钥上"
     );
-    assert!(!app.is_active(Agent::Codex, "alpha.a2"));
+    assert!(app.agents_using("alpha.a2").is_empty());
+}
+
+/// ★ 是回读客户端现场得出的：用户手改了 codex 的 config（这里把 token 换掉），
+/// 刷新后 ★ 必须消失 —— apim 不存「上次导入了谁」这种会过期的台账。
+#[tokio::test]
+async fn star_disappears_after_the_client_config_is_hand_edited() {
+    let mut app = picker_app();
+    codex_uses(&app, "sk-test-placeholder");
+    app.refresh_active_keys();
+    assert_eq!(app.agents_using("alpha.a1"), vec![Agent::Codex]);
+
+    // 用户自己在 ~/.codex/config.toml 里换了 token
+    codex_uses(&app, "sk-hand-written");
+    app.refresh_active_keys();
+    assert!(
+        app.agents_using("alpha.a1").is_empty(),
+        "配置里的 token 换了，就不该再说这把密钥在用"
+    );
 }
 
 #[tokio::test]
@@ -41,7 +61,7 @@ async fn failed_import_keeps_panel_open_with_reason() {
     assert_eq!(flow(&app).step, ImportStep::Failed);
     assert_eq!(flow(&app).error.as_deref(), Some("codex 未识别这些模型：x"));
     assert!(
-        !app.is_active(Agent::Codex, "alpha.a1"),
+        app.agents_using("alpha.a1").is_empty(),
         "失败不能留下 ★ 状态"
     );
 }
@@ -97,9 +117,9 @@ async fn stale_import_outcome_does_not_close_a_newer_panel() {
 
     // 新面板停在 Waiting
     app.open_import();
+    codex_uses(&app, "sk-test-placeholder");
     let mut stale = outcome("alpha.a1", Ok(report(&["gpt-6-sol"], "gpt-6-sol")));
     stale.seq = first_seq;
-    stale.last_import = Some(last_import("alpha.a1"));
     app.import_result(stale);
 
     assert!(
@@ -107,9 +127,10 @@ async fn stale_import_outcome_does_not_close_a_newer_panel() {
         "旧代际的回执不该关掉新面板"
     );
     assert!(app.toast_text().is_some(), "但要给一条提示");
-    assert!(
-        app.is_active(Agent::Codex, "alpha.a1"),
-        "导入本身是成功的，★ 记录应更新"
+    assert_eq!(
+        app.agents_using("alpha.a1"),
+        vec![Agent::Codex],
+        "导入本身是成功的，★ 应更新"
     );
 }
 
@@ -176,7 +197,7 @@ async fn import_panel_lists_exactly_what_the_browse_modal_lists() {
 #[tokio::test]
 async fn import_request_goes_to_the_selected_agent() {
     use std::sync::{Arc, Mutex};
-    /// runner 收到的调用记录：(交给了哪个客户端, 密钥 id, 勾选的模型)
+    /// runner 收到的调用记录：(交给了哪个客户端, 厂商 id, 勾选的模型)
     type Calls = Arc<Mutex<Vec<(Agent, String, Vec<String>)>>>;
     let (mut app, _rx, _rx_task) = test_app(&[("alpha", &["a1"])]);
     app.focus = Focus::Keys;
@@ -187,7 +208,7 @@ async fn import_request_goes_to_the_selected_agent() {
         recorder
             .lock()
             .unwrap()
-            .push((agent, request.key_id(), request.models.clone()));
+            .push((agent, request.provider_id.clone(), request.models.clone()));
         Ok(report(&["gpt-6-sol"], "gpt-6-sol"))
     }));
 
@@ -208,6 +229,6 @@ async fn import_request_goes_to_the_selected_agent() {
     let calls = seen.lock().unwrap().clone();
     assert_eq!(calls.len(), 1, "runner 应被调用一次");
     assert_eq!(calls[0].0, Agent::Codex, "交给的应是所选客户端");
-    assert_eq!(calls[0].1, "alpha.a1");
+    assert_eq!(calls[0].1, "alpha");
     assert_eq!(calls[0].2, vec!["gpt-6-sol".to_string()]);
 }

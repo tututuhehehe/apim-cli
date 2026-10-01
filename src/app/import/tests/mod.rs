@@ -7,7 +7,7 @@ use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 use super::*;
 use crate::app::Focus;
 use crate::app::tests::test_app;
-use crate::clients::{Agent, DEFAULT_EFFORT, ImportReport, LastImport, RestartReport};
+use crate::clients::{Agent, DEFAULT_EFFORT, ImportReport, RestartReport};
 
 mod apply;
 mod flow;
@@ -93,18 +93,28 @@ fn outcome(key_id: &str, result: Result<ImportReport, String>) -> ImportOutcome 
         key_id: key_id.into(),
         seq: 1,
         result,
-        last_import: None,
-        state_error: None,
         restart: RestartReport::default(),
     }
 }
 
-/// 测试用的「上次导入」摘要。
-fn last_import(key_id: &str) -> LastImport {
-    LastImport {
-        key_id: key_id.into(),
-        summary: format!("alpha（表名 alpha）· 默认 gpt-6-sol · 强度 {DEFAULT_EFFORT} · 1 个模型"),
-    }
+/// 造一个「codex 现在真的在用这把密钥」的现场：把 `app` 的客户端配置目录填上 config.toml。
+///
+/// 这正是导入刚写完后的样子 —— ★ 现在是回读现场得出的，所以要测「打了 ★」就得先有现场。
+fn codex_uses(app: &App, token: &str) {
+    let home = app
+        .agent_homes
+        .get(&Agent::Codex)
+        .expect("测试 App 有客户端配置目录");
+    std::fs::write(
+        home.join("config.toml"),
+        format!(
+            "model = \"gpt-6-sol\"\nmodel_provider = \"alpha\"\n\n\
+             [model_providers.alpha]\nname = \"alpha\"\n\
+             base_url = \"https://example.invalid/v1\"\nwire_api = \"responses\"\n\
+             experimental_bearer_token = \"{token}\"\n"
+        ),
+    )
+    .unwrap();
 }
 
 fn flow_mut(app: &mut App) -> &mut ImportFlow {
