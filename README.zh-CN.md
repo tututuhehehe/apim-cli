@@ -196,6 +196,7 @@ apim status glm --json
 几个刻意的选择：
 
 - **只切换激活项，不删旧配置**。Codex 允许 `config.toml` 里同时存在多个 `[model_providers.*]`，但同一时刻只有 `model_provider` 指向的那一个生效。所以导入新厂商时旧的 provider 块原样保留（想切回去改一下 `model_provider` 就行），你手写的注释、`[projects.*]`、`[tui]` 也不会被重写。
+- **代价：旧块里的旧 token 也一起留着**。apim 不会清理旧 provider 块，所以切走之后那个厂商的 `experimental_bearer_token` 仍然明文躺在 `~/.codex/config.toml` 里 —— 不打算再用就手动删掉那个块（或在那个厂商侧轮换/吊销这把 key）。
 - **密钥直接写进 `experimental_bearer_token`**。`~/.codex/config.toml` 本来就是 600 权限。在 apim 里轮换这把 key 后，记得重新按一次 `x` 同步。
 - **思考强度不用选**：目录里每个模型都声明 `medium/high/xhigh/max` 四档，顶层 `model_reasoning_effort` 固定写 `high`（面板上不让你逐个挑）。想换档就在 codex 里用 `/model` 选，或直接改 `apim-models.json` / `config.toml`。
 - **每次导入前备份**：改写前把现有内容存成 `~/.codex/config.toml.apim.bak`，想回退直接拿它覆盖回去。备份与改写后的 `config.toml` 都会被设成 600（里面有 token；codex 自己建的 0644 也会被收紧）；如果 codex 校验不过，apim 会用备份把两处改动自动还原。`config.toml` 是符号链接（dotfiles 管理）时会写入链接指向的真实文件、不替换链接，而备份始终留在 `~/.codex/` 下。

@@ -4,7 +4,7 @@ use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 
 use super::*;
 use crate::app::tests::test_app;
-use crate::clients::DEFAULT_EFFORT;
+use crate::clients::{DEFAULT_EFFORT, RestartReport};
 
 /// 与 `m` 键浏览一致的模型名列表（不再区分端点能力）。
 fn mixed_entries() -> Vec<String> {
@@ -270,7 +270,7 @@ fn outcome(key_id: &str, result: Result<ImportReport, String>) -> ImportOutcome 
         result,
         state: None,
         state_error: None,
-        restarted: 0,
+        restart: RestartReport::default(),
     }
 }
 

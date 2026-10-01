@@ -8,6 +8,7 @@ use std::time::Instant;
 use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 
 use super::{App, Focus, Modal, TaskMsg};
+use crate::clients::codex::RestartReport;
 use crate::clients::{Agent, CodexState, ImportReport, ImportRequest};
 use crate::probe;
 
@@ -119,8 +120,8 @@ pub struct ImportOutcome {
     pub state: Option<CodexState>,
     /// 状态文件写失败时的说明（导入本身是成功的）。
     pub state_error: Option<String>,
-    /// 重启掉的 codex 守护进程数（0 = 当时没在跑，或已被 APIM_NO_RESTART_CODEX 禁用）。
-    pub restarted: usize,
+    /// 自动重启 codex 守护进程的结果（killed=0 表示当时没在跑或已被禁用）。
+    pub restart: RestartReport,
 }
 
 impl App {
@@ -418,10 +419,10 @@ impl App {
                     Err(_) => (None, None),
                 };
                 // 写成功才重启：codex 只会在 daemon 启动时读一次模型目录
-                let restarted = if result.is_ok() && restart_daemon {
-                    crate::clients::codex::restart_daemon().unwrap_or(0)
+                let restart = if result.is_ok() && restart_daemon {
+                    crate::clients::codex::restart_daemon().unwrap_or_default()
                 } else {
-                    0
+                    RestartReport::default()
                 };
                 ImportOutcome {
                     key_id: request_key_id,
@@ -429,7 +430,7 @@ impl App {
                     result,
                     state,
                     state_error,
-                    restarted,
+                    restart,
                 }
             })
             .await
@@ -439,7 +440,7 @@ impl App {
                 result: Err(format!("导入任务异常终止：{err}")),
                 state: None,
                 state_error: None,
-                restarted: 0,
+                restart: RestartReport::default(),
             });
             let _ = tx.send(TaskMsg::Import(Box::new(outcome)));
         });
@@ -468,10 +469,16 @@ impl App {
                     note.push_str(&format!(" · 旧配置备份为 {}", file_name(backup)));
                 }
                 // codex 的模型目录只在 app-server 启动时读一次，必须重启才能让 /model 刷新
-                if outcome.restarted > 0 {
+                if outcome.restart.killed > 0 {
                     note.push_str(&format!(
                         " · 已重启 codex 守护进程({} 个)，重开 codex 即可看到新模型",
-                        outcome.restarted
+                        outcome.restart.killed
+                    ));
+                } else if outcome.restart.ambiguous > 0 {
+                    // 形态不标准的没敢自动杀：说清楚，让他自己重启
+                    note.push_str(&format!(
+                        " · 没找到标准形态的 codex 守护进程（有 {} 个类似进程没敢动），若 codex 正开着请手动重启",
+                        outcome.restart.ambiguous
                     ));
                 } else {
                     note.push_str(" · 重启 codex 后 /model 才会列出新模型");

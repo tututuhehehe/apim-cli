@@ -40,7 +40,7 @@ pub(crate) fn draw_import(frame: &mut Frame, app: &App, flow: &ImportFlow, area:
 // ---- 第一步：选客户端 --------------------------------------------------
 
 fn draw_agent(frame: &mut Frame, app: &App, flow: &ImportFlow, area: Rect) {
-    let height = (Agent::ALL.len() * 2 + 6) as u16;
+    let height = (Agent::ALL.len() * 2 + 7) as u16;
     let rect = centered(76, height, area);
     frame.render_widget(Clear, rect);
     let block = pane_block(" 一键导入 · 选择客户端 ", true);
@@ -77,6 +77,11 @@ fn draw_agent(frame: &mut Frame, app: &App, flow: &ImportFlow, area: Rect) {
     lines.push(Line::from(Span::styled(
         flow_note(app, flow),
         Style::new().fg(theme::GOLD),
+    )));
+    // 「旧配置块保留」是有代价的：块里的旧 token 也一起留着，得让用户知道
+    lines.push(Line::from(Span::styled(
+        " 旧厂商的配置块会保留（方便切回），里面的旧 token 需手动删 ",
+        Style::new().fg(theme::MUTED),
     )));
     lines.push(Line::from(Span::styled(
         " j/k 移动   ⏎ 下一步   Esc 取消 ",
