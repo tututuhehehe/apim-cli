@@ -44,9 +44,9 @@ pub(crate) fn draw_import(frame: &mut Frame, app: &App, flow: &ImportFlow, area:
 // ---- 第一步：选客户端 --------------------------------------------------
 
 fn draw_agent(frame: &mut Frame, app: &App, flow: &ImportFlow, area: Rect) {
-    // 每个客户端恒定 3 行（显示名 / 配置位置 / 说明）+ 固定 4 行，再加 2 行边框。
-    // 之前是 `n*2+7`：n=1 恰好不裁，n≥2 起最后那行快捷键提示会被切掉。
-    let height = (Agent::ALL.len() * 3 + 6) as u16;
+    // 一行一个客户端（显示名）+ 空行 + 将导入 + 快捷键，再加 2 行边框。
+    // 光标行的说明一律不展开：客户端细节写进各自的 README，面板只负责选谁。
+    let height = (Agent::ALL.len() + 5) as u16;
     let rect = centered(76, height, area);
     frame.render_widget(Clear, rect);
     let block = pane_block(" 一键导入 · 选择客户端 ", true);
@@ -66,18 +66,6 @@ fn draw_agent(frame: &mut Frame, app: &App, flow: &ImportFlow, area: Rect) {
             format!("{marker}{}", agent.label()),
             label_style,
         )));
-        lines.push(Line::from(Span::styled(
-            format!("    {}", agent.config_hint()),
-            Style::new().fg(theme::MUTED),
-        )));
-        if selected {
-            lines.push(Line::from(Span::styled(
-                format!("    {}", agent.note()),
-                Style::new().fg(theme::MUTED),
-            )));
-        } else {
-            lines.push(Line::from(""));
-        }
     }
     lines.push(Line::from(""));
     lines.push(Line::from(Span::styled(

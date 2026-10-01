@@ -126,7 +126,7 @@ recipes/              内置 recipe ×4（deepseek/openai/moonshot/openrouter，
 13. **加一个客户端（Claude Code / pi …）就是三处改动**，别在面板里写客户端专属分支：
     - `src/clients/mod.rs`：加 `Agent` 变体（所有 `match` 会被编译器强制补全）+ 一条分派；
     - `src/clients/<id>/`：新子模块，实现「写哪里 / 怎么写 / 写完后怎么校验 / 怎么重新加载」；
-    - `app/import` 与 `ui/import` **不用改**：它们只经 `Agent` 的 `import/remember/reload/last_import/label/config_hint/note` 调客户端，文案全取自 `Agent`。
+    - `app/import` 与 `ui/import` **不用改**：它们只经 `Agent` 的 `import/remember/reload/last_import/label/config_hint` 调客户端；选择面板只列客户端名，不展开各家说明（要写就写在客户端子模块的文档里）。
     - 例外（已知）：密钥行的 ★ 目前读 `App::last_imports` 里 Codex 那一条，`Agent::last_import` 已经通用，加客户端时只需确认 ★ 是否要一起显示多客户端。
     - **不要**给客户端造 YAML 配方（约定 2 的数据化范围是厂商协议）；客户端之间不是同一套协议，各写 Rust 更直白。
     - 「不需要选模型的客户端」暂时还得先做一步重构：`ImportRequest.models/default_model` 现在是必填，要先改成 `Option` 才能让面板跳过勾选模型两步（见 `DEV-NOTES.local.md`）。

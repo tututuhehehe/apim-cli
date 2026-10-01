@@ -7,7 +7,8 @@
 //! 3. `Agent` 的新方法里加一条分派（通常一行）。
 //!
 //! 面板（`app/import`、`ui/import`）**不需要改**：它只经 `Agent` 的这些方法调客户端，
-//! 文案也全部取自 `label()/config_hint()/note()`。
+//! 文案也全部取自 `label()/config_hint()`。客户端细节（配置文件长什么样、要重启什么）
+//! 不进面板文案 —— 选择面板就是一行一个客户端名。
 //!
 //! 各家的「导入规则」不一样（配置格式、鉴权变量名、有没有模型清单、生效方式都不同），
 //! 所以**不用 YAML 配方把客户端数据化**：那是厂商协议层的事（见 AGENTS.md 约定 2 ——
@@ -55,15 +56,6 @@ impl Agent {
     pub fn config_hint(self) -> String {
         match self {
             Agent::Codex => crate::clients::codex::config_hint(),
-        }
-    }
-
-    /// 这个客户端的一条现状说明，面板里显示。
-    pub fn note(self) -> &'static str {
-        match self {
-            Agent::Codex => {
-                "同一时刻只激活一个厂商；旧厂商的配置块会保留（方便切回），里面的旧 token 需手动删"
-            }
         }
     }
 
