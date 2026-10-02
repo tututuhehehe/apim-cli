@@ -3,6 +3,20 @@
 本项目遵循 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.1.0/) 与
 [语义化版本](https://semver.org/lang/zh-CN/)。
 
+## [0.1.5] - 2026-10-02
+
+### 修复
+
+- **`apim update`（npm 渠道）不再谎报「更新完成」**：更新前同时核对 `apim-cli` 与**当前平台子包**的版本，
+  npm 还没跟上 GitHub Release 时报出两个版本号并拒绝安装（`--force` 可越过）；`--check` 多打一行
+  「npm 上可装：…」。之前只跑 `npm install -g apim-cli@latest`：npm 还没发出来时等于把旧版本重装一遍，
+  主包先可见而平台子包还没可见时更糟 —— npm 对 optional 依赖失败是**静默跳过**，
+  装出来的 shim 直接报 `no prebuilt binary available for <platform>`
+- **npm 发布链路堵住上面那个窗口**：`scripts/publish-npm.mjs` 每个平台子包发布后轮询到它真的可见，
+  最后才发主包；全部发完再整体核对 6 个包，缺一个就非零退出。`release.yml` 转正 Release 后显式
+  dispatch `publish-npm.yml`（用 GITHUB_TOKEN 转正产生的 release 事件不会再触发 workflow 运行），
+  workflow 的幂等检查也改成「6 个包都在才跳过」（少一个继续发，可修复半发状态）
+
 ## [0.1.4] - 2026-10-02
 
 ### 新增
@@ -128,7 +142,8 @@
 - `apim --version` 版本输出（供安装脚本与更新检测使用）
 - MIT 开源协议
 
-[Unreleased]: https://github.com/tututuhehehe/apim-cli/compare/v0.1.4...HEAD
+[Unreleased]: https://github.com/tututuhehehe/apim-cli/compare/v0.1.5...HEAD
+[0.1.5]: https://github.com/tututuhehehe/apim-cli/releases/tag/v0.1.5
 [0.1.4]: https://github.com/tututuhehehe/apim-cli/releases/tag/v0.1.4
 [0.1.3]: https://github.com/tututuhehehe/apim-cli/releases/tag/v0.1.3
 [0.1.2]: https://github.com/tututuhehehe/apim-cli/releases/tag/v0.1.2

@@ -1,6 +1,6 @@
 [package]
 name = "apim"
-version = "0.1.4"
+version = "0.1.5"
 edition = "2024"
 rust-version = "1.88"
 description = "Terminal manager for model-provider API keys"
