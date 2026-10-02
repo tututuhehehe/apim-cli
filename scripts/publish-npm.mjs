@@ -180,7 +180,8 @@ async function alreadyPublished(dir) {
 // 主包先可见、平台子包还没可见的那段窗口里，用户 `npm install -g apim-cli` 会**静默跳过**
 // optional 依赖（npm 对 optional 依赖失败不报错），装出来的 shim 直接报
 // "no prebuilt binary available for <platform>" —— v0.1.4 真机踩过。
-// 所以每个平台子包发布后要等它真的可见，主包最后发；全部发完再整体核对一遍。
+// 所以：先把 5 个平台子包全发出去，**一起等**它们可见（npm 的 processing 在服务端是并行的，
+// 串行等会把每包的 1~2 分钟叠加成 ~10 分钟），确认都可见后才发主包；最后整体核对一遍。
 async function waitUntilVisible(dir, timeoutMs = 180000, intervalMs = 3000) {
   const { name } = JSON.parse(readFileSync(path.join(dir, 'package.json'), 'utf8'));
   const deadline = Date.now() + timeoutMs;
@@ -196,32 +197,46 @@ async function waitUntilVisible(dir, timeoutMs = 180000, intervalMs = 3000) {
   }
 }
 
-for (const dir of built) {
+const MAIN_PKG = 'apim-cli';
+const platformDirs = built.filter((dir) => path.basename(dir) !== MAIN_PKG);
+const mainDirs = built.filter((dir) => path.basename(dir) === MAIN_PKG);
+
+/// 发一个包（或只打包）；已存在的跳过（便于换码续发 / 修复半发状态）。
+async function publishOrPack(dir) {
   const pkgName = path.basename(dir);
-  if (publish && (await alreadyPublished(dir))) {
+  if (!publish) {
+    console.log(`apim npm: pack ${pkgName}`);
+    return run('npm', ['pack', dir, '--pack-destination', packDir]);
+  }
+  if (await alreadyPublished(dir)) {
     console.log(`apim npm: 跳过 ${pkgName}（该版本已存在，可续发）`);
-    continue;
+    return;
   }
-  const argv = publish
-    ? ['publish', dir, '--access', 'public', ...provenance, ...otpArg]
-    : ['pack', dir, '--pack-destination', packDir];
-  console.log(`apim npm: ${publish ? 'publish' : 'pack'} ${pkgName}`);
-  try {
-    run('npm', argv);
-    if (publish) await waitUntilVisible(dir);
-  } catch {
-    console.error(
-      `\napim npm：${pkgName} 发布失败。` +
-        '若因 2FA 被拒（E403 / EOTP）：npm 的 2FA 是安全密钥 / 通行证，没有 6 位验证码，\n' +
-        '  非交互发布请用带 Bypass 2FA 的 granular access token：\n' +
-        '    npmjs.com → Access Tokens → Generate New Token → Granular，\n' +
-        '    勾选 Bypass two-factor authentication (2FA)、Read and write\n' +
-        '    npm config set //registry.npmjs.org/:_authToken=npm_xxxx\n' +
-        '已发布的包不会重发：配好 token 后直接重跑本命令即可。',
-    );
-    rmSync(work, { recursive: true, force: true });
-    process.exit(1);
+  console.log(`apim npm: publish ${pkgName}`);
+  return run('npm', ['publish', dir, '--access', 'public', ...provenance, ...otpArg]);
+}
+
+try {
+  // 平台子包先全发出去，再一起等可见；主包最后发 —— 主包可见时平台子包必然已可见。
+  for (const dir of platformDirs) await publishOrPack(dir);
+  if (publish) {
+    console.log('apim npm: 等平台子包在 registry 上可见…');
+    await Promise.all(platformDirs.map((dir) => waitUntilVisible(dir)));
   }
+  for (const dir of mainDirs) await publishOrPack(dir);
+  if (publish) await Promise.all(mainDirs.map((dir) => waitUntilVisible(dir)));
+} catch (error) {
+  console.error(
+    `\napim npm：发布失败（${error instanceof Error ? error.message : String(error)}）。` +
+      '若因 2FA 被拒（E403 / EOTP）：npm 的 2FA 是安全密钥 / 通行证，没有 6 位验证码，\n' +
+      '  非交互发布请用带 Bypass 2FA 的 granular access token：\n' +
+      '    npmjs.com → Access Tokens → Generate New Token → Granular，\n' +
+      '    勾选 Bypass two-factor authentication (2FA)、Read and write\n' +
+      '    npm config set //registry.npmjs.org/:_authToken=npm_xxxx\n' +
+      '已发布的包不会重发：配好 token 后直接重跑本命令即可。',
+  );
+  rmSync(work, { recursive: true, force: true });
+  process.exit(1);
 }
 
 // 全部发完再核对一遍：任何一个包不可见都算失败（否则用户装到一半会拿到缺平台包的 shim）
