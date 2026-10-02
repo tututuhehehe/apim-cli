@@ -217,7 +217,8 @@ apim status glm --json
 
 几个刻意的选择：
 
-- **密钥行上的 ★ 是现场读出来的，不是 apim 记着的**。apim **不存**「上次导入了谁」：启动时、切厂商（`j`/`k`）时、按 `r` 刷新时、5 分钟自动刷新时、每次导入成功后，都重新读一遍 codex 自己的配置（顶层 `model_provider` → 那个 `[model_providers.<id>]` 块），拿里面的 `experimental_bearer_token`（该块用 `env_key` 取 token 时则拿 `base_url`）与 apim 的密钥对账，**真正在用的**那把才带 `★C`（`C` 是客户端的短标，取自 `Agent::badge()`；多个客户端都用同一把时会叠成 `★C,P`）。手改了 codex 配置（换 token、把 `model_provider` 切走、删掉那个块），下次刷新 ★ 就跟着消失，不会骗你。
+- **密钥行上的 ★ 是现场读出来的，不是 apim 记着的**。apim **不存**「上次导入了谁」：启动时、切厂商（`j`/`k`）时、按 `r` 刷新时、5 分钟自动刷新时、每次导入成功后，都重新读一遍**客户端自己的配置** —— Codex 看顶层 `model_provider` → 那个 `[model_providers.<id>]` 块的 `experimental_bearer_token`；Pi 看 `defaultProvider`（项目级 `.pi/settings.json` 优先）那个 provider 的凭据，并按 **pi 自己的优先级**取（先 `auth.json`，再 `models.json` 的 `apiKey`；`auth.json` 对 apim 是**只读**的 —— 那里面还有你的订阅 OAuth 凭据，pi 自己加锁管）。**真正在用的**那把才带角标 `★C` / `★P`（字母是客户端短标，多个客户端叠成 `★C,P`）。手改了客户端配置（换 token、换默认 provider、删掉那个块），下次重算 ★ 就跟着消失，不会骗你。
+- **认 ★ 只看 key，不看名字**（Codex 侧同样如此）：所以你自己起的 provider 名、或者 pi 内置的 `deepseek`，只要用着 apim 里那把 key，★ 也会亮。
 - **只切换激活项，不删旧配置**。Codex 允许 `config.toml` 里同时存在多个 `[model_providers.*]`，但同一时刻只有 `model_provider` 指向的那一个生效。所以导入新厂商时旧的 provider 块原样保留（想切回去改一下 `model_provider` 就行），你手写的注释、`[projects.*]`、`[tui]` 也不会被重写。
 - **代价：旧块里的旧 token 也一起留着**。apim 不会清理旧 provider 块，所以切走之后那个厂商的 `experimental_bearer_token` 仍然明文躺在 `~/.codex/config.toml` 里 —— 不打算再用就手动删掉那个块（或在那个厂商侧轮换/吊销这把 key）。
 - **密钥直接写进 `experimental_bearer_token`**。`~/.codex/config.toml` 本来就是 600 权限。在 apim 里轮换这把 key 后，记得重新按一次 `x` 同步。
@@ -243,7 +244,8 @@ apim status glm --json
 
 几个刻意的选择：
 
-- **provider 键一律带 `apim-` 前缀**。Pi 自带一大批内置 provider（`deepseek` / `openai` / `openrouter` …），而 `models.json` 里同名的条目会**覆盖那个内置 provider 的 `baseUrl`** —— 等于悄悄把你的 OpenAI 模型指到中转站。加前缀永远不会撞名，`/model` 里也一眼看出是 apim 写的。
+- **provider 键一律带 `apim-` 前缀 —— 但这只管「写」**。Pi 自带一大批内置 provider（`deepseek` / `openai` / `openrouter` …），而 `models.json` 里同名的条目会**覆盖那个内置 provider 的 `baseUrl`** —— 等于悄悄把你的 OpenAI 模型指到中转站。加前缀永远不会撞名，`/model` 里也一眼看出是 apim 写的；而认 ★ 时**不看名字**：你用着 apim 里那把 key 的 provider（自己起的名字或 pi 内置的都行）都会亮。
+- **pi 的 `auth.json` 一个字都不写**。apim 把密钥写在 `models.json` 的 `apiKey` 里（pi 官方文档给兼容端点的写法）；`auth.json` 是 `/login` 的凭据库（里面有订阅的 OAuth refresh token），pi 用 `proper-lockfile` 自己管、读取时逐条校验（任一条坏掉整份加载失败），所以 apim 只**读**它来判断现在用的是哪把 key。
 - **只动 apim 负责的那几个键**：`models.json` 里别的 provider 与用户手写的 `headers` / `compat` / `modelOverrides` / `authHeader`、`settings.json` 里别的设置，全部原样保留（有测试守着）。
 - **模型条目留最小集合**（`id` / `name` / `reasoning: true` / `input: [text, image]`），其余交给 pi 自己的保守默认（128000 上下文 / 16384 输出 / 零价）—— apim 不替它编数字。想按模型写真值就自己改 `models.json`。
 - **默认模型镜像 pi 自己的行为**：除写 `defaultProvider` / `defaultModel` 外，`enabledModels` 非空时会把 `<provider>/<model>` 追加进去 —— 与你在 pi 里按 `Ctrl+S` 存默认模型时一致。不这么做的话，设了 `enabledModels` 的用户会「导入成功但选不到」。

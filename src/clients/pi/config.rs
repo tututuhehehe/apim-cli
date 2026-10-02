@@ -1,5 +1,9 @@
 //! `~/.pi/agent/models.json` 与 `settings.json` 的读写。
 //!
+//! `auth.json`（pi 自己的凭据库）**只读不写**：里面有 `/login` 的订阅凭据，而且 pi 用
+//! `proper-lockfile` 自己管、读取时逐条校验（任何一条坏掉整份加载失败）—— 我们碰它只会
+//! 给自己找麻烦，也帮不上什么忙（`active.rs` 只是拿它对账）。
+//!
 //! 两份都是 JSON，而且都可能被用户手写（`models.json` 里常有人写 `modelOverrides` /
 //! `headers` / `compat`）：所以**只按我们认识的键改，其余字段原样保留**，
 //! 写前备份成 `<原名>.apim.bak`，落盘走 `file_io`（跟随符号链接 + 原子 + 建文件即 600）。
@@ -14,6 +18,8 @@ use crate::clients::file_io;
 pub const MODELS_FILE: &str = "models.json";
 /// Pi 的设置（我们只动 `defaultProvider` / `defaultModel` / `enabledModels`）。
 pub const SETTINGS_FILE: &str = "settings.json";
+/// Pi 自己的凭据库（`/login` 写的，**apim 只读不写**，见 `active` 与 AGENTS.md 约定 14）。
+pub const AUTH_FILE: &str = "auth.json";
 
 pub fn models_path(dir: &Path) -> PathBuf {
     dir.join(MODELS_FILE)

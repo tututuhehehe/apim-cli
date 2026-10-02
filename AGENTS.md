@@ -146,7 +146,7 @@ recipes/              内置 recipe ×4（deepseek/openai/moonshot/openrouter，
 
 14. **一键导入到 Pi（`x` 键）的硬约束**（都来自 pi 源码 + 真机实测，别凭感觉改）：
     - **写两处**：`<agent-dir>/models.json`（`providers.<键>`：`name`/`baseUrl`/`api="openai-completions"`/`apiKey`/`models`）与 `<agent-dir>/settings.json`（`defaultProvider`/`defaultModel`）。`<agent-dir>` 默认 `~/.pi/agent`，`PI_CODING_AGENT_DIR` 可改（面板提示也读它）。
-    - **provider 键一律加 `apim-` 前缀**：pi 自带一大批同名 provider（`deepseek`/`openai`/`openrouter` …），`models.json` 里同名的条目会被 `applyModelsJson` 用来**覆盖那个内置 provider 的 baseUrl**（等于把用户的 OpenAI 指到我们的中转站）。加前缀永远不会撞名，`/model` 里也一眼看出是 apim 写的。
+    - **provider 键一律加 `apim-` 前缀（只约束写、不约束认）**：pi 自带一大批同名 provider（`deepseek`/`openai`/`openrouter` …），`models.json` 里同名的条目会被 `applyModelsJson` 用来**覆盖那个内置 provider 的 baseUrl**（等于把用户的 OpenAI 指到我们的中转站）。加前缀永远不会撞名，`/model` 里也一眼看出是 apim 写的；但认 ★ 时不看名字（见下一条）。
     - **只动我们认识的键**：`providers.<键>` 里的 `headers` / `compat` / `modelOverrides` / `authHeader` 与其它 provider、`settings.json` 里别的设置都原样保留（`pi/tests/import.rs` 有断言守）。
     - **模型条目用 pi 的默认值兜底**：只写 `id`/`name`/`reasoning: true`/`input: [text, image]`，**不写** `contextWindow`/`maxTokens`/`cost` —— pi 对缺省用自己的保守默认（128000 / 16384 / 零价），apim 不替它编数字（与 codex 那边写 272000 不同：那是 codex 给未知模型的默认值）。
     - **默认模型镜像 pi 自己的行为**：除写 `defaultProvider`/`defaultModel` 外，`enabledModels` 非空时要把 `<provider>/<model>` 追加进去（pi 存默认模型时就是这么做的），否则用户设了 `enabledModels` 后会「导入成功但选不到」。

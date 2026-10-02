@@ -968,30 +968,36 @@ pub(crate) mod tests {
         );
     }
 
-    /// 两个客户端都回读各自的现场：pi 认 `settings.json` 的 `defaultProvider`，
-    /// 手改了它的 `apiKey` 也要能掉 ★。
+    /// 两个客户端都回读各自的现场：pi 认 `defaultProvider` 指向的那个 provider 的凭据
+    /// （`auth.json` 与 `models.json` 都看），用户手改了它也要能掉 ★。
     #[test]
     fn pi_is_detected_from_its_own_config_too() {
         let (mut app, _rx, _rx_models) = test_app(&[("alpha", &["a1"])]);
         let home = app.agent_homes[&Agent::Pi].clone();
+        // 两样都要能认：用户自己起的 provider 名（没有 apim- 前缀）+ 凭据在 auth.json 里
         std::fs::write(
-            home.join("models.json"),
-            "{\n  \"providers\": {\n    \"apim-alpha\": { \"baseUrl\": \"https://example.invalid/v1\", \"api\": \"openai-completions\", \"apiKey\": \"sk-test-placeholder\" }\n  }\n}\n",
+            home.join("settings.json"),
+            "{ \"defaultProvider\": \"my-relay\" }",
         )
         .unwrap();
         std::fs::write(
-            home.join("settings.json"),
-            "{ \"defaultProvider\": \"apim-alpha\", \"defaultModel\": \"m1\" }",
+            home.join("models.json"),
+            "{ \"providers\": { \"my-relay\": { \"baseUrl\": \"https://example.invalid/v1\" } } }",
+        )
+        .unwrap();
+        std::fs::write(
+            home.join("auth.json"),
+            "{ \"my-relay\": { \"type\": \"api_key\", \"key\": \"sk-test-placeholder\" } }",
         )
         .unwrap();
 
         app.refresh_active_keys();
         assert_eq!(app.agents_using("alpha.a1"), vec![Agent::Pi]);
 
-        // 用户在 pi 里换成了自己手写的 key
+        // 用户在 pi 里换成了别的凭据（/login 或手改 auth.json）
         std::fs::write(
-            home.join("models.json"),
-            "{\n  \"providers\": {\n    \"apim-alpha\": { \"baseUrl\": \"https://example.invalid/v1\", \"api\": \"openai-completions\", \"apiKey\": \"sk-hand-written\" }\n  }\n}\n",
+            home.join("auth.json"),
+            "{ \"my-relay\": { \"type\": \"api_key\", \"key\": \"sk-hand-written\" } }",
         )
         .unwrap();
         app.refresh_active_keys();
