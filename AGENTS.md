@@ -168,6 +168,7 @@ cargo run -- --snapshot-import         # 一键导入面板快照：第一步选
 cargo run -- --snapshot-import-models  # 一键导入面板快照：第二步勾选模型
 cargo run -- --snapshot-import-default # 一键导入面板快照：第三步选默认模型
 cargo test                             # 单测（recipe/表单/CLI 沙盒/codex+pi 适配等）
+cargo +1.88 check --locked --all-targets   # 声明的 MSRV（Cargo.toml 的 rust-version）要真能编；CI 的 msrv job 跑同一条
 cargo test -- codex_real_end_to_end --ignored --nocapture   # 需本机装 codex：真机端到端（生成目录 + 让 codex 校验）
 cargo test -- pi_real_end_to_end --ignored --nocapture      # 需本机装 pi：真机端到端（写两份 JSON + 让 pi 列模型）
 APIM_SNAPSHOT_AGENT=pi cargo run -- --snapshot-import-models   # 换客户端出面板快照（默认第一个；「选默认模型」那屏只对 codex 存在）

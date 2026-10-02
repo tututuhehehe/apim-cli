@@ -39,3 +39,24 @@ jobs:
         run: |
           node --check npm/bin/apim.js
           node --check scripts/publish-npm.mjs
+
+  msrv:
+    name: MSRV（Cargo.toml 里声明的 rust-version 真能编）
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      # 版本号单一来源是 Cargo.toml 的 rust-version；代码里用了 let-chain（1.88 才稳定），
+      # 声明与实际不一致时 cargo 只会「允许」低版本工具链去构建然后失败 —— 这个 job 把它钉住。
+      - name: 安装声明的 MSRV 工具链
+        uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: "1.88"
+
+      - name: 缓存 cargo
+        uses: Swatinem/rust-cache@v2
+
+      # --locked：依赖版本按 Cargo.lock 来，失败就说明是「声明的 MSRV 不再成立」，
+      # 而不是依赖解析碰运气。要升依赖并要求更新的 Rust，就同时把 rust-version 往上抬。
+      - name: cargo check（MSRV）
+        run: cargo check --locked --all-targets

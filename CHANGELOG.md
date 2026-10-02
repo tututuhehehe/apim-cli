@@ -17,6 +17,8 @@
 
 ### 变更
 
+- `Cargo.toml` 的 `rust-version` 从 1.85 修正为 **1.88**（代码里用了 let-chain，1.88 才稳定；原来的声明是错的），
+  CI 新增一个 **msrv job** 用声明的版本真跑一遍 `cargo check --locked --all-targets`，避免以后又漂回去
 - **一键导入面板瘦身**：选客户端那屏只留一行一个客户端名（不再展开配置路径与现状说明），
   并删掉「将导入：xxx（apim 上次导入的是 yyy）」那句
 - **Pi 侧的 ★ 判定改成「只认 key」+ 多读一份 `auth.json`**：不再要求 provider 键带 `apim-` 前缀
