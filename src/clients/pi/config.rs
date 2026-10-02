@@ -16,7 +16,9 @@ use crate::clients::file_io;
 
 /// 每模型清单（我们写的那份）。
 pub const MODELS_FILE: &str = "models.json";
-/// Pi 的设置（我们只动 `defaultProvider` / `defaultModel` / `enabledModels`）。
+/// Pi 的设置文件。**apim 不读也不写它**（一键导入不动用户的默认 provider / 默认模型设定；
+/// ★ 的判定只扫凭据，见 `active`），所以这个常量只给测试用：断言导入没碰过 settings.json。
+#[cfg(test)]
 pub const SETTINGS_FILE: &str = "settings.json";
 /// Pi 自己的凭据库（`/login` 写的，**apim 只读不写**，见 `active` 与 AGENTS.md 约定 14）。
 pub const AUTH_FILE: &str = "auth.json";
@@ -25,6 +27,7 @@ pub fn models_path(dir: &Path) -> PathBuf {
     dir.join(MODELS_FILE)
 }
 
+#[cfg(test)]
 pub fn settings_path(dir: &Path) -> PathBuf {
     dir.join(SETTINGS_FILE)
 }

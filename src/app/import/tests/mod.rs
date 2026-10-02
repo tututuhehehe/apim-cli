@@ -81,7 +81,7 @@ fn picker_app() -> App {
 fn report(models: &[&str], model: &str) -> ImportReport {
     ImportReport {
         provider_key: "alpha".into(),
-        model: model.into(),
+        model: Some(model.into()),
         models: models.iter().map(|name| (*name).to_string()).collect(),
         detail: Some(format!("强度 {DEFAULT_EFFORT}")),
         backups: Vec::new(),

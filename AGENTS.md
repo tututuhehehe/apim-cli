@@ -142,15 +142,15 @@ recipes/              内置 recipe ×4（deepseek/openai/moonshot/openrouter，
     - `app/import` 与 `ui/import` **不用改**：它们只经 `Agent` 的这套方法调客户端；选择面板只列客户端名，不展开各家说明（要写就写在客户端子模块的文档里）。
     - 密钥行的 ★ 已经按客户端通用：`Agent::active_key_ids` 各自回读现场，UI 用 `Agent::badge()` 拼角标（`★C`、`★C,P`），加客户端只需补 `active_key_ids` 与 `badge` 两条分派（`clients/mod.rs` 里有一条注册表自检的测试守着「角标不许撞车」）。
     - **不要**给客户端造 YAML 配方（约定 2 的数据化范围是厂商协议）；客户端之间不是同一套协议，各写 Rust 更直白。
-    - 「不需要选模型的客户端」暂时还得先做一步重构：`ImportRequest.models/default_model` 现在是必填，要先改成 `Option` 才能让面板跳过勾选模型两步（见 `DEV-NOTES.local.md`）。
+    - 面板的「选默认模型」第三步已经按客户端可关：`Agent::default_model_step()` 返回 `None` 就跳过（pi 就是这样），`ImportRequest.default_model` / `ImportReport.model` 都是 `Option`。只勾一个模型时也自动跳过。
 
 14. **一键导入到 Pi（`x` 键）的硬约束**（都来自 pi 源码 + 真机实测，别凭感觉改）：
-    - **写两处**：`<agent-dir>/models.json`（`providers.<键>`：`name`/`baseUrl`/`api="openai-completions"`/`apiKey`/`models`）与 `<agent-dir>/settings.json`（`defaultProvider`/`defaultModel`）。`<agent-dir>` 默认 `~/.pi/agent`，`PI_CODING_AGENT_DIR` 可改（面板提示也读它）。
+    - **只写一处**：`<agent-dir>/models.json` 的 `providers.<键>`（`name`/`baseUrl`/`api="openai-completions"`/`apiKey`/`models`）。`<agent-dir>` 默认 `~/.pi/agent`，`PI_CODING_AGENT_DIR` 可改（面板提示也读它）。
+    - **`settings.json` 一个字都不动**：一键导入只干「往模型列表里加 provider + 模型」；默认 provider / 默认模型 / `enabledModels` 都是用户自己的设定（pi 里有 `/model` + `Ctrl+S`），apim 既不读也不写它（有逐字节断言的测试）。因此 **Pi 没有「选默认模型」这一步**：`Agent::default_model_step()` 返回 `None`，面板勾完模型直接开写。
     - **provider 键一律加 `apim-` 前缀（只约束写、不约束认）**：pi 自带一大批同名 provider（`deepseek`/`openai`/`openrouter` …），`models.json` 里同名的条目会被 `applyModelsJson` 用来**覆盖那个内置 provider 的 baseUrl**（等于把用户的 OpenAI 指到我们的中转站）。加前缀永远不会撞名，`/model` 里也一眼看出是 apim 写的；但认 ★ 时不看名字（见下一条）。
     - **只动我们认识的键**：`providers.<键>` 里的 `headers` / `compat` / `modelOverrides` / `authHeader` 与其它 provider、`settings.json` 里别的设置都原样保留（`pi/tests/import.rs` 有断言守）。
     - **模型条目用 pi 的默认值兜底**：只写 `id`/`name`/`reasoning: true`/`input: [text, image]`，**不写** `contextWindow`/`maxTokens`/`cost` —— pi 对缺省用自己的保守默认（128000 / 16384 / 零价），apim 不替它编数字（与 codex 那边写 272000 不同：那是 codex 给未知模型的默认值）。
-    - **默认模型镜像 pi 自己的行为**：除写 `defaultProvider`/`defaultModel` 外，`enabledModels` 非空时要把 `<provider>/<model>` 追加进去（pi 存默认模型时就是这么做的），否则用户设了 `enabledModels` 后会「导入成功但选不到」。
-    - **校验靠 `pi --list-models`**（同 codex 的 `codex debug models`）：输出是定宽表，要匹配 `provider` 与 `model` **两列都对**（同名模型挂在别的 provider 下不算）；不通过就用备份把**两处**都还原（原来没有的文件删掉），没装 pi 直接报错。
+    - **校验靠 `pi --list-models`**（同 codex 的 `codex debug models`）：输出是定宽表，要匹配 `provider` 与 `model` **两列都对**（同名模型挂在别的 provider 下不算）；不通过就用备份还原 `models.json`（原来没有的文件删掉），没装 pi 直接报错。
     - **pi 没有常驻进程可杀**：`needs_reload()` 返回 false，提示语是「在 Pi 里打开 `/model`（或重开）即可看到新模型」（`Agent::reload_hint`，面板不写客户端分支）。
     - **★ 扫 pi 配置里的每一份凭据**（pi **没有**「唯一激活的 provider」：`defaultProvider` 只是启动默认值，`/model` / `Ctrl+P` / 会话记录都可能用别的）：`<agent-dir>/auth.json`（`/login` 存的 `type:"api_key"` 的 `key`；`type:"oauth"` 是订阅凭据，不算）与 `models.json` 里**每个带 `apiKey`** 的 provider（没有 `apiKey` 的不算 —— 它可能靠环境变量/登录用，那个值看不见，只看地址会把地址相同的别的密钥误标）；能看见明文就**只比 token**（同一个 token 就是同一把），`$ENV` / `!cmd` 看不见才退化成比 `base_url`。所以内置 provider 用着 apim 的 key 也认。
     - **`auth.json` 只读不写**：那里面还有你的订阅凭据（`type:"oauth"`，含 refresh token），而且 pi 用 `proper-lockfile` 自己管、读取时**逐条校验**（任一条不合法整份加载失败）—— apim 写它既帮不上忙又可能把你登出订阅。apim 的 key 一律写在 `models.json` 的 `apiKey` 里。

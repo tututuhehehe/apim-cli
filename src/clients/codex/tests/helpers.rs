@@ -37,7 +37,7 @@ pub(super) fn request_for(models: &[&str]) -> ImportRequest {
         base_url: "https://api.ikuncode.cc".into(),
         api_key: "sk-placeholder".into(),
         models: models.iter().map(|m| (*m).to_string()).collect(),
-        default_model: models[0].to_string(),
+        default_model: Some(models[0].to_string()),
     }
 }
 

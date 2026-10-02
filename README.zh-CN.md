@@ -235,23 +235,23 @@ apim status glm --json
 
 ### 一键导入到 Pi
 
-同一个 `x` 面板也能导到 **Pi**（第一步选 `Pi`）。Pi 加第三方 provider 是纯数据的事（`models.json`），所以 apim 写两处：
+同一个 `x` 面板也能导到 **Pi**（第一步选 `Pi`；Pi 只有两步，选默认模型是 Codex 专属的一步，对 Pi 会跳过）。Pi 加第三方 provider 是纯数据的事（`models.json`），所以 apim **只写一处**：
 
 | 位置 | 内容 |
 |---|---|
 | `~/.pi/agent/models.json` 的 `providers.apim-<厂商id>` | `name` / `baseUrl`（缺 `/v1` 自动补）/ `api = "openai-completions"` / `apiKey` / `models`（勾选的那几个） |
-| `~/.pi/agent/settings.json` | `defaultProvider = apim-<厂商id>`、`defaultModel = 第三步选的那个模型` |
 
 几个刻意的选择：
 
+- **`settings.json` 一个字都不动**。一键导入就是「往模型列表里加上我要的 provider 和模型」——默认 provider、默认模型、`enabledModels` 都是你自己的设定，而且 pi 里本来就有 `/model` + `Ctrl+S` 用来选默认。apim 不读也不写那个文件（有逐字节断言的测试守着）。
+
 - **provider 键一律带 `apim-` 前缀 —— 但这只管「写」**。Pi 自带一大批内置 provider（`deepseek` / `openai` / `openrouter` …），而 `models.json` 里同名的条目会**覆盖那个内置 provider 的 `baseUrl`** —— 等于悄悄把你的 OpenAI 模型指到中转站。加前缀永远不会撞名，`/model` 里也一眼看出是 apim 写的；而认 ★ 时**不看名字**：你用着 apim 里那把 key 的 provider（自己起的名字或 pi 内置的都行）都会亮。
 - **pi 的 `auth.json` 一个字都不写**。apim 把密钥写在 `models.json` 的 `apiKey` 里（pi 官方文档给兼容端点的写法）；`auth.json` 是 `/login` 的凭据库（里面有订阅的 OAuth refresh token），pi 用 `proper-lockfile` 自己管、读取时逐条校验（任一条坏掉整份加载失败），所以 apim 只**读**它来判断现在用的是哪把 key。
-- **只动 apim 负责的那几个键**：`models.json` 里别的 provider 与用户手写的 `headers` / `compat` / `modelOverrides` / `authHeader`、`settings.json` 里别的设置，全部原样保留（有测试守着）。
+- **只动 apim 负责的那几个键**：`models.json` 里别的 provider 与用户手写的 `headers` / `compat` / `modelOverrides` / `authHeader` 全部原样保留（有测试守着），`settings.json` 完全不碰。
 - **模型条目留最小集合**（`id` / `name` / `reasoning: true` / `input: [text, image]`），其余交给 pi 自己的保守默认（128000 上下文 / 16384 输出 / 零价）—— apim 不替它编数字。想按模型写真值就自己改 `models.json`。
-- **默认模型镜像 pi 自己的行为**：除写 `defaultProvider` / `defaultModel` 外，`enabledModels` 非空时会把 `<provider>/<model>` 追加进去 —— 与你在 pi 里按 `Ctrl+S` 存默认模型时一致。不这么做的话，设了 `enabledModels` 的用户会「导入成功但选不到」。
-- **校验用你本机的 pi**：写完跑 `pi --list-models`，勾选的每个模型都要**挂在我们的 provider 键下**出现；不过就用 `.apim.bak` 备份把两处都还原。
+- **校验用你本机的 pi**：写完跑 `pi --list-models`，勾选的每个模型都要**挂在我们的 provider 键下**出现；不过就用 `.apim.bak` 备份把 `models.json` 还原。
 - **不需要重启**：pi 没有常驻进程，打开 `/model`（或重开）就能看到新 provider。
-- **只走 API key 这一路**：pi 的订阅是 `/login` 的 OAuth（凭据在 `auth.json`），apim 既不读也不写。
+- **只走 API key 这一路**：pi 的订阅是 `/login` 的 OAuth（凭据在 `auth.json`），apim 不写那个文件（只读它来判断哪把 key 在用）。
 
 > 需要本机装好 `pi`（用它校验结果）；apim 从 `PATH` 找它，也可以用 `APIM_PI_BIN` 指定路径。
 

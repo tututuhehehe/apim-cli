@@ -14,7 +14,7 @@ fn read(path: &std::path::Path) -> Value {
 
 #[cfg(unix)]
 #[test]
-fn import_writes_provider_and_default_model_then_verifies() {
+fn import_writes_the_provider_and_verifies_without_touching_settings() {
     let dir = temp_dir("import-e2e");
     let bin = fake_pi(&dir);
     write_model_table(&dir, "apim-ikun", &["glm-5", "gpt-6-sol"]);
@@ -22,7 +22,7 @@ fn import_writes_provider_and_default_model_then_verifies() {
     let report = import_in(&dir, &request_for(&["glm-5", "gpt-6-sol"]), Some(&bin)).unwrap();
 
     assert_eq!(report.provider_key, "apim-ikun");
-    assert_eq!(report.model, "glm-5");
+    assert_eq!(report.model, None, "pi 不需要（也不该）写默认模型");
     assert_eq!(report.detail, None, "pi 侧没有思考强度要固定");
 
     let models = read(&config::models_path(&dir));
@@ -49,12 +49,13 @@ fn import_writes_provider_and_default_model_then_verifies() {
     );
     assert!(entry["models"][0].get("contextWindow").is_none());
 
-    let settings = read(&config::settings_path(&dir));
-    assert_eq!(settings["defaultProvider"], "apim-ikun");
-    assert_eq!(settings["defaultModel"], "glm-5");
+    assert!(
+        !config::settings_path(&dir).exists(),
+        "一键导入只加 provider + 模型，不该创建 / 改 settings.json"
+    );
 }
 
-/// 导入写下的两份配置，回读现场时必须能认出同一把密钥（writer / reader 双向耦合）。
+/// 导入写下的配置，回读现场时必须能认出同一把密钥（writer / reader 双向耦合）。
 #[cfg(unix)]
 #[test]
 fn imported_config_is_recognized_as_in_use() {
@@ -136,64 +137,63 @@ fn import_preserves_everything_it_does_not_own() {
     assert_eq!(entry["modelOverrides"]["glm-5"]["reasoning"], true);
     assert_eq!(entry["apiKey"], "sk-placeholder", "我们负责的键要更新");
 
-    let settings = read(&config::settings_path(&dir));
-    assert_eq!(settings["theme"], "dark", "settings.json 里别的设置不许动");
-    // pi 自己存默认模型时会往 enabledModels 追加（AgentSession._addPersistedDefaultToNonEmptyScope），
-    // 镜像它，否则用户设了 enabledModels 后新模型进不了启动选择
+    // settings.json 一个字节都不许动：默认 provider / 默认模型 / enabledModels 都是用户的设定
     assert_eq!(
-        settings["enabledModels"],
-        serde_json::json!(["opencode-go/glm-5.2", "apim-ikun/glm-5"])
+        fs::read_to_string(config::settings_path(&dir)).unwrap(),
+        r#"{ "theme": "dark", "enabledModels": ["opencode-go/glm-5.2"] }"#,
+        "一键导入不改 settings.json"
     );
 }
 
-/// `enabledModels` 已经有这个模型（大小写不敏感）时不重复追加。
+/// 用户的 `settings.json`（默认 provider / 默认模型 / enabledModels 都是他自己设定的）
+/// 导入前后必须**一个字节都不变** —— 一键导入只往模型列表里加东西。
 #[cfg(unix)]
 #[test]
-fn enabled_models_is_not_duplicated() {
-    let dir = temp_dir("import-enabled-dup");
+fn settings_json_is_left_byte_for_byte_untouched() {
+    let dir = temp_dir("import-settings-untouched");
     let bin = fake_pi(&dir);
     write_model_table(&dir, "apim-ikun", &["glm-5"]);
-    fs::write(
-        config::settings_path(&dir),
-        r#"{ "enabledModels": ["APIM-IKUN/GLM-5"] }"#,
-    )
-    .unwrap();
+    let before = r#"{
+  "defaultProvider": "opencode-go",
+  "defaultModel": "glm-5.2",
+  "enabledModels": ["opencode-go/glm-5.2"],
+  "theme": "dark"
+}
+"#;
+    fs::write(config::settings_path(&dir), before).unwrap();
 
     import_in(&dir, &request_for(&["glm-5"]), Some(&bin)).unwrap();
-    let settings = read(&config::settings_path(&dir));
+
     assert_eq!(
-        settings["enabledModels"],
-        serde_json::json!(["APIM-IKUN/GLM-5"])
+        fs::read_to_string(config::settings_path(&dir)).unwrap(),
+        before
     );
 }
 
-/// 校验失败要把**两处**改动都还原（否则用户看到「导入失败」，pi 其实已经切过去了）。
+/// 校验失败要把改动还原（否则用户看到「导入失败」，pi 其实已经切过去了）。
 #[cfg(unix)]
 #[test]
-fn failed_verification_rolls_both_files_back() {
+fn failed_verification_rolls_models_json_back() {
     let dir = temp_dir("import-rollback");
     let bin = fake_pi_failing(&dir);
     let old_models = r#"{ "providers": { "apim-ikun": { "baseUrl": "https://old.example/v1", "api": "openai-completions", "apiKey": "sk-old" } } }"#;
     fs::write(config::models_path(&dir), old_models).unwrap();
-    fs::write(
-        config::settings_path(&dir),
-        r#"{ "defaultProvider": "opencode-go" }"#,
-    )
-    .unwrap();
+    let settings_before = r#"{ "defaultProvider": "opencode-go" }"#;
+    fs::write(config::settings_path(&dir), settings_before).unwrap();
 
     let err = import_in(&dir, &request_for(&["glm-5"]), Some(&bin)).unwrap_err();
     assert!(err.contains("已还原"), "{err}");
 
     let models = fs::read_to_string(config::models_path(&dir)).unwrap();
     assert!(models.contains("sk-old"), "models.json 要还原：{models}");
-    let settings = fs::read_to_string(config::settings_path(&dir)).unwrap();
-    assert!(
-        settings.contains("opencode-go"),
-        "settings.json 也要还原：{settings}"
+    assert_eq!(
+        fs::read_to_string(config::settings_path(&dir)).unwrap(),
+        settings_before,
+        "settings.json 从头到尾都没碰过（回滚也只回滚 models.json）"
     );
 }
 
-/// 原来没有这两个文件（全新 pi）时，回滚要把它们删掉，别留半份配置。
+/// 原来没有 models.json（全新 pi）时，回滚要把它删掉，别留半份配置。
 #[cfg(unix)]
 #[test]
 fn rollback_removes_files_that_did_not_exist() {

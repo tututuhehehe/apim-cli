@@ -20,7 +20,7 @@ async fn successful_import_toasts_and_marks_the_key_codex_now_uses() {
     assert_eq!(
         app.toast_text(),
         Some(
-            "已导入 Codex：alpha.a1 · 1 个模型 · 默认 gpt-6-sol · 表名 alpha · 强度 high · 重启 Codex 后才会列出新模型"
+            "已导入 Codex：alpha.a1 · 1 个模型 · 表名 alpha · 默认 gpt-6-sol · 强度 high · 重启 Codex 后才会列出新模型"
         )
     );
     assert_eq!(
@@ -71,6 +71,32 @@ async fn undo_rechecks_the_star() {
         app.agents_using("alpha.a1"),
         vec![Agent::Codex],
         "撤销把密钥放回来，★ 要跟着回来"
+    );
+}
+
+/// pi 没有「选默认模型」这一步：勾完模型直接开写（默认模型由用户自己在 pi 里挑），
+/// 面板不会停在第三步。
+#[tokio::test]
+async fn pi_skips_the_default_model_step() {
+    use std::sync::Arc;
+    let (mut app, _rx, _rx_task) = test_app(&[("alpha", &["a1"])]);
+    app.focus = Focus::Keys;
+    // 真 runner 会去写用户真实的 ~/.pi，测试里换成假的
+    app.import_runner = Some(Arc::new(|_, _| Ok(report(&["gpt-6-sol"], "gpt-6-sol"))));
+
+    app.open_import();
+    flow_mut(&mut app).agent = Agent::Pi;
+    app.import_choose_agent();
+    app.import_receive_models("alpha.a1".into(), seq_of(&app), Ok(mixed_entries()));
+    app.import_toggle_all(); // 勾上 3 个：codex 这时会进第三步，pi 不该
+    assert!(flow(&app).checked_count() > 1, "先确认确实勾了多个");
+
+    app.import_confirm_models();
+
+    assert_eq!(
+        flow(&app).step,
+        ImportStep::Working,
+        "pi 应直接开写，不停在「选默认模型」"
     );
 }
 

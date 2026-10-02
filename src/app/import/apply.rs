@@ -30,7 +30,7 @@ pub struct ImportOutcome {
 
 impl App {
     /// 真正开写：后台线程跑客户端导入 + 校验（codex 那一路还要重启它的 daemon）。
-    pub(super) fn start_import(&mut self, models: Vec<String>, default_model: String) {
+    pub(super) fn start_import(&mut self, models: Vec<String>, default_model: Option<String>) {
         let Some(flow) = self.import_flow() else {
             return;
         };
@@ -115,13 +115,16 @@ impl App {
                 // ★ 回读客户端现场得出（不存 apim 侧的台账）：这里刚写完配置，重算一定准
                 self.refresh_active_keys();
                 let mut note = format!(
-                    "已导入 {}：{} · {} 个模型 · 默认 {} · 表名 {}",
+                    "已导入 {}：{} · {} 个模型 · 表名 {}",
                     outcome.agent.label(),
                     outcome.key_id,
                     report.models.len(),
-                    report.model,
                     report.provider_key
                 );
+                // 客户端写了默认模型才提它（pi 不写：默认模型由用户自己在 /model 里挑）
+                if let Some(model) = &report.model {
+                    note.push_str(&format!(" · 默认 {model}"));
+                }
                 // 客户端自己报的补充（codex 报思考强度，pi 没有）：面板不猜，客户端才知道自己写了什么
                 if let Some(detail) = &report.detail {
                     note.push_str(&format!(" · {detail}"));

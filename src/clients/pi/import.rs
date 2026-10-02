@@ -1,14 +1,13 @@
-//! 一次 pi 导入的编排：定位 pi → 改内存里的两份配置 → 写盘 → `pi --list-models` 校验 → 失败回滚。
+//! 一次 pi 导入的编排：定位 pi → 改内存里的 models.json → 写盘 → `pi --list-models` 校验 → 失败回滚。
 //!
-//! 写下去的东西：
-//! - `models.json` → `providers.<apim-厂商id>`：`name` / `baseUrl`（补 `/v1`）/
-//!   `api = "openai-completions"` / `apiKey` / `models`（勾选的那几个）
-//! - `settings.json` → `defaultProvider` / `defaultModel`（面板第三步选的那个），
-//!   并在 `enabledModels` 非空时把新模型追加进去（pi 自己保存默认模型时就是这么做的，
-//!   否则用户设了 `enabledModels` 之后新模型进不了启动选择与 `Ctrl+P` 循环）
+//! **只写一处**：`models.json` → `providers.<apim-厂商id>`（`name` / `baseUrl`（补 `/v1`）/
+//! `api = "openai-completions"` / `apiKey` / `models`（勾选的那几个））。
 //!
-//! 顺序上有两条硬要求（同 codex）：**先在内存里改完（失败时磁盘一点没动）**，
-//! **校验不过要把两处改动都还原**。
+//! **不动 `settings.json`**：一键导入只是「往模型列表里加上我要的模型和厂商」，默认 provider /
+//! 默认模型由用户自己在 pi 里挑（`/model` + `Ctrl+S`），`enabledModels` 也不碰 —— 改用户
+//! 原有设定不是这个功能该干的事。
+//!
+//! 顺序上（同 codex）：**先在内存里改完（失败时磁盘一点没动）**，**校验不过要把改动还原**。
 
 use std::path::Path;
 
@@ -18,7 +17,7 @@ use super::{agent_dir, config, locate_pi, pi_provider_key, verify};
 use crate::clients::lock::ImportLock;
 use crate::clients::{ImportReport, ImportRequest, normalize_base_url};
 
-/// 一键导入：定位本机 pi → 写入两份配置 → 让 pi 自己列出模型校验。
+/// 一键导入：定位本机 pi → 写入 models.json → 让 pi 自己列出模型校验。
 pub fn import(request: &ImportRequest) -> Result<ImportReport, String> {
     let pi_bin = locate_pi();
     import_in(&agent_dir(), request, pi_bin.as_deref())
@@ -44,43 +43,32 @@ pub fn import_in(
     let _lock = ImportLock::acquire(dir, "pi")?;
 
     let models_path = config::models_path(dir);
-    let settings_path = config::settings_path(dir);
     let mut models = config::read(&models_path)?;
-    let mut settings = config::read(&settings_path)?;
     apply_models(&mut models, &key, request, &base_url)?;
-    apply_settings(&mut settings, &key, &request.default_model);
 
-    // 先写 models.json（它才是主体）：这一步失败时磁盘还一点没动
+    // 先在内存里改完，写盘失败时磁盘一点没动
     let models_backup = config::write(&models_path, &models)?;
-    let settings_backup = match config::write(&settings_path, &settings) {
-        Ok(backup) => backup,
-        Err(err) => {
-            restore(&models_path, models_backup.as_deref());
-            return Err(format!("{err}（已还原 models.json）"));
-        }
-    };
 
     if let Err(err) = verify::verify(bin, dir, &key, &request.models) {
-        let rolled_back = restore(&models_path, models_backup.as_deref())
-            & restore(&settings_path, settings_backup.as_deref());
+        let rolled_back = restore(&models_path, models_backup.as_deref());
         return Err(if rolled_back {
             format!("{err}（已还原到导入前的配置）")
         } else {
             format!(
-                "{err}（自动还原失败，请手动把 {} / {} 覆盖回两份配置）",
-                config::models_path(dir).display(),
-                config::settings_path(dir).display()
+                "{err}（自动还原失败，请手动把 {} 覆盖回去）",
+                config::models_path(dir).display()
             )
         });
     }
 
     Ok(ImportReport {
         provider_key: key,
-        model: request.default_model.clone(),
+        // pi 没有「默认模型」这回事要写：用户自己在 /model 里挑
+        model: None,
         models: request.models.clone(),
         // pi 侧没有「思考强度」这种要固定的东西（每个模型自己声明 reasoning，档位由 /thinking 选）
         detail: None,
-        backups: models_backup.into_iter().chain(settings_backup).collect(),
+        backups: models_backup.into_iter().collect(),
     })
 }
 
@@ -123,28 +111,6 @@ fn model_entry(id: &str) -> Value {
         "reasoning": true,
         "input": ["text", "image"],
     })
-}
-
-/// `settings.json`：默认 provider / 模型指过去，并（在有 scope 时）把新模型加进 `enabledModels`。
-///
-/// 后半段是**镜像 pi 自己的行为**（`AgentSession._addPersistedDefaultToNonEmptyScope`）：
-/// 用户按 `Ctrl+S` 存默认模型时，pi 会在 `enabledModels` 非空时把该模型追加进去，
-/// 否则它进不了启动选择与 `Ctrl+P` 的循环 —— apim 不这么做就会「导入成功但选不到」。
-fn apply_settings(settings: &mut Map<String, Value>, key: &str, model: &str) {
-    settings.insert("defaultProvider".into(), json!(key));
-    settings.insert("defaultModel".into(), json!(model));
-    let reference = format!("{key}/{model}");
-    if let Some(list) = settings
-        .get_mut("enabledModels")
-        .and_then(Value::as_array_mut)
-        && !list.is_empty()
-        && !list.iter().any(|v| {
-            v.as_str()
-                .is_some_and(|s| s.eq_ignore_ascii_case(&reference))
-        })
-    {
-        list.push(json!(reference));
-    }
 }
 
 /// 用备份把文件还原回去；没有备份（原来是新文件）就删掉它。返回是否全部还原成功。

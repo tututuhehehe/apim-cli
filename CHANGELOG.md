@@ -7,10 +7,10 @@
 
 ### 新增
 
-- **一键导入到 Pi**（`x` 键选客户端 Pi）：把密钥 / 厂商 / 勾选的模型写进 `~/.pi/agent/models.json`
-  （`providers.apim-<厂商id>`：OpenAI 兼容端点 + apiKey + 模型）与 `~/.pi/agent/settings.json`
-  （`defaultProvider` / `defaultModel`），写完跑 `pi --list-models` 让 pi 自己确认模型都在，
-  失败用备份把两处都还原。provider 键一律带 `apim-` 前缀（否则会蹭到 pi 内置 provider 的 baseUrl）；
+- **一键导入到 Pi**（`x` 键选客户端 Pi）：只把密钥 / 厂商 / 勾选的模型写进 `~/.pi/agent/models.json`
+  （`providers.apim-<厂商id>`：OpenAI 兼容端点 + apiKey + 模型）—— **`settings.json` 一个字都不动**
+  （默认 provider / 默认模型 / `enabledModels` 由用户自己在 `/model` 里选），所以 Pi 没有
+  「选默认模型」这一步；写完跑 `pi --list-models` 让 pi 自己确认模型都在，失败用备份还原 models.json。provider 键一律带 `apim-` 前缀（否则会蹭到 pi 内置 provider 的 baseUrl）；
   只改 apim 负责的键，用户手写的 `headers` / `compat` / `modelOverrides` 与别的设置都保留；
   不需要重启（打开 `/model` 即可）；`PI_CODING_AGENT_DIR` / `APIM_PI_BIN` 可重定向
 

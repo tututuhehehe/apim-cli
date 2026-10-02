@@ -196,7 +196,10 @@ fn draw_default_picker(frame: &mut Frame, flow: &ImportFlow, area: Rect) {
             ];
             if is_cursor {
                 spans.push(Span::styled(
-                    format!("   ← {}", flow.agent.default_model_hint()),
+                    format!(
+                        "   ← {}",
+                        flow.agent.default_model_step().unwrap_or_default()
+                    ),
                     Style::new().fg(theme::GOLD),
                 ));
             }

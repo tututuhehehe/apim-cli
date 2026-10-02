@@ -196,8 +196,12 @@ impl App {
             self.toast = Some(("至少勾选一个模型".into(), Instant::now()));
             return;
         }
-        if checked.len() == 1 {
-            let only = checked[0].clone();
+        // 没有「默认模型」这一步的客户端（pi：默认模型由用户自己在 /model 里挑）：勾完直接开写
+        let needs_default = self
+            .import_flow()
+            .is_some_and(|flow| flow.agent.default_model_step().is_some());
+        if checked.len() == 1 || !needs_default {
+            let only = checked.first().cloned();
             self.start_import(checked, only);
             return;
         }
@@ -225,7 +229,7 @@ impl App {
         let Some(default_model) = checked.get(index).cloned() else {
             return;
         };
-        self.start_import(checked, default_model);
+        self.start_import(checked, Some(default_model));
     }
 
     /// 从「选默认模型」退回「勾选模型」。

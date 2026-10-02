@@ -57,7 +57,11 @@ pub fn import_in(
     let base_url = normalize_base_url(&request.base_url);
     // 思考强度不让人选：每个模型都声明全四档，默认档固定，想改就在 codex 里用 /model
     let effort = DEFAULT_EFFORT;
-    let entries = catalog::build(&request.models, &request.default_model)
+    // codex 这一路必须有默认模型（面板的第三步就是为它存在的）
+    let default_model = request.default_model.as_deref().ok_or_else(|| {
+        "codex 需要一个默认模型（面板第三步选的那个），这次请求里没有".to_string()
+    })?;
+    let entries = catalog::build(&request.models, default_model)
         .map_err(|err| format!("生成模型目录失败：{err}"))?;
 
     std::fs::create_dir_all(home).map_err(|err| format!("创建 {} 失败：{err}", home.display()))?;
@@ -75,7 +79,7 @@ pub fn import_in(
             base_url: &base_url,
             api_key: &request.api_key,
             catalog_file: CATALOG_FILE,
-            model: &request.default_model,
+            model: default_model,
             reasoning_effort: effort,
         },
     )?;
@@ -109,7 +113,7 @@ pub fn import_in(
 
     Ok(ImportReport {
         provider_key: key,
-        model: request.default_model.clone(),
+        model: Some(default_model.to_string()),
         models: request.models.clone(),
         detail: Some(format!("强度 {effort}")),
         backups: backup_path.into_iter().collect(),

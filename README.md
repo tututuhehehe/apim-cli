@@ -236,23 +236,23 @@ Deliberate choices:
 
 ### One-click import into Pi
 
-The same `x` panel targets **Pi** — pick `Pi` in step one. Pi takes a third-party provider as pure data (`models.json`), so apim writes:
+The same `x` panel targets **Pi** — pick `Pi` in step one (Pi needs only two steps: picking a default model is Codex-specific and is skipped). Pi takes a third-party provider as pure data (`models.json`), so apim writes exactly one place:
 
 | Location | Content |
 |---|---|
 | `~/.pi/agent/models.json` → `providers.apim-<provider-id>` | `name` / `baseUrl` (`/v1` appended when missing) / `api = "openai-completions"` / `apiKey` / `models` (the ones you ticked) |
-| `~/.pi/agent/settings.json` | `defaultProvider` = `apim-<provider-id>`, `defaultModel` = the model you picked in step three |
 
 Deliberate choices:
 
+- **`settings.json` is not touched at all.** One-click import is "add the provider and the models I need to the list" — your default provider, default model and `enabledModels` are your own settings, and Pi already has `/model` + `Ctrl+S` for choosing a default. apim neither reads nor writes that file (there is a byte-for-byte test).
+
 - **The provider key always carries an `apim-` prefix — but that only constrains *writing*.** Pi ships a large set of built-in providers (`deepseek`, `openai`, `openrouter`, …) and a same-named `models.json` entry **overrides that built-in provider's `baseUrl`** — i.e. it would quietly point your OpenAI models at the relay. A prefix can never collide, and it also tells you at a glance which entries apim wrote. Detection deliberately ignores the name: any provider — yours, or Pi's built-in — that is using one of your apim keys gets the ★.
 - **Pi's `auth.json` is never written.** apim puts the key in `models.json` (`apiKey`), the shape Pi's own docs use for a compatible endpoint. `auth.json` holds your `/login` credentials — including OAuth refresh tokens for subscriptions — and Pi manages it under its own lockfile and validates every entry on load (one bad entry breaks the whole file), so apim only *reads* it, to work out which key is in use.
-- **Only the keys apim owns are touched.** `headers`, `compat`, `modelOverrides`, `authHeader` and every other provider in `models.json`, plus every other setting in `settings.json`, are preserved (there are tests pinning this).
+- **Only the keys apim owns are touched.** `headers`, `compat`, `modelOverrides`, `authHeader` and every other provider in `models.json` are preserved (there is a test pinning this), and `settings.json` is left alone entirely.
 - **Model entries are minimal** (`id`, `name`, `reasoning: true`, `input: [text, image]`) and let Pi fill in its own conservative defaults (128000 context, 16384 output, zero cost) — apim does not invent numbers. Edit `models.json` if you want the real per-model values.
-- **Mirrors Pi's own default-model save**: besides `defaultProvider`/`defaultModel`, a non-empty `enabledModels` gets `<provider>/<model>` appended — exactly what Pi does when you press `Ctrl+S` on a model. Without it, an import into a scoped setup would look successful but stay unselectable.
-- **Verification uses your installed pi**: after writing, apim runs `pi --list-models` and requires every ticked model to show up **under our provider key**; on failure both files are restored from their `.apim.bak` backups.
+- **Verification uses your installed pi**: after writing, apim runs `pi --list-models` and requires every ticked model to show up **under our provider key**; on failure `models.json` is restored from its `.apim.bak` backup.
 - **Nothing to restart**: unlike Codex, Pi has no long-lived daemon — open `/model` (or relaunch) and the new provider is there.
-- **API keys only.** Pi's other path is subscription auth through `/login` (OAuth, credentials in `auth.json`); apim neither reads nor writes that.
+- **API keys only.** Pi's other path is subscription auth through `/login` (OAuth, credentials in `auth.json`); apim never writes that file (it only reads it, to work out which key is in use).
 
 > Requires `pi` on your machine (it is used to verify the result). apim finds it on `PATH`, or you can point `APIM_PI_BIN` at it.
 

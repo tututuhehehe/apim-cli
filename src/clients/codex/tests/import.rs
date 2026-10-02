@@ -84,7 +84,7 @@ fn import_end_to_end_writes_config_catalog_and_verifies() {
     let report = import_in(&home, &request, Some(&bin)).unwrap();
 
     assert_eq!(report.provider_key, "ikun");
-    assert_eq!(report.model, "glm-5");
+    assert_eq!(report.model.as_deref(), Some("glm-5"));
     assert_eq!(report.backups, vec![home.join("config.toml.apim.bak")]);
     assert!(home.join("config.toml.apim.bak").exists(), "改写前应留备份");
 

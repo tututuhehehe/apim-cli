@@ -25,7 +25,7 @@ fn pi_real_end_to_end() {
             fs::write(dir.join(name), text).unwrap();
         }
     }
-    let before = fs::read_to_string(config::settings_path(&dir)).ok();
+    let settings_before = fs::read_to_string(config::settings_path(&dir)).ok();
 
     let request = request_for(&["deepseek-v4", "glm-5"]);
     let report = import_in(&dir, &request, Some(&bin)).expect("真机导入应成功");
@@ -33,23 +33,19 @@ fn pi_real_end_to_end() {
     let models = fs::read_to_string(config::models_path(&dir)).unwrap();
     let settings = fs::read_to_string(config::settings_path(&dir)).unwrap();
     eprintln!(
-        "pi {} → provider {} / 表名 {} / 默认 {}；models.json {} 字节，settings.json {} 字节",
+        "pi {} → provider {} / 表名 {} / 默认（不写）{}；models.json {} 字节，settings.json {} 字节",
         bin.display(),
         pi_provider_key(&request.provider_id),
         report.provider_key,
-        report.model,
+        report.model.is_none(),
         models.len(),
         settings.len()
     );
 
-    let written = config::read(&config::settings_path(&dir)).unwrap();
-    assert_eq!(written.get("defaultProvider").unwrap(), "apim-ikun");
-    // 原来的设置项一个都没丢
-    if let Some(before_text) = before {
-        let before_map: serde_json::Map<String, serde_json::Value> =
-            serde_json::from_str(&before_text).unwrap();
-        for (key, _) in before_map.iter() {
-            assert!(written.contains_key(key), "settings.json 丢了 {key}");
-        }
+    // 一键导入只加 provider + 模型：用户的默认 provider / 默认模型设定一个字节都不许变
+    assert_eq!(report.model, None, "pi 不写默认模型");
+    match settings_before {
+        Some(before_text) => assert_eq!(settings, before_text, "settings.json 必须原样"),
+        None => assert!(!config::settings_path(&dir).exists()),
     }
 }

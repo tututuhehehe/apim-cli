@@ -51,8 +51,9 @@ pub struct ImportRequest {
     pub api_key: String,
     /// 勾选导入的模型（至少 1 个）。
     pub models: Vec<String>,
-    /// 默认模型，必须是 `models` 之一。
-    pub default_model: String,
+    /// 默认模型（必须是 `models` 之一）；`None` = 这个客户端没有「默认模型」这回事
+    /// （pi 的默认模型由用户自己在 `/model` 里选，apim 不改它的设置）。
+    pub default_model: Option<String>,
 }
 
 /// 导入成功后的结果：面板只读这里的字段拼提示，不认识任何客户端细节。
@@ -60,8 +61,8 @@ pub struct ImportRequest {
 pub struct ImportReport {
     /// 客户端侧的 provider 表名 / 键（codex：`[model_providers.<key>]`；pi：`providers` 里的键）。
     pub provider_key: String,
-    /// 写进客户端「默认模型」的那个模型。
-    pub model: String,
+    /// 写进客户端「默认模型」的那个模型；`None` = 这次导入没有写默认模型。
+    pub model: Option<String>,
     pub models: Vec<String>,
     /// 客户端特有的一句补充（codex：思考强度），面板原样显示；`None` 则不显示。
     pub detail: Option<String>,
@@ -134,14 +135,16 @@ impl Agent {
         }
     }
 
-    /// 面板第三步的说明：选中的这个模型会被写到哪里。
-    pub fn default_model_hint(self) -> String {
+    /// 面板第三步（选默认模型）的说明；`None` = 这个客户端没有「默认模型」这一步，面板直接跳过。
+    ///
+    /// pi 的默认模型由用户自己在 `/model` 里存（`Ctrl+S`），apim 不动它的 `settings.json`。
+    pub fn default_model_step(self) -> Option<String> {
         match self {
-            Agent::Codex => format!(
+            Agent::Codex => Some(format!(
                 "写进 config.toml 的 model（强度 {}）",
                 codex::DEFAULT_EFFORT
-            ),
-            Agent::Pi => "写进 settings.json 的默认模型".to_string(),
+            )),
+            Agent::Pi => None,
         }
     }
 
@@ -214,7 +217,10 @@ mod tests {
             assert!(!agent.badge().is_empty());
             assert!(!agent.config_hint().is_empty());
             assert!(!agent.reload_hint().is_empty());
-            assert!(!agent.default_model_hint().is_empty());
+            // 有「选默认模型」这一步的客户端，必须给得出说明
+            if let Some(hint) = agent.default_model_step() {
+                assert!(!hint.is_empty());
+            }
             assert!(
                 !badges.contains(&agent.badge()),
                 "角标撞车：{}",
