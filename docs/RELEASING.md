@@ -38,7 +38,11 @@ git push origin vX.Y.Z
 
 `.github/workflows/release.yml` 会：矩阵构建 macOS arm64/x64、Linux x64/arm64、Windows x64 → 打包 `apim-vX.Y.Z-<target>.tar.gz|zip` + `.sha256` → 先建草稿 Release 再上传 → 最后转正标 latest，并**额外发布 `install.sh.sha256`**（`apim update` 的 install.sh 渠道要靠它校验脚本；缺了它那条渠道会拒绝执行并给手动命令）。
 
-Release 转正（`gh release edit --draft=false --latest`）会触发 `release: [published]`，**`publish-npm.yml` 随即自动把 6 个 npm 包发出去**（版本号取自 tag）。所以 tag 一推、Release 一转正，`apim update`（npm 渠道）就能一键更新到新版本 —— 不用再手动点 Run workflow。
+Release 转正后，同一个 job 的下一步会**显式 dispatch** `publish-npm.yml`，把 6 个 npm 包发出去（版本号取自 tag）。
+
+> **为什么不用 `on: release: [published]`？** 那条路走不通：Release 是本 workflow 用 **`GITHUB_TOKEN`**（`GH_TOKEN: ${{ github.token }}`）转正的，而 GitHub 规定 *GITHUB_TOKEN 产生的事件不会再触发新的 workflow 运行*（防递归）。v0.1.4 就是这么发的：Release 出来了、npm 停在旧版本。`workflow_dispatch` 是这条规则的**例外**，所以改成 `gh workflow run publish-npm.yml ...`（该 job 需要 `actions: write`）。要换成 release 事件触发，就得给一个 PAT/App token —— 多一个长期凭据要维护，不划算。
+>
+> 因此：tag 一推 → 5 平台构建 → Release 转正 → **npm 自动跟随发布** → 用户 `apim update` 一键更新。
 
 CI（`.github/workflows/ci.yml`）同时在 main 上跑 fmt/clippy/test/JS 语法检查。
 
@@ -85,7 +89,7 @@ npm 的 2FA 是**安全密钥 / 通行证（WebAuthn：Touch ID、Face ID、实�
 发布后到 npmjs.com 给这 6 个包各配一次 Trusted Publisher（仓库 `tututuhehehe/apim-cli`、
 workflow `publish-npm.yml`），之后每次发版走 Actions（OIDC，免 token）。
 
-**之后每次发版**：通常不用管 —— Release 一转正就自动发了。只有下面两种情况要手动重跑：
+**之后每次发版**：通常不用管 —— Release 一转正，`release.yml` 就会 dispatch 它。只有下面两种情况要手动重跑：
 
 - 那次自动运行失败了（npm 是 OIDC 免 token，失败原因看 Actions 日志）：GitHub → Actions → **Publish to npm** → Run workflow，填 `X.Y.Z`；
 - 想补发一个以前漏发的版本。

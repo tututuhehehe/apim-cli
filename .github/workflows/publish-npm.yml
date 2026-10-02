@@ -35,20 +35,36 @@ jobs:
           fi
           echo "value=$VERSION" >> "$GITHUB_OUTPUT"
 
+      - name: npm 上已经有这个版本就跳过（npm 不允许覆盖；重复触发保持幂等）
+        id: exists
+        env:
+          VERSION: ${{ steps.version.outputs.value }}
+        run: |
+          if npm view "apim-cli@${VERSION}" version >/dev/null 2>&1; then
+            echo "apim-cli@${VERSION} 已经在 npm 上，跳过发布"
+            echo "skip=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "skip=false" >> "$GITHUB_OUTPUT"
+          fi
+
       - name: 检出对应 tag（用该版本的组装脚本）
+        if: steps.exists.outputs.skip != 'true'
         uses: actions/checkout@v4
         with:
           ref: v${{ steps.version.outputs.value }}
 
       - uses: actions/setup-node@v4
+        if: steps.exists.outputs.skip != 'true'
         with:
           node-version: "22"
         # 不设 registry-url：避免生成带 NODE_AUTH_TOKEN 占位的 .npmrc，让 npm 走 OIDC
 
       - name: 升级 npm（Trusted Publishing 需 >= 11.5.1）
+        if: steps.exists.outputs.skip != 'true'
         run: npm install -g npm@latest
 
       - name: 组装并发布
+        if: steps.exists.outputs.skip != 'true'
         env:
           GH_TOKEN: ${{ github.token }}
         run: node scripts/publish-npm.mjs "${{ steps.version.outputs.value }}" --publish

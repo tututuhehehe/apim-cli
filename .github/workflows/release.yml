@@ -108,6 +108,10 @@ jobs:
     name: 发布 Release
     needs: build
     runs-on: ubuntu-latest
+    # actions: write 是给最后一步 `gh workflow run` 用的（dispatch 另一个 workflow）
+    permissions:
+      contents: write
+      actions: write
     steps:
       - uses: actions/checkout@v4
       # apim update 的 install.sh 渠道要求这个摘要：拿不到就拒绝执行未校验的脚本
@@ -125,3 +129,13 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         # --repo：该 job 未 checkout，不传仓库上下文 gh 会报 not a git repository
         run: gh release edit "${GITHUB_REF_NAME}" --draft=false --latest --repo "${GITHUB_REPOSITORY}"
+
+      - name: 触发 npm 发布
+        env:
+          GH_TOKEN: ${{ github.token }}
+        # 为什么不用 `on: release: [published]`：那次 published 事件是**本 workflow 用
+        # GITHUB_TOKEN** 制造的，而 GitHub 规定 GITHUB_TOKEN 产生的事件不会再触发新 workflow 运行
+        # （防递归）—— 实测 v0.1.4 就是这么没发出去的。workflow_dispatch 是这条规则的例外，
+        # 所以这里显式 dispatch 一次；publish-npm.yml 自己也做了幂等（npm 上已有该版本就跳过），
+        # 万一将来有人手动发布草稿触发了 release 事件，也不会重复发。
+        run: gh workflow run publish-npm.yml --repo "${GITHUB_REPOSITORY}" --ref main -f "version=${GITHUB_REF_NAME#v}"
