@@ -166,10 +166,33 @@ const otpArg = process.env.NPM_OTP ? [`--otp=${process.env.NPM_OTP}`] : [];
 async function alreadyPublished(dir) {
   const { name } = JSON.parse(readFileSync(path.join(dir, 'package.json'), 'utf8'));
   try {
-    const res = await fetch(`https://registry.npmjs.org/${name}/${version}`, { method: 'HEAD' });
+    const res = await fetch(`https://registry.npmjs.org/${name}/${version}?apim=${Date.now()}`, {
+      method: 'HEAD',
+      headers: { 'cache-control': 'no-cache' },
+    });
     return res.ok;
   } catch {
     return false;
+  }
+}
+
+// npm 的发布是**异步**的：CLI 报成功后，包在 registry 上还要「processing」一会儿才可见。
+// 主包先可见、平台子包还没可见的那段窗口里，用户 `npm install -g apim-cli` 会**静默跳过**
+// optional 依赖（npm 对 optional 依赖失败不报错），装出来的 shim 直接报
+// "no prebuilt binary available for <platform>" —— v0.1.4 真机踩过。
+// 所以每个平台子包发布后要等它真的可见，主包最后发；全部发完再整体核对一遍。
+async function waitUntilVisible(dir, timeoutMs = 180000, intervalMs = 3000) {
+  const { name } = JSON.parse(readFileSync(path.join(dir, 'package.json'), 'utf8'));
+  const deadline = Date.now() + timeoutMs;
+  for (;;) {
+    if (await alreadyPublished(dir)) {
+      console.log(`apim npm: ${name}@${version} 已可见`);
+      return;
+    }
+    if (Date.now() > deadline) {
+      throw new Error(`${name}@${version} 发布后 ${Math.round(timeoutMs / 1000)}s 内仍不可见`);
+    }
+    await new Promise((resolve) => setTimeout(resolve, intervalMs));
   }
 }
 
@@ -185,6 +208,7 @@ for (const dir of built) {
   console.log(`apim npm: ${publish ? 'publish' : 'pack'} ${pkgName}`);
   try {
     run('npm', argv);
+    if (publish) await waitUntilVisible(dir);
   } catch {
     console.error(
       `\napim npm：${pkgName} 发布失败。` +
@@ -198,6 +222,23 @@ for (const dir of built) {
     rmSync(work, { recursive: true, force: true });
     process.exit(1);
   }
+}
+
+// 全部发完再核对一遍：任何一个包不可见都算失败（否则用户装到一半会拿到缺平台包的 shim）
+if (publish) {
+  const missing = [];
+  for (const dir of built) {
+    if (!(await alreadyPublished(dir))) missing.push(path.basename(dir));
+  }
+  if (missing.length > 0) {
+    console.error(
+      `\napim npm：以下 ${missing.length} 个包在 registry 上仍不可见：${missing.join('、')}\n` +
+        '  这通常只是 npm 还在 processing，过几分钟重跑本命令即可（已存在的会自动跳过）。',
+    );
+    rmSync(work, { recursive: true, force: true });
+    process.exit(1);
+  }
+  console.log(`apim npm: ${built.length} 个包都已可见`);
 }
 
 if (!publish) {

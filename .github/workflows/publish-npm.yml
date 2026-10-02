@@ -35,15 +35,20 @@ jobs:
           fi
           echo "value=$VERSION" >> "$GITHUB_OUTPUT"
 
-      - name: npm 上已经有这个版本就跳过（npm 不允许覆盖；重复触发保持幂等）
+      - name: 六个包都在 npm 上才跳过（幂等；少一个就继续发，顺便修复半发状态）
         id: exists
         env:
           VERSION: ${{ steps.version.outputs.value }}
         run: |
-          if npm view "apim-cli@${VERSION}" version >/dev/null 2>&1; then
-            echo "apim-cli@${VERSION} 已经在 npm 上，跳过发布"
+          missing=""
+          for pkg in apim-cli apim-cli-darwin-arm64 apim-cli-darwin-x64 apim-cli-linux-x64 apim-cli-linux-arm64 apim-cli-windows-x64; do
+            npm view "${pkg}@${VERSION}" version >/dev/null 2>&1 || missing="${missing} ${pkg}"
+          done
+          if [ -z "$missing" ]; then
+            echo "六个包都已经是 ${VERSION}，跳过发布"
             echo "skip=true" >> "$GITHUB_OUTPUT"
           else
+            echo "还缺：${missing} —— 继续发布（脚本会跳过已存在的）"
             echo "skip=false" >> "$GITHUB_OUTPUT"
           fi
 

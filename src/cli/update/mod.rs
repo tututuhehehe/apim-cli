@@ -84,10 +84,23 @@ pub(crate) async fn run(args: &super::Args) -> Result<()> {
             Some(tag) => println!("最新：{tag}"),
             None => println!("最新：查不到（网络问题？）"),
         }
-        if channel == Some(Channel::Npm)
-            && let Some(published) = npm_published_version()
-        {
-            println!("npm 上可装：apim-cli {published}");
+        if channel == Some(Channel::Npm) {
+            let mut parts = Vec::new();
+            for pkg in [
+                "apim-cli",
+                npm_platform_package_for(std::env::consts::OS, std::env::consts::ARCH)
+                    .unwrap_or(""),
+            ] {
+                if pkg.is_empty() {
+                    continue;
+                }
+                if let Some(version) = npm_published_version(pkg) {
+                    parts.push(format!("{pkg} {version}"));
+                }
+            }
+            if !parts.is_empty() {
+                println!("npm 上可装：{}", parts.join("、"));
+            }
         }
     }
 
@@ -138,12 +151,13 @@ async fn run_channel_update(
             // GitHub 的 Release 与 npm 是两条腿：Release 刚转正时 npm 可能还没跟上，
             // 这时 `npm install -g apim-cli@latest` 只会把**旧版本重装一遍**，
             // 用户看到「更新完成」会以为更新了（v0.1.4 真机踩过）。所以先问 npm 现在能装到哪个版本。
-            let target = latest_tag.map(|tag| tag.trim_start_matches('v'));
-            if let (Some(target), Some(published)) = (target, npm_published_version())
-                && published != target
+            // 主包可见 ≠ 能装：平台子包还没可见时 npm 会**静默跳过** optional 依赖，
+            // 装出来的 shim 会报 "no prebuilt binary available"。两个都查。
+            if let Some(target) = latest_tag.map(|tag| tag.trim_start_matches('v'))
+                && let Some(lags) = npm_lagging_packages(target)
                 && !force
             {
-                bail!(npm_lag_message(target, &published));
+                bail!(npm_lag_message(target, &lags));
             }
             run_tool("npm", &["install", "-g", "apim-cli@latest"], "更新")?;
         }
@@ -196,12 +210,12 @@ pub(crate) fn run_tool(tool: &str, args: &[&str], action: &str) -> Result<()> {
     }
 }
 
-/// npm 上 `apim-cli@latest` 现在解析到的版本（查不到 = `None`：离线 / 私有 registry / 没装 npm）。
+/// `npm view <pkg> version` 的结果（查不到 = `None`：离线 / 私有 registry / 没装 npm / 版本不存在）。
 ///
 /// 不打印 npm 自己的输出：这里只用来判断「npm 跟上 GitHub 了没有」。
-fn npm_published_version() -> Option<String> {
+fn npm_published_version(pkg: &str) -> Option<String> {
     let output = Command::new("npm")
-        .args(["view", "apim-cli", "version"])
+        .args(["view", pkg, "version"])
         .output()
         .ok()?;
     if !output.status.success() {
@@ -211,11 +225,46 @@ fn npm_published_version() -> Option<String> {
     (!text.is_empty()).then_some(text)
 }
 
-/// npm 还没跟上 GitHub 时的提示（`published` 是 npm 现在能装到的版本）。
-fn npm_lag_message(target: &str, published: &str) -> String {
+/// 当前平台的 npm 平台子包名（与 `scripts/publish-npm.mjs` 的 `PLATFORMS` 一一对应）。
+fn npm_platform_package_for(os: &str, arch: &str) -> Option<&'static str> {
+    match (os, arch) {
+        ("macos", "aarch64") => Some("apim-cli-darwin-arm64"),
+        ("macos", "x86_64") => Some("apim-cli-darwin-x64"),
+        ("linux", "x86_64") => Some("apim-cli-linux-x64"),
+        ("linux", "aarch64") => Some("apim-cli-linux-arm64"),
+        ("windows", "x86_64") => Some("apim-cli-windows-x64"),
+        _ => None,
+    }
+}
+
+/// npm 上还没跟上目标版本的包（`None` = 查不到 npm，不做判断），形如 `apim-cli 0.1.3`。
+///
+/// 主包与**当前平台的子包**都要看：只发主包、平台子包还没可见时，npm 会静默跳过 optional
+/// 依赖，装出来的是个跑不起来的 shim。
+fn npm_lagging_packages(target: &str) -> Option<String> {
+    let mut packages = vec!["apim-cli"];
+    if let Some(platform) = npm_platform_package_for(std::env::consts::OS, std::env::consts::ARCH) {
+        packages.push(platform);
+    }
+    let mut lags = Vec::new();
+    let mut checked = false;
+    for pkg in packages {
+        if let Some(published) = npm_published_version(pkg) {
+            checked = true;
+            if published != target {
+                lags.push(format!("{pkg} {published}"));
+            }
+        }
+    }
+    (checked && !lags.is_empty()).then(|| lags.join("、"))
+}
+
+/// npm 还没跟上 GitHub 时的提示（`lags` 是「包名 版本」的列表）。
+fn npm_lag_message(target: &str, lags: &str) -> String {
     format!(
-        "npm 上还没有 apim-cli {target}（现在能装到的是 {published}）。\n\
-         Release 刚发布时 npm 可能还在发：等几分钟再 `apim update`，或去 Actions 看 \"Publish to npm\" 那次运行。\n\
+        "npm 上还没有 apim-cli {target}（现在能装到的是 {lags}）。\n\
+         Release 刚发布时 npm 可能还在 processing（主包与平台子包是先后可见的）：\n\
+         等几分钟再 `apim update`（--check 能看现在的版本），或去 Actions 看 \"Publish to npm\" 那次运行。\n\
          （没有这一步的话，`npm install -g apim-cli@latest` 只会把旧版本重装一遍，看起来像更新成功了。）"
     )
 }
@@ -260,13 +309,40 @@ where
 mod tests {
     use super::*;
 
-    /// npm 落后于 GitHub Release 时的提示要同时给出两个版本号与两条出路（等一会儿 / 去 Actions）。
+    /// npm 落后于 GitHub Release 时的提示要给出目标版本、实际可装版本与出路。
     #[test]
     fn npm_lag_message_says_both_versions_and_the_way_out() {
-        let message = npm_lag_message("0.1.4", "0.1.3");
+        let message = npm_lag_message("0.1.4", "apim-cli 0.1.3、apim-cli-darwin-arm64 0.1.3");
         assert!(message.contains("0.1.4"), "{message}");
         assert!(message.contains("0.1.3"), "{message}");
         assert!(message.contains("Publish to npm"), "{message}");
         assert!(message.contains("apim update"), "{message}");
+    }
+
+    /// 平台子包名必须与 `scripts/publish-npm.mjs` 的 PLATFORMS 一致（少一个平台就装不起来）。
+    #[test]
+    fn platform_package_names_match_the_publish_script() {
+        assert_eq!(
+            npm_platform_package_for("macos", "aarch64"),
+            Some("apim-cli-darwin-arm64")
+        );
+        assert_eq!(
+            npm_platform_package_for("macos", "x86_64"),
+            Some("apim-cli-darwin-x64")
+        );
+        assert_eq!(
+            npm_platform_package_for("linux", "x86_64"),
+            Some("apim-cli-linux-x64")
+        );
+        assert_eq!(
+            npm_platform_package_for("linux", "aarch64"),
+            Some("apim-cli-linux-arm64")
+        );
+        assert_eq!(
+            npm_platform_package_for("windows", "x86_64"),
+            Some("apim-cli-windows-x64")
+        );
+        // 不在发布矩阵里的平台：不猜（也就不做「npm 跟上了吗」的判断）
+        assert_eq!(npm_platform_package_for("linux", "arm"), None);
     }
 }

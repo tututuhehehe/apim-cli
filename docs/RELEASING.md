@@ -63,6 +63,15 @@ tar -xzf apim-vX.Y.Z-aarch64-apple-darwin.tar.gz && ./apim --version
 ## 5. 发布到 npm（6 个包）
 
 包结构：主包 `apim-cli` + 5 个平台子包 `apim-cli-<os>-<arch>`（见 `scripts/publish-npm.mjs`）。
+主包靠 `optionalDependencies` + shim 在运行时挑平台子包 —— 所以**5 个平台子包不是可选项**：
+少发一个平台，那个平台的 `npm install -g apim-cli` 用户就会拿到一个只会报
+`no prebuilt binary available for <platform>` 的 shim（npm 对 optional 依赖失败是**静默跳过**的）。
+
+> **顺序与可见性（v0.1.4 真机踩过）**：npm 的发布是**异步**的，CLI 报成功之后包还要
+> "processing" 一会儿才在 registry 上可见，而且主包与平台子包是**先后**可见的。如果主包先可见、
+> 平台子包还没可见，这中间装的用户就装不到二进制。所以脚本：先发 5 个平台子包，**每个发完都轮询
+> 到它真的可见**，最后才发主包；全部发完再整体核对一遍，任何一个不可见就以非零退出
+> （workflow 的幂等检查也按「6 个包都在」算，少一个就继续发 —— 可用来修复半发状态）。
 
 **首次发布（只能本地手动，因为 OIDC / Trusted Publisher 需要包已存在）**
 
