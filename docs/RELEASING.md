@@ -38,6 +38,8 @@ git push origin vX.Y.Z
 
 `.github/workflows/release.yml` 会：矩阵构建 macOS arm64/x64、Linux x64/arm64、Windows x64 → 打包 `apim-vX.Y.Z-<target>.tar.gz|zip` + `.sha256` → 先建草稿 Release 再上传 → 最后转正标 latest，并**额外发布 `install.sh.sha256`**（`apim update` 的 install.sh 渠道要靠它校验脚本；缺了它那条渠道会拒绝执行并给手动命令）。
 
+Release 转正（`gh release edit --draft=false --latest`）会触发 `release: [published]`，**`publish-npm.yml` 随即自动把 6 个 npm 包发出去**（版本号取自 tag）。所以 tag 一推、Release 一转正，`apim update`（npm 渠道）就能一键更新到新版本 —— 不用再手动点 Run workflow。
+
 CI（`.github/workflows/ci.yml`）同时在 main 上跑 fmt/clippy/test/JS 语法检查。
 
 ## 4. 验证 Release
@@ -83,7 +85,18 @@ npm 的 2FA 是**安全密钥 / 通行证（WebAuthn：Touch ID、Face ID、实�
 发布后到 npmjs.com 给这 6 个包各配一次 Trusted Publisher（仓库 `tututuhehehe/apim-cli`、
 workflow `publish-npm.yml`），之后每次发版走 Actions（OIDC，免 token）。
 
-**之后每次发版**：GitHub → Actions → **Publish to npm** → Run workflow，填 `X.Y.Z`。
+**之后每次发版**：通常不用管 —— Release 一转正就自动发了。只有下面两种情况要手动重跑：
+
+- 那次自动运行失败了（npm 是 OIDC 免 token，失败原因看 Actions 日志）：GitHub → Actions → **Publish to npm** → Run workflow，填 `X.Y.Z`；
+- 想补发一个以前漏发的版本。
+
+命令行等价（需要 token 有 `workflow` scope：`gh auth refresh -s workflow`）：
+
+```bash
+gh workflow run publish-npm.yml -f version=X.Y.Z
+```
+
+⚠️ **npm 不允许覆盖已发布的版本**：同一个 `X.Y.Z` 只能成功发一次，发错了只能改版本号重发。
 该 workflow 用 OIDC 免 token 发布并带 provenance 签名。
 
 **想先看产物不发布**：

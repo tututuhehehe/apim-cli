@@ -3,7 +3,7 @@
 本项目遵循 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.1.0/) 与
 [语义化版本](https://semver.org/lang/zh-CN/)。
 
-## [Unreleased]
+## [0.1.4] - 2026-10-02
 
 ### 新增
 
@@ -17,6 +17,9 @@
 
 ### 变更
 
+- **npm 分发改为跟随 Release 自动发布**：`publish-npm.yml` 增加 `release: [published]` 触发
+  （版本号取自 tag），Release 一转正就把 6 个 npm 包发出去；`workflow_dispatch` 保留给重跑/补发。
+  以前必须手动点一次 Run workflow ——npm 侧的 Trusted Publisher 只是免 token，不会自己跑
 - `Cargo.toml` 的 `rust-version` 从 1.85 修正为 **1.88**（代码里用了 let-chain，1.88 才稳定；原来的声明是错的），
   CI 新增一个 **msrv job** 用声明的版本真跑一遍 `cargo check --locked --all-targets`，避免以后又漂回去
 - **一键导入面板瘦身**：选客户端那屏只留一行一个客户端名（不再展开配置路径与现状说明），
@@ -125,7 +128,8 @@
 - `apim --version` 版本输出（供安装脚本与更新检测使用）
 - MIT 开源协议
 
-[Unreleased]: https://github.com/tututuhehehe/apim-cli/compare/v0.1.3...HEAD
+[Unreleased]: https://github.com/tututuhehehe/apim-cli/compare/v0.1.4...HEAD
+[0.1.4]: https://github.com/tututuhehehe/apim-cli/releases/tag/v0.1.4
 [0.1.3]: https://github.com/tututuhehehe/apim-cli/releases/tag/v0.1.3
 [0.1.2]: https://github.com/tututuhehehe/apim-cli/releases/tag/v0.1.2
 [0.1.1]: https://github.com/tututuhehehe/apim-cli/releases/tag/v0.1.1
