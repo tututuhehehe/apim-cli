@@ -110,6 +110,13 @@ fn auth_json_credentials_count_even_when_another_provider_is_the_default() {
     let dir = temp_dir("active-auth-not-default");
     imported_as(&dir, "apim-ikun", "sk-ikun");
     auth_api_key(&dir, "opencode-go", "sk-opencode");
+    // 诱饵：settings.json 的 defaultProvider 指的是被导入的那条（apim-ikun）。
+    // 只看「默认 provider 的凭据」的实现会只返回 ikun.codex —— 下面的两条断言就是钉它的。
+    fs::write(
+        config::settings_path(&dir),
+        r#"{ "defaultProvider": "apim-ikun" }"#,
+    )
+    .unwrap();
     let keys = [
         key("opencode-go", "111", "sk-opencode"),
         key("ikun", "codex", "sk-ikun"),

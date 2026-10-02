@@ -13,6 +13,7 @@ rustup update stable          # 本地工具链与 CI 对齐，避免"本地过 
 cargo fmt --all -- --check
 cargo clippy --all-targets -- -D warnings
 cargo test
+cargo +1.88 check --locked --all-targets   # 声明的 MSRV（Cargo.toml 的 rust-version）也要过，CI 有同名 job
 node --check npm/bin/apim.js && node --check scripts/publish-npm.mjs
 ```
 

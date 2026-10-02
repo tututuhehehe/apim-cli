@@ -359,6 +359,18 @@ fn pi_leftovers_survives_a_jsonc_models_json() {
     assert_eq!(found.len(), 1, "含明文 apiKey 的条目必须报出来：{found:?}");
 }
 
+/// JSONC（带 `//` 注释）里只有用户自己的 provider → 退回文本判断也不能误报。
+#[test]
+fn pi_leftovers_jsonc_without_apim_providers_is_quiet() {
+    let dir = tmp("pi-agent-jsonc-own");
+    fs::write(
+        dir.join("models.json"),
+        "{\n  // 手写的注释\n  \"providers\": { \"sensenova\": { \"apiKey\": \"sk-y\" } }\n}\n",
+    )
+    .unwrap();
+    assert!(cleanup::pi_leftovers_in(&dir).is_empty());
+}
+
 /// models.json 里只有用户自己的 provider（没有 `apim-` 前缀）= 不算残留。
 #[test]
 fn pi_leftovers_ignores_user_own_providers() {
