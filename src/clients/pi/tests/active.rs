@@ -1,4 +1,8 @@
-//! ★ 现场识别：pi 现在默认用哪个 provider、那把密钥是不是 apim 里的这一把。
+//! ★ 现场识别：pi 配置里**每一份**凭据（`auth.json` 的 `/login` 凭据 + `models.json` 的 `apiKey`）
+//! 拿来和 apim 的密钥对账。
+//!
+//! 关键行为：pi 没有「唯一激活的 provider」，`defaultProvider` 只是启动默认值，所以**不**只看它 ——
+//! auth.json 里登过的 `opencode-go`、models.json 里导入过的每个 provider，都算在用。
 
 use std::collections::HashMap;
 use std::fs;
@@ -36,7 +40,7 @@ fn recipes(provider: &str, base_url: &str) -> HashMap<String, Recipe> {
     )])
 }
 
-/// 造一份「apim 刚导入完」的 pi 现场（key 在 models.json 里）。
+/// 造一份「apim 刚导入完」的 pi 现场（key 在 `models.json` 里）。
 fn imported(dir: &std::path::Path, token: &str) {
     imported_as(dir, "apim-ikun", token);
 }
@@ -77,13 +81,18 @@ fn auth_api_key(dir: &std::path::Path, provider_key: &str, token: &str) {
 }
 
 #[test]
-fn reads_the_default_provider_from_the_live_config() {
+fn reads_every_credential_from_both_files() {
     let dir = temp_dir("active-read");
-    imported(&dir, "sk-1");
-    let found = active::active_provider(Some(&dir)).expect("应读出默认 provider");
-    assert_eq!(found.provider_key, "apim-ikun");
-    assert_eq!(found.base_url, "https://api.ikuncode.cc/v1");
-    assert_eq!(found.token.as_deref(), Some("sk-1"));
+    imported_as(&dir, "apim-ikun", "sk-models");
+    auth_api_key(&dir, "opencode-go", "sk-auth");
+    let found = active::credentials_in_use(Some(&dir));
+    assert_eq!(found.len(), 2, "{found:?}");
+    assert!(
+        found
+            .iter()
+            .any(|c| c.token.as_deref() == Some("sk-models"))
+    );
+    assert!(found.iter().any(|c| c.token.as_deref() == Some("sk-auth")));
 }
 
 #[test]
@@ -98,7 +107,26 @@ fn matches_the_key_whose_token_is_in_the_config() {
     );
 }
 
-/// 用户手改了 pi 里的 apiKey → apim 里没有一把对得上，★ 就该消失。
+/// **用户报过的那条**：pi 的 `auth.json` 里登着 `opencode-go`（token 与 apim 里那把一样），
+/// 但 `defaultProvider` 是另一个 provider —— 那把 key 也是在用的，★ 必须亮。
+#[test]
+fn auth_json_credentials_count_even_when_another_provider_is_the_default() {
+    let dir = temp_dir("active-auth-not-default");
+    imported_as(&dir, "apim-ikun", "sk-ikun");
+    auth_api_key(&dir, "opencode-go", "sk-opencode");
+    let keys = [
+        key("opencode-go", "111", "sk-opencode"),
+        key("ikun", "codex", "sk-ikun"),
+    ];
+    let recipes = HashMap::new();
+    assert_eq!(
+        active::active_key_ids(Some(&dir), &keys, &recipes),
+        vec!["opencode-go.111".to_string(), "ikun.codex".to_string()],
+        "两份凭据都算在用（顺序按 keys）"
+    );
+}
+
+/// 用户手改了 pi 里的凭据（换 token / 换登录）→ apim 里没有一把对得上，★ 就该消失。
 #[test]
 fn hand_edited_token_matches_nothing() {
     let dir = temp_dir("active-hand-edited");
@@ -108,40 +136,6 @@ fn hand_edited_token_matches_nothing() {
     assert!(active::active_key_ids(Some(&dir), &keys, &recipes).is_empty());
 }
 
-/// 用户把默认 provider 切到一个**在 models.json 里不存在、也没凭据**的 → 不算在用。
-#[test]
-fn provider_without_any_credential_is_not_in_use() {
-    let dir = temp_dir("active-builtin");
-    imported(&dir, "sk-1");
-    fs::write(
-        config::settings_path(&dir),
-        r#"{ "defaultProvider": "deepseek", "defaultModel": "deepseek-v4" }"#,
-    )
-    .unwrap();
-    let keys = [key("ikun", "codex", "sk-1")];
-    let recipes = recipes("ikun", "https://api.ikuncode.cc");
-    assert!(active::active_key_ids(Some(&dir), &keys, &recipes).is_empty());
-}
-
-/// pi 内置 provider（models.json 里没有它的条目）+ 你在 `auth.json` 存了 apim 里那把 key
-/// （比如用 `/login` 粘进去的）→ 那把 key 真的在用，★ 要亮。
-#[test]
-fn builtin_provider_with_an_apim_key_in_auth_json_is_recognized() {
-    let dir = temp_dir("active-builtin-auth");
-    fs::write(
-        config::settings_path(&dir),
-        r#"{ "defaultProvider": "deepseek", "defaultModel": "deepseek-v4" }"#,
-    )
-    .unwrap();
-    auth_api_key(&dir, "deepseek", "sk-1");
-    let keys = [key("deepseek", "1", "sk-1")];
-    let recipes = recipes("deepseek", "https://api.deepseek.com");
-    assert_eq!(
-        active::active_key_ids(Some(&dir), &keys, &recipes),
-        vec!["deepseek.1".to_string()]
-    );
-}
-
 /// **`apim-` 前缀只约束「写」，不约束「认」**：用户手写的 provider（不带前缀）用着 apim 的 key，
 /// ★ 照样要亮。
 #[test]
@@ -149,7 +143,7 @@ fn provider_without_the_apim_prefix_is_recognized() {
     let dir = temp_dir("active-no-prefix");
     imported_as(&dir, "my-ikun-relay", "sk-1");
     let keys = [key("ikun", "codex", "sk-1")];
-    let recipes = recipes("ikun", "https://api.ikuncode.cc");
+    let recipes = HashMap::new();
     assert_eq!(
         active::active_key_ids(Some(&dir), &keys, &recipes),
         vec!["ikun.codex".to_string()]
@@ -169,37 +163,35 @@ fn any_provider_name_is_recognized_by_the_key_alone() {
     );
 }
 
-/// pi 的凭据优先级：`auth.json`（`/login` 存的）高于 `models.json` 的 `apiKey`；
-/// apim 要能看出「现在是 auth.json 里那把」。
+/// 同一把 key 在 pi 里配了两处（auth.json + models.json）也只标记一次。
 #[test]
-fn auth_json_credential_wins_over_models_json() {
-    let dir = temp_dir("active-auth-wins");
-    imported(&dir, "sk-in-models");
-    auth_api_key(&dir, "apim-ikun", "sk-from-login");
-    let keys = [
-        key("ikun", "codex", "sk-from-login"),
-        key("ikun", "models", "sk-in-models"),
-    ];
-    let recipes = recipes("ikun", "https://api.ikuncode.cc");
+fn the_same_token_in_both_files_marks_the_key_once() {
+    let dir = temp_dir("active-same-again");
+    imported(&dir, "sk-1");
+    auth_api_key(&dir, "apim-ikun", "sk-1");
+    let keys = [key("ikun", "codex", "sk-1")];
+    let recipes = HashMap::new();
     assert_eq!(
         active::active_key_ids(Some(&dir), &keys, &recipes),
-        vec!["ikun.codex".to_string()],
-        "auth.json 里的凭据优先，models.json 那把这会儿没在用"
+        vec!["ikun.codex".to_string()]
     );
 }
 
-/// `auth.json` 里是 `type: "oauth"`（订阅凭据）→ 用的是订阅，不是 apim 的 key，
-/// 即使 models.json 里写着 apim 的 key 也不算（pi 按优先级根本不会用那个 apiKey）。
+/// `auth.json` 里是 `type: "oauth"`（订阅凭据）→ 不是 apim 的 key；
+/// 同一 provider 在 models.json 里只有地址、没有 apiKey → 也不产生标记（没有能对账的凭据）。
 #[test]
 fn subscription_credential_is_not_apims_key() {
     let dir = temp_dir("active-oauth");
     imported(&dir, "sk-1");
     fs::write(
         dir.join(config::AUTH_FILE),
-        r#"{
-  "apim-ikun": { "type": "oauth", "access": "a", "refresh": "r", "expires": 1 }
-}
-"#,
+        r#"{ "apim-ikun": { "type": "oauth", "access": "a", "refresh": "r", "expires": 1 } }"#,
+    )
+    .unwrap();
+    // models.json 里只剩地址（比如用户把 apiKey 换成了自己环境变量那套）
+    fs::write(
+        config::models_path(&dir),
+        r#"{ "providers": { "apim-ikun": { "baseUrl": "https://api.ikuncode.cc/v1" } } }"#,
     )
     .unwrap();
     let keys = [key("ikun", "codex", "sk-1")];
@@ -207,35 +199,7 @@ fn subscription_credential_is_not_apims_key() {
     assert!(active::active_key_ids(Some(&dir), &keys, &recipes).is_empty());
 }
 
-/// `auth.json` 里的 key 是要运行时求值的（`$ENV`）→ 看不见明文，退化成比 base_url。
-#[test]
-fn auth_json_env_key_falls_back_to_base_url() {
-    let dir = temp_dir("active-auth-env");
-    imported(&dir, "sk-1");
-    auth_api_key(&dir, "apim-ikun", "$IKUN_API_KEY");
-    let keys = [key("ikun", "codex", "sk-1")];
-    let recipes = recipes("ikun", "https://api.ikuncode.cc");
-    assert_eq!(
-        active::active_key_ids(Some(&dir), &keys, &recipes),
-        vec!["ikun.codex".to_string()]
-    );
-}
-
-/// `auth.json` 读坏了 / 不存在都不影响检测（那只是个附加的对比来源）。
-#[test]
-fn broken_auth_json_falls_back_to_models_json() {
-    let dir = temp_dir("active-auth-broken");
-    imported(&dir, "sk-1");
-    fs::write(dir.join(config::AUTH_FILE), "{ not json").unwrap();
-    let keys = [key("ikun", "codex", "sk-1")];
-    let recipes = recipes("ikun", "https://api.ikuncode.cc");
-    assert_eq!(
-        active::active_key_ids(Some(&dir), &keys, &recipes),
-        vec!["ikun.codex".to_string()]
-    );
-}
-
-/// apiKey 是 `$ENV` 之类的取不到明文时的退路：比 base_url。
+/// `$ENV` / `!cmd` 看不见明文 → 退化成比 base_url。
 #[test]
 fn env_api_key_falls_back_to_base_url() {
     let dir = temp_dir("active-env-key");
@@ -251,46 +215,13 @@ fn env_api_key_falls_back_to_base_url() {
     assert!(active::active_key_ids(Some(&dir), &keys, &other).is_empty());
 }
 
-/// 没配过 / 配置被删 → 什么都没在用。
+/// `auth.json` 里的 key 是 `$ENV` 时看不见明文，而它没有地址可比 → 不产生标记。
 #[test]
-fn missing_config_reads_as_nothing() {
-    let dir = temp_dir("active-empty");
-    let keys = [key("ikun", "codex", "sk-1")];
-    let recipes = recipes("ikun", "https://api.ikuncode.cc");
-    assert!(active::active_provider(Some(&dir)).is_none());
-    assert!(active::active_key_ids(Some(&dir), &keys, &recipes).is_empty());
-
-    // defaultProvider 指向的 provider 在 models.json 里不存在（用户删了那个条目）
-    fs::write(
-        config::settings_path(&dir),
-        r#"{ "defaultProvider": "apim-ikun" }"#,
-    )
-    .unwrap();
-    assert!(active::active_provider(Some(&dir)).is_none());
-}
-
-/// provider 条目里**根本没有 `apiKey`**（pi 会报 no authentication method configured，用不起来）
-/// → 不算在用，不能因为 base_url 碰巧一样就打 ★。
-#[test]
-fn provider_without_api_key_is_not_in_use() {
-    let dir = temp_dir("active-no-api-key");
-    fs::write(
-        config::models_path(&dir),
-        r#"{
-  "providers": {
-    "apim-ikun": { "baseUrl": "https://api.ikuncode.cc/v1", "api": "openai-completions" }
-  }
-}
-"#,
-    )
-    .unwrap();
-    fs::write(
-        config::settings_path(&dir),
-        r#"{ "defaultProvider": "apim-ikun" }"#,
-    )
-    .unwrap();
-    let keys = [key("ikun", "codex", "sk-1")];
-    let recipes = recipes("ikun", "https://api.ikuncode.cc");
+fn auth_json_env_key_without_a_base_url_matches_nothing() {
+    let dir = temp_dir("active-auth-env");
+    auth_api_key(&dir, "opencode-go", "$OPENCODE_API_KEY");
+    let keys = [key("opencode-go", "111", "sk-1")];
+    let recipes = recipes("opencode-go", "https://opencode.ai");
     assert!(active::active_key_ids(Some(&dir), &keys, &recipes).is_empty());
 }
 
@@ -300,40 +231,33 @@ fn escaped_api_key_is_compared_by_its_literal_value() {
     let dir = temp_dir("active-escaped-key");
     imported(&dir, "$$sk-1");
     let keys = [key("ikun", "codex", "$sk-1")];
-    let recipes = recipes("ikun", "https://other.example.com");
+    let recipes = HashMap::new();
     assert_eq!(
         active::active_key_ids(Some(&dir), &keys, &recipes),
         vec!["ikun.codex".to_string()]
     );
 }
 
-/// 项目级 `.pi/settings.json` 会深合并到 agent 目录设置之上（项目优先）。
-/// 项目里把默认 provider 切走时，★ 不能再留在 apim 写的那把上。
+/// 什么都没配 / 没有凭据 → 什么都没在用。
 #[test]
-fn project_settings_override_the_agent_directory() {
-    let dir = temp_dir("active-project-override");
-    imported(&dir, "sk-1");
-    let project = dir.join("project/.pi");
-    fs::create_dir_all(&project).unwrap();
-    fs::write(
-        project.join(config::SETTINGS_FILE),
-        r#"{ "defaultProvider": "opencode-go" }"#,
-    )
-    .unwrap();
+fn missing_config_reads_as_nothing() {
+    let dir = temp_dir("active-empty");
+    let keys = [key("ikun", "codex", "sk-1")];
+    let recipes = recipes("ikun", "https://api.ikuncode.cc");
+    assert!(active::credentials_in_use(Some(&dir)).is_empty());
+    assert!(active::active_key_ids(Some(&dir), &keys, &recipes).is_empty());
+}
 
-    assert!(
-        active::active_provider_with(Some(&dir), Some(project.join(config::SETTINGS_FILE)))
-            .is_none(),
-        "项目里切走了默认 provider，就不该再说 apim 那把在用"
-    );
-    // 项目里没提 defaultProvider 时不影响
-    fs::write(
-        project.join(config::SETTINGS_FILE),
-        r#"{ "theme": "dark" }"#,
-    )
-    .unwrap();
-    assert!(
-        active::active_provider_with(Some(&dir), Some(project.join(config::SETTINGS_FILE)))
-            .is_some()
+/// `auth.json` 读坏了不影响从 `models.json` 认（那只是个附加来源）。
+#[test]
+fn broken_auth_json_falls_back_to_models_json() {
+    let dir = temp_dir("active-auth-broken");
+    imported(&dir, "sk-1");
+    fs::write(dir.join(config::AUTH_FILE), "{ not json").unwrap();
+    let keys = [key("ikun", "codex", "sk-1")];
+    let recipes = HashMap::new();
+    assert_eq!(
+        active::active_key_ids(Some(&dir), &keys, &recipes),
+        vec!["ikun.codex".to_string()]
     );
 }

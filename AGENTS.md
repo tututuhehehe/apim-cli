@@ -33,7 +33,7 @@ src/
 │       ├── import.rs  ~/.pi/agent 两份 JSON 的写入编排 + 回滚（provider 键一律 `apim-` 前缀）
 │       ├── config.rs  models.json / settings.json 读写（保留未知字段 + 备份 + 原子 600）
 │       ├── verify.rs  跑 `pi --list-models` 让 pi 自己确认勾选的模型都在
-│       ├── active.rs  回读 defaultProvider + apiKey 现场：现在在用哪把密钥（★ 角标）
+│       ├── active.rs  回读 auth.json + models.json 的凭据：现在在用哪把密钥（★ 角标）
 │       └── tests/     沙盒测试（假 pi 脚本）+ 真机 opt-in（`--ignored pi_real_end_to_end`）
 ├── cli/               CLI 子命令（AI/脚本的机器接口，与 TUI 共用底层）
 │   ├── mod.rs         Args 解析（--flag 值/布尔）、Ctx（config+recipes 目录，可注入测试）、分发与帮助
@@ -152,7 +152,9 @@ recipes/              内置 recipe ×4（deepseek/openai/moonshot/openrouter，
     - **默认模型镜像 pi 自己的行为**：除写 `defaultProvider`/`defaultModel` 外，`enabledModels` 非空时要把 `<provider>/<model>` 追加进去（pi 存默认模型时就是这么做的），否则用户设了 `enabledModels` 后会「导入成功但选不到」。
     - **校验靠 `pi --list-models`**（同 codex 的 `codex debug models`）：输出是定宽表，要匹配 `provider` 与 `model` **两列都对**（同名模型挂在别的 provider 下不算）；不通过就用备份把**两处**都还原（原来没有的文件删掉），没装 pi 直接报错。
     - **pi 没有常驻进程可杀**：`needs_reload()` 返回 false，提示语是「在 Pi 里打开 `/model`（或重开）即可看到新模型」（`Agent::reload_hint`，面板不写客户端分支）。
-    - **★ 只认现场**：`settings.json` 的 `defaultProvider` + `models.json` 里该 provider 的 `apiKey`；`apiKey` 是 `$ENV` / `!cmd`（请求时才求值）时读不到明文，退化成比 `base_url`；键没有 `apim-` 前缀就不算 apim 写的。
+    - **★ 扫 pi 配置里的每一份凭据**（pi **没有**「唯一激活的 provider」：`defaultProvider` 只是启动默认值，`/model` / `Ctrl+P` / 会话记录都可能用别的）：`<agent-dir>/auth.json`（`/login` 存的 `type:"api_key"` 的 `key`；`type:"oauth"` 是订阅凭据，不算）与 `models.json` 里**每个带 `apiKey`** 的 provider（没有 `apiKey` 的不算 —— 它可能靠环境变量/登录用，那个值看不见，只看地址会把地址相同的别的密钥误标）；能看见明文就**只比 token**（同一个 token 就是同一把），`$ENV` / `!cmd` 看不见才退化成比 `base_url`。所以内置 provider 用着 apim 的 key 也认。
+    - **`auth.json` 只读不写**：那里面还有你的订阅凭据（`type:"oauth"`，含 refresh token），而且 pi 用 `proper-lockfile` 自己管、读取时**逐条校验**（任一条不合法整份加载失败）—— apim 写它既帮不上忙又可能把你登出订阅。apim 的 key 一律写在 `models.json` 的 `apiKey` 里。
+    - **与 codex 侧的语义差别（有意为之）**：codex 同一时刻只有一个激活 provider → ★ = 当前激活的那个在用它；pi 是「配置里有的凭据都算在用」→ 导入过几把就有几个 `★P`。这是两个客户端的真实差别，不是实现偷懒。
     - **只支持 API key 这一路**：pi 的订阅渠道是 `/login` 的 OAuth（凭据在 `auth.json`），apim 拿不到也不该碰。
 
 ## 验证命令速查

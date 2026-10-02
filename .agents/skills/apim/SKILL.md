@@ -204,7 +204,7 @@ apim status <id> --json
 
 密钥表里选中一把密钥按 `x`：把「这把密钥 + 它的厂商 + 勾选的模型」写进某个客户端配置。面板三步：选客户端（Codex 或 Pi）→ 勾选模型（列表与 `m` 键一致；`空格` 勾选、`a` 全选、`/` 搜索、`⏎` 下一步）→ 选默认模型（只勾一个时自动跳过）。导入后会让客户端自己读一遍新配置（`codex debug models` / `pi --list-models`）确认成功，密钥行上会打 ★ 角标（`★C`、多个客户端叠成 `★C,P`）标出**当前真正在用**的那几把 —— 它是回读客户端配置现场算出来的，你手改了它们的配置（换 token / 切走默认 provider），下次重算（切厂商 / `r` / 自动刷新）★ 就消失。
 
-**Pi 那边写两处**：`~/.pi/agent/models.json` 的 `providers.apim-<厂商id>`（`baseUrl` + `api: openai-completions` + `apiKey` + 勾选的 models）与 `settings.json` 的 `defaultProvider` / `defaultModel`；provider 键带 `apim-` 前缀避免蹭到 pi 内置 provider 的 baseUrl（**只管写**）；模型条目只写 id/name/reasoning/input，其余用 pi 的保守默认；不需要重启，打开 `/model` 即可；只走 API key（订阅是 `/login` 的 OAuth，apim 不碰）。★ 判定只认 key：读 `defaultProvider` 那个 provider 的凭据（先 `auth.json`（只读）、再 `models.json` 的 `apiKey`）与 apim 密钥比，所以 provider 叫什么名字都行。
+**Pi 那边写两处**：`~/.pi/agent/models.json` 的 `providers.apim-<厂商id>`（`baseUrl` + `api: openai-completions` + `apiKey` + 勾选的 models）与 `settings.json` 的 `defaultProvider` / `defaultModel`；provider 键带 `apim-` 前缀避免蹭到 pi 内置 provider 的 baseUrl（**只管写**）；模型条目只写 id/name/reasoning/input，其余用 pi 的保守默认；不需要重启，打开 `/model` 即可；只走 API key（订阅是 `/login` 的 OAuth，apim 不碰）。★ 判定只认 key：扫 pi 配置里的**每一份**凭据（`auth.json`（`/login` 存的，只读）+ `models.json` 里每个 `apiKey`）与 apim 密钥比 token，所以 provider 叫什么名字都行、`defaultProvider` 是哪个也不影响。
 
 **模型不在 `config.toml` 里**（Codex 的机制，GLM / DeepSeek 官方 Codex 文档也是这个写法）：顶层只写 `model_provider` / `model` / `model_reasoning_effort` / `model_catalog_json="apim-models.json"`，模型元数据（每模型都带 medium/high/xhigh/max 四档思考等级，默认档固定 high；面板不让人挑）在 `~/.codex/apim-models.json`。apim 侧**不存**导入记录（★ 是回读 codex 配置现场算的）。
 

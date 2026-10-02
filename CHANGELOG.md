@@ -17,10 +17,10 @@
 ### 变更
 
 - **Pi 侧的 ★ 判定改成「只认 key」+ 多读一份 `auth.json`**：不再要求 provider 键带 `apim-` 前缀
-  （前缀只约束写），改读 `settings.json` 的 `defaultProvider`（项目级优先）那个 provider 的凭据 ——
-  按 pi 自己的优先级先看 `auth.json`（`/login` 存的，只读）再看 `models.json` 的 `apiKey`，
-  与 apim 的密钥比 token（读不到明文才退化比 `base_url`）。所以你自己起的 provider 名、
-  或 pi 内置的 deepseek 存了 apim 的 key，★ 一样会亮；`type:"oauth"` 的订阅凭据不算。
+  （前缀只约束写），改成扫 **pi 配置里的每一份凭据** —— `auth.json`（`/login` 存的，只读）
+  与 `models.json` 里每个带 `apiKey` 的 provider，与 apim 的密钥比 token（读不到明文才退化比
+  `base_url`）。pi 没有「唯一激活的 provider」（`defaultProvider` 只是启动默认），所以
+  `auth.json` 里登过的 `opencode-go` 这种也会被认出来；`type:"oauth"` 的订阅凭据不算。
   **apim 不写 `auth.json`**（那里面还有订阅凭据，且 pi 自己加锁管、逐条校验）
 - **密钥行 ★ 改成回读客户端现场**：不再写 `~/.config/apim/codex.toml` 台账，而是重算时点
   （启动 / 切厂商 `j`/`k` / `r` 刷新 / 5 分钟自动刷新 / 导入成功后）读一遍 codex 的 `config.toml`
