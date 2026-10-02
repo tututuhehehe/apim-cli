@@ -157,11 +157,10 @@ pub(super) fn pi_leftovers_in(dir: &Path) -> Vec<String> {
     let models = dir.join("models.json");
     let backup = crate::clients::file_io::backup_path_of(&models);
     let mut out = Vec::new();
-    // models.json 里混着用户自己的 provider，只按 `apim-` 前缀的键判断 apim 有没有写过它
+    // models.json 里混着用户自己的 provider，只按 `apim-` 前缀的键判断 apim 有没有写过它。
+    // 解析失败（比如用户加了 pi 能读、apim 不能读的 `//` 注释）就退回文本判断，别漏报。
     if let Ok(text) = fs::read_to_string(&models)
-        && let Ok(value) = serde_json::from_str::<serde_json::Value>(&text)
-        && let Some(providers) = value.get("providers").and_then(|p| p.as_object())
-        && providers.keys().any(|key| key.starts_with("apim-"))
+        && apim_owns_pi_models(&text)
     {
         out.push(format!(
             "{} 里的 providers.apim-* 条目（apiKey 是明文）",
@@ -178,6 +177,19 @@ pub(super) fn pi_leftovers_in(dir: &Path) -> Vec<String> {
     out
 }
 
+/// `models.json` 里有没有 apim 写的 provider（`apim-` 前缀的键）。
+///
+/// 先按 JSON 解析（精确）；解析不了（用户加了 `//` 注释等）就退回文本搜索 ——
+/// 这是报残留用的，宁可多报一条让用户自己看，也别把含明文密钥的文件漏掉。
+fn apim_owns_pi_models(text: &str) -> bool {
+    if let Ok(value) = serde_json::from_str::<serde_json::Value>(text)
+        && let Some(providers) = value.get("providers").and_then(|p| p.as_object())
+    {
+        return providers.keys().any(|key| key.starts_with("apim-"));
+    }
+    text.contains("\"apim-")
+}
+
 /// `~/.codex` 里 apim 一键导入留下的文件（只报告、不删）。
 pub(super) fn codex_leftovers() -> Vec<String> {
     codex_leftovers_in(&crate::clients::codex::codex_home())
@@ -186,7 +198,7 @@ pub(super) fn codex_leftovers() -> Vec<String> {
 pub(super) fn codex_leftovers_in(home: &Path) -> Vec<String> {
     let catalog = home.join("apim-models.json");
     let config = home.join("config.toml");
-    let backup = home.join("config.toml.apim.bak");
+    let backup = crate::clients::file_io::backup_path_of(&config);
     let mut out = Vec::new();
     if catalog.exists() {
         out.push(catalog.display().to_string());

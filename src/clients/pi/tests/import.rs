@@ -100,7 +100,7 @@ fn provider_key_always_carries_the_prefix() {
     );
 }
 
-/// 只动我们认识的键：其他 provider、用户手写的 headers/compat、以及 settings 里别的设置都要留下。
+/// 只动我们认识的键：其他 provider 与用户手写的 headers/compat 都要留下，settings.json 完全不碰。
 #[cfg(unix)]
 #[test]
 fn import_preserves_everything_it_does_not_own() {

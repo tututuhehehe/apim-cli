@@ -223,7 +223,7 @@ apim status glm --json
 几个刻意的选择：
 
 - **密钥行上的 ★ 是现场读出来的，不是 apim 记着的**。apim **不存**「上次导入了谁」：启动时、切厂商（`j`/`k`）时、按 `r` 刷新时、5 分钟自动刷新时、每次导入成功后，都重新读一遍**客户端自己的配置** —— Codex 看顶层 `model_provider` → 那个 `[model_providers.<id>]` 块的 `experimental_bearer_token`；Pi 看**它配置里的每一份凭据**（pi 没有「唯一激活的 provider」，`defaultProvider` 只是启动默认值）—— 扫 `auth.json`（`/login` 存的；对 apim **只读**，那里面还有你的订阅 OAuth 凭据）与 `models.json` 里每个 `apiKey`。**真正在用的**那把才带角标 `★C` / `★P`（字母是客户端短标，多个客户端叠成 `★C,P`）。手改了客户端配置（换 token、换默认 provider、删掉那个块），下次重算 ★ 就跟着消失，不会骗你。
-- **认 ★ 只看 key，不看名字**（Codex 侧同样如此）：所以你自己起的 provider 名、或者 pi 内置的 `deepseek`，只要用着 apim 里那把 key，★ 也会亮。
+- **Pi 侧认 ★ 只看 key**：你自己起的 provider 名、或者 pi 内置的 `deepseek`，只要用着 apim 里那把 key，★ 就会亮（pi 那边不要求 `apim-` 前缀）。Codex 侧更严：还要**表名**对得上（当前激活的 `model_provider`，保留名带 `apim-` 前缀），所以你把那个块改个名，codex 那边就不再算「在用」。
 - **只切换激活项，不删旧配置**。Codex 允许 `config.toml` 里同时存在多个 `[model_providers.*]`，但同一时刻只有 `model_provider` 指向的那一个生效。所以导入新厂商时旧的 provider 块原样保留（想切回去改一下 `model_provider` 就行），你手写的注释、`[projects.*]`、`[tui]` 也不会被重写。
 - **代价：旧块里的旧 token 也一起留着**。apim 不会清理旧 provider 块，所以切走之后那个厂商的 `experimental_bearer_token` 仍然明文躺在 `~/.codex/config.toml` 里 —— 不打算再用就手动删掉那个块（或在那个厂商侧轮换/吊销这把 key）。
 - **密钥直接写进 `experimental_bearer_token`**。`~/.codex/config.toml` 本来就是 600 权限。在 apim 里轮换这把 key 后，记得重新按一次 `x` 同步。

@@ -22,7 +22,7 @@ pub(super) struct Report<'a> {
     /// 动完之后仍在磁盘上的（渠道工具没删掉、或名字不是 apim 故意没删）。
     pub(super) left: Vec<String>,
     pub(super) purged: Option<String>,
-    /// `~/.codex` 里 apim 留下的东西（没启用一键导入就是空的）。
+    /// 各客户端（`~/.codex`、`~/.pi/agent`）里 apim 留下的东西（没启用一键导入就是空的）。
     pub(super) leftovers: Vec<String>,
 }
 

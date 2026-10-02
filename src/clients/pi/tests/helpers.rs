@@ -15,7 +15,7 @@ pub(super) fn temp_dir(name: &str) -> PathBuf {
     dir
 }
 
-/// 测试用的导入请求：厂商固定 ikun，模型由调用方给（第一个 = 默认模型）。
+/// 测试用的导入请求：厂商固定 ikun，模型由调用方给（pi 不需要默认模型，恒为 `None`）。
 pub(super) fn request_for(models: &[&str]) -> ImportRequest {
     ImportRequest {
         provider_id: "ikun".into(),

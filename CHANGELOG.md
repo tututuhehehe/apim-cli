@@ -17,6 +17,8 @@
 
 ### 变更
 
+- **一键导入面板瘦身**：选客户端那屏只留一行一个客户端名（不再展开配置路径与现状说明），
+  并删掉「将导入：xxx（apim 上次导入的是 yyy）」那句
 - **Pi 侧的 ★ 判定改成「只认 key」+ 多读一份 `auth.json`**：不再要求 provider 键带 `apim-` 前缀
   （前缀只约束写），改成扫 **pi 配置里的每一份凭据** —— `auth.json`（`/login` 存的，只读）
   与 `models.json` 里每个带 `apiKey` 的 provider，与 apim 的密钥比 token（读不到明文才退化比

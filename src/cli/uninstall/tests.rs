@@ -346,6 +346,19 @@ fn pi_leftovers_follows_apim_files() {
     );
 }
 
+/// models.json 带 `//` 注释（pi 能读、apim 的 JSON 解析器不能）时也不能漏报残留 —— 退回文本判断。
+#[test]
+fn pi_leftovers_survives_a_jsonc_models_json() {
+    let dir = tmp("pi-agent-jsonc");
+    fs::write(
+        dir.join("models.json"),
+        "{\n  // 手写的注释\n  \"providers\": { \"apim-ikun\": { \"apiKey\": \"sk-x\" } }\n}\n",
+    )
+    .unwrap();
+    let found = cleanup::pi_leftovers_in(&dir);
+    assert_eq!(found.len(), 1, "含明文 apiKey 的条目必须报出来：{found:?}");
+}
+
 /// models.json 里只有用户自己的 provider（没有 `apim-` 前缀）= 不算残留。
 #[test]
 fn pi_leftovers_ignores_user_own_providers() {

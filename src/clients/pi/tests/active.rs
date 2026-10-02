@@ -59,11 +59,7 @@ fn imported_as(dir: &std::path::Path, provider_key: &str, token: &str) {
         ),
     )
     .unwrap();
-    fs::write(
-        config::settings_path(dir),
-        format!(r#"{{ "defaultProvider": "{provider_key}", "defaultModel": "glm-5" }}"#),
-    )
-    .unwrap();
+    // 注意：这里**不写** settings.json —— 判定根本不读它（`defaultProvider` 只是 pi 的启动默认值）
 }
 
 /// 往 pi 自己的凭据库（`auth.json`）里放一条 API key —— 模拟用户用 `/login` 存过。
