@@ -2,8 +2,8 @@
 //!
 //! Pi 加一个 API-key 厂商是**纯数据**的事，不需要扩展（Pi 文档 `models.md` 的
 //! "Configure a compatible endpoint"）：在 `<agent-dir>/models.json` 里加一个
-//! `providers.<id>` 条目（`baseUrl` + `api: "openai-completions"` + `apiKey` + `models`），
-//! 再在 `<agent-dir>/settings.json` 里把 `defaultProvider` / `defaultModel` 指过去。
+//! `providers.<id>` 条目（`baseUrl` + `api: "openai-completions"` + `apiKey` + `models`）就够了。
+//! 默认 provider / 默认模型由用户自己在 `/model` 里挑，apim 不动 `settings.json`。
 //! Pi 只有 API key 这一条路能自动化（订阅是 `/login` 的 OAuth，apim 拿不到，也不该碰）。
 //!
 //! 三条来自 pi 源码（`dist/core/provider-composer.js` + `model-config.d.ts`，0.x 实测）的硬约束：
@@ -19,8 +19,8 @@
 //!    （128000 / 16384 / 零价），apim 不替它编数字。要按模型写真值就自己改 models.json。
 //!
 //! 子模块分工：
-//! - `active`：回读 `settings.json` + `models.json` 现场，回答「现在在用哪把密钥」（★ 角标）
-//! - `config`：两份 JSON 的读写（保留未知字段 + 备份 + 原子 600）
+//! - `active`：回读 `auth.json` + `models.json` 的凭据，回答「现在在用哪把密钥」（★ 角标）
+//! - `config`：`models.json` 的读写（保留未知字段 + 备份 + 原子 600）；`auth.json` 只读
 //! - `import`：一次导入的编排（锁 → 改内存 → 写盘 → 校验 → 回滚）
 //! - `verify`：跑 `pi --list-models` 让 pi 自己确认勾选的模型都在
 

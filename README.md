@@ -244,6 +244,7 @@ The same `x` panel targets **Pi** — pick `Pi` in step one (Pi needs only two s
 
 Deliberate choices:
 
+- **The price of not touching `enabledModels`**: if you have that setting non-empty, `/model` starts in the scoped view and new models are not in it (nor in the `Ctrl+P` cycle) until you pick one and save it as your default (`Ctrl+S`) — which is exactly when Pi itself appends it. apim deliberately leaves that decision to you.
 - **`settings.json` is not touched at all.** One-click import is "add the provider and the models I need to the list" — your default provider, default model and `enabledModels` are your own settings, and Pi already has `/model` + `Ctrl+S` for choosing a default. apim neither reads nor writes that file (there is a byte-for-byte test).
 
 - **The provider key always carries an `apim-` prefix — but that only constrains *writing*.** Pi ships a large set of built-in providers (`deepseek`, `openai`, `openrouter`, …) and a same-named `models.json` entry **overrides that built-in provider's `baseUrl`** — i.e. it would quietly point your OpenAI models at the relay. A prefix can never collide, and it also tells you at a glance which entries apim wrote. Detection deliberately ignores the name: any provider — yours, or Pi's built-in — that is using one of your apim keys gets the ★.
@@ -265,7 +266,7 @@ Everything lives under `~/.config/apim/`. TUI edits write these two files direct
 - `config.toml` — alias and group (no tokens)
 - `secrets.toml` — the actual tokens, keyed by `"provider.alias"`
 
-Import targets live outside that directory: `~/.codex/config.toml` + `~/.codex/apim-models.json` (Codex, backed up as `config.toml.apim.bak`) and `~/.pi/agent/models.json` + `~/.pi/agent/settings.json` (Pi, `PI_CODING_AGENT_DIR` overrides the directory, backups as `<name>.apim.bak`).
+Import targets live outside that directory: `~/.codex/config.toml` + `~/.codex/apim-models.json` (Codex, backed up as `config.toml.apim.bak`) and `~/.pi/agent/models.json` (Pi, backed up as `models.json.apim.bak`; `PI_CODING_AGENT_DIR` overrides the directory). Pi's `settings.json` is never written — apim only *reads* `auth.json` (never writes it either) to work out which key is in use.
 
 Nothing apim-side records the import: the ★ marker on a key row is computed from the client's own config (see above).
 

@@ -287,7 +287,7 @@ pub(crate) async fn run_snapshot_import_default() -> Result<()> {
     let (mut app, _rx, _rx_task) = App::start()?;
     app.focus = Focus::Keys;
     let mut flow = ImportFlow::new(snapshot_key_id(&app), 0);
-    flow.agent = snapshot_agent();
+    flow.agent = snapshot_agent_with_default_step();
     flow.step = ImportStep::DefaultModel;
     flow.items = vec![
         ModelPick {
@@ -317,6 +317,29 @@ fn snapshot_agent() -> Agent {
         .copied()
         .find(|agent| agent.label().eq_ignore_ascii_case(&wanted))
         .unwrap_or(Agent::ALL[0])
+}
+
+/// 「选默认模型」那一屏专用的客户端选择：pi 根本没有这一步（`default_model_step()` 为 `None`），
+/// 拿它出快照会渲染出一屏运行期到不了的界面 —— 这时回退到第一个真有这一步的客户端并提示一句。
+fn snapshot_agent_with_default_step() -> Agent {
+    let wanted = std::env::var("APIM_SNAPSHOT_AGENT").unwrap_or_default();
+    let agent = snapshot_agent();
+    if agent.default_model_step().is_some() {
+        return agent;
+    }
+    let fallback = Agent::ALL
+        .iter()
+        .copied()
+        .find(|agent| agent.default_model_step().is_some())
+        .unwrap_or(agent);
+    if !wanted.is_empty() {
+        eprintln!(
+            "{} 没有「选默认模型」这一步，快照改用 {}",
+            agent.label(),
+            fallback.label()
+        );
+    }
+    fallback
 }
 
 /// 快照用的密钥 id：有真实密钥就用它，没有就用占位（快照不依赖配置目录内容）。

@@ -31,7 +31,7 @@ src/
 │   │   └── tests/     沙盒测试（按源码文件分）+ 真机 opt-in（`--ignored codex_real_end_to_end`）
 │   └── pi/            Pi 适配
 │       ├── import.rs  ~/.pi/agent 两份 JSON 的写入编排 + 回滚（provider 键一律 `apim-` 前缀）
-│       ├── config.rs  models.json / settings.json 读写（保留未知字段 + 备份 + 原子 600）
+│       ├── config.rs  models.json 读写（保留未知字段 + 备份 + 原子 600）；auth.json 只读
 │       ├── verify.rs  跑 `pi --list-models` 让 pi 自己确认勾选的模型都在
 │       ├── active.rs  回读 auth.json + models.json 的凭据：现在在用哪把密钥（★ 角标）
 │       └── tests/     沙盒测试（假 pi 脚本）+ 真机 opt-in（`--ignored pi_real_end_to_end`）
@@ -101,7 +101,7 @@ recipes/              内置 recipe ×4（deepseek/openai/moonshot/openrouter，
 - `~/.config/apim/secrets.toml` — token，键名 `"厂商.别名"`，600 权限
 - `~/.config/apim/recipes/*.yaml` — 用户厂商 recipe，同 id 覆盖内置
 - `~/.codex/config.toml`、`~/.codex/apim-models.json` — 一键导入到 Codex（`x` 键）写的，前者每次改写前备份成 `config.toml.apim.bak`
-- `~/.pi/agent/models.json`、`~/.pi/agent/settings.json` — 一键导入到 Pi（`x` 键）写的，各自备份成 `<原名>.apim.bak`；`PI_CODING_AGENT_DIR` 可改整个目录
+- `~/.pi/agent/models.json` — 一键导入到 Pi（`x` 键）写的，备份成 `models.json.apim.bak`；`PI_CODING_AGENT_DIR` 可改整个目录。`settings.json` / `auth.json` **都不写**（前者完全不碰，后者只读来判断哪把 key 在用）
 - `APIM_CONFIG_DIR` 环境变量可重定向整个配置目录（测试用）
 
 ★ 不落在 apim 自己的文件里：密钥行的 ★ 是**回读各客户端配置现场**算出来的（codex 见约定 11、pi 见约定 14）。
@@ -137,7 +137,7 @@ recipes/              内置 recipe ×4（deepseek/openai/moonshot/openrouter，
 12. **`apim update` 只认三条渠道**（install.sh / npm / Homebrew，见 `docs/RELEASING.md` 的速查表）：`src/cli/update.rs` 按可执行文件路径认渠道（npm 看 `node_modules/apim-cli`、brew 看 `Cellar/apim`，其余当 install.sh 装的裸二进制），裸二进制那条复用官方 install.sh，但**不是 `curl | sh`**：URL 钉到本次要更新到的 tag、下载到临时文件、先做形状校验（是 shell 脚本 / 是本仓库安装器 / 含 sha256 校验）、再按 Release 发布的 `install.sh.sha256` 校验摘要（**拿不到摘要就拒绝执行**），最后用 `sh <file>` 跑；`APIM_INSTALL_DIR` 钉在当前二进制的**真实位置**（先 canonicalize，否则符号链接会被替换掉）保证原地更新。**`target/` 下的开发构建与 `~/.cargo/bin` 里的 cargo 副本一律不更新**（前者会被 Release 覆盖掉开发二进制，后者是 `cargo install` 留下的、被 PATH 遮挡的多余副本）。加渠道要同时改 `Channel` 与它的识别规则、测试和 RELEASING 的表；`apim uninstall` 复用同一套 `detect_channel`，新渠道的卸载动作会被 `uninstall_program` 的穷尽 `match` 拦下（编译器逼你补），但提示语与单测仍要手工过一遍。
 
 13. **加一个客户端（Claude Code / pi …）就是三处改动**，别在面板里写客户端专属分支：
-    - `src/clients/mod.rs`：加 `Agent` 变体（所有 `match` 会被编译器强制补全）+ 一条分派（`label/badge/config_hint/reload_hint/default_model_hint/active_key_ids/import/needs_reload/reload`）；`ImportRequest` / `ImportReport` 是共用的（面板只读这两个形状，不认客户端细节）；
+    - `src/clients/mod.rs`：加 `Agent` 变体（所有 `match` 会被编译器强制补全）+ 一条分派（`label/badge/config_hint/reload_hint/default_model_step/active_key_ids/import/needs_reload/reload`）；`ImportRequest` / `ImportReport` 是共用的（面板只读这两个形状，不认客户端细节）；
     - `src/clients/<id>/`：新子模块，实现「写哪里 / 怎么写 / 写完后怎么校验 / 怎么重新加载 / 怎么从自家配置里认出正在用的密钥」；公共件在 `clients/file_io.rs`（跟随符号链接 + 写前备份 + 原子 600）与 `clients/lock.rs`（导入排他锁），别重写一遍；
     - `app/import` 与 `ui/import` **不用改**：它们只经 `Agent` 的这套方法调客户端；选择面板只列客户端名，不展开各家说明（要写就写在客户端子模块的文档里）。
     - 密钥行的 ★ 已经按客户端通用：`Agent::active_key_ids` 各自回读现场，UI 用 `Agent::badge()` 拼角标（`★C`、`★C,P`），加客户端只需补 `active_key_ids` 与 `badge` 两条分派（`clients/mod.rs` 里有一条注册表自检的测试守着「角标不许撞车」）。
@@ -146,9 +146,9 @@ recipes/              内置 recipe ×4（deepseek/openai/moonshot/openrouter，
 
 14. **一键导入到 Pi（`x` 键）的硬约束**（都来自 pi 源码 + 真机实测，别凭感觉改）：
     - **只写一处**：`<agent-dir>/models.json` 的 `providers.<键>`（`name`/`baseUrl`/`api="openai-completions"`/`apiKey`/`models`）。`<agent-dir>` 默认 `~/.pi/agent`，`PI_CODING_AGENT_DIR` 可改（面板提示也读它）。
-    - **`settings.json` 一个字都不动**：一键导入只干「往模型列表里加 provider + 模型」；默认 provider / 默认模型 / `enabledModels` 都是用户自己的设定（pi 里有 `/model` + `Ctrl+S`），apim 既不读也不写它（有逐字节断言的测试）。因此 **Pi 没有「选默认模型」这一步**：`Agent::default_model_step()` 返回 `None`，面板勾完模型直接开写。
+    - **`settings.json` 一个字都不动**：一键导入只干「往模型列表里加 provider + 模型」；默认 provider / 默认模型 / `enabledModels` 都是用户自己的设定（pi 里有 `/model` + `Ctrl+S`），apim 既不读也不写它（有逐字节断言的测试）。代价：用户设了非空 `enabledModels` 时，新模型不在 `/model` 的 scoped 视图里（也不进 `Ctrl+P` 循环），要他自己 `Ctrl+S` 存一次 —— 那一步 pi 自己会追加（`AgentSession._addPersistedDefaultToNonEmptyScope`）。因此 **Pi 没有「选默认模型」这一步**：`Agent::default_model_step()` 返回 `None`，面板勾完模型直接开写。
     - **provider 键一律加 `apim-` 前缀（只约束写、不约束认）**：pi 自带一大批同名 provider（`deepseek`/`openai`/`openrouter` …），`models.json` 里同名的条目会被 `applyModelsJson` 用来**覆盖那个内置 provider 的 baseUrl**（等于把用户的 OpenAI 指到我们的中转站）。加前缀永远不会撞名，`/model` 里也一眼看出是 apim 写的；但认 ★ 时不看名字（见下一条）。
-    - **只动我们认识的键**：`providers.<键>` 里的 `headers` / `compat` / `modelOverrides` / `authHeader` 与其它 provider、`settings.json` 里别的设置都原样保留（`pi/tests/import.rs` 有断言守）。
+    - **只动我们认识的键**：`providers.<键>` 里的 `headers` / `compat` / `modelOverrides` / `authHeader` 与其它 provider 都原样保留（`pi/tests/import.rs` 有断言守）；`settings.json` 完全不碰。
     - **模型条目用 pi 的默认值兜底**：只写 `id`/`name`/`reasoning: true`/`input: [text, image]`，**不写** `contextWindow`/`maxTokens`/`cost` —— pi 对缺省用自己的保守默认（128000 / 16384 / 零价），apim 不替它编数字（与 codex 那边写 272000 不同：那是 codex 给未知模型的默认值）。
     - **校验靠 `pi --list-models`**（同 codex 的 `codex debug models`）：输出是定宽表，要匹配 `provider` 与 `model` **两列都对**（同名模型挂在别的 provider 下不算）；不通过就用备份还原 `models.json`（原来没有的文件删掉），没装 pi 直接报错。
     - **pi 没有常驻进程可杀**：`needs_reload()` 返回 false，提示语是「在 Pi 里打开 `/model`（或重开）即可看到新模型」（`Agent::reload_hint`，面板不写客户端分支）。
@@ -169,7 +169,7 @@ cargo run -- --snapshot-import-default # 一键导入面板快照：第三步选
 cargo test                             # 单测（recipe/表单/CLI 沙盒/codex+pi 适配等）
 cargo test -- codex_real_end_to_end --ignored --nocapture   # 需本机装 codex：真机端到端（生成目录 + 让 codex 校验）
 cargo test -- pi_real_end_to_end --ignored --nocapture      # 需本机装 pi：真机端到端（写两份 JSON + 让 pi 列模型）
-APIM_SNAPSHOT_AGENT=pi cargo run -- --snapshot-import-default  # 换客户端出面板快照（默认第一个）
+APIM_SNAPSHOT_AGENT=pi cargo run -- --snapshot-import-models   # 换客户端出面板快照（默认第一个；「选默认模型」那屏只对 codex 存在）
 cargo run -- update --check                # 认安装渠道 + 报当前/最新（不动手）
 apim provider ls --json                # CLI 冒烟（跑已发布版；本地代码用 cargo run -- provider ls）
 ```

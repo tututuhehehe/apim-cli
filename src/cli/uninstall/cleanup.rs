@@ -162,13 +162,13 @@ pub(super) fn codex_leftovers_in(home: &Path) -> Vec<String> {
         out.push(catalog.display().to_string());
     }
     // config.toml 里混着用户手写的配置，只能靠指针字符串判断 apim 有没有写过它
-    if let Ok(text) = fs::read_to_string(&config) {
-        if text.contains("apim-models.json") {
-            out.push(format!(
-                "{} 里的 [model_providers.apim-*] / model_provider / model_catalog_json",
-                config.display()
-            ));
-        }
+    if let Ok(text) = fs::read_to_string(&config)
+        && text.contains("apim-models.json")
+    {
+        out.push(format!(
+            "{} 里的 [model_providers.apim-*] / model_provider / model_catalog_json",
+            config.display()
+        ));
     }
     // 约定 11：改写前的备份里同样有 experimental_bearer_token（明文密钥），必须一起报
     if backup.exists() {

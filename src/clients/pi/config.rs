@@ -1,4 +1,4 @@
-//! `~/.pi/agent/models.json` 与 `settings.json` 的读写。
+//! `~/.pi/agent/models.json` 的读写（`auth.json` 只读、`settings.json` 完全不碰）。
 //!
 //! `auth.json`（pi 自己的凭据库）**只读不写**：里面有 `/login` 的订阅凭据，而且 pi 用
 //! `proper-lockfile` 自己管、读取时逐条校验（任何一条坏掉整份加载失败）—— 我们碰它只会

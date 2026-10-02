@@ -1,7 +1,7 @@
 //! 导入期间对客户端配置目录的排他锁（`.apim-import.lock`）。
 //!
 //! 锁覆盖「读 → 改 → 写 → 校验」整段：客户端的配置文件都是 read-modify-write
-//! （codex 的 `config.toml`、pi 的 `models.json`/`settings.json`），两个 apim 同时导入时，
+//! （codex 的 `config.toml`、pi 的 `models.json`），两个 apim 同时导入时，
 //! 后写者会把前者刚加的那个 provider 块整段抹掉，而两边都报成功
 //! （tmp 名带 pid 只保证不写坏文件，不保证不丢内容）。
 

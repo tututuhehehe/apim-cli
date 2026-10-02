@@ -213,7 +213,7 @@ apim status <id> --json
 几个容易踩的：
 
 - Codex **可以同时定义多个** `[model_providers.*]`，但同一时刻只有 `model_provider` 指向的那个生效 → apim 只切激活项，旧 provider 块保留（想要多套并存就用官方的 `codex --profile <name>` + `~/.codex/<name>.config.toml`）。
-- **`wire_api = "chat"` 已被 codex 删除**（0.134+ 硬报错）。中转站必须提供 `/v1/responses`；加客户端 = `src/clients/mod.rs` 加 `Agent` 变体 + 新建 `src/clients/<id>/` 子模块（写哪里 / 怎么写 / 怎么校验 / 怎么重载 / 怎么认出正在用的密钥）+ 补一条分派；面板（`app/import`、`ui/import`）不用改，文案全取自 `Agent::{label,badge,config_hint,reload_hint,default_model_hint}`。**不要**给客户端写 YAML 配方（约定 2 的数据化范围是厂商协议；客户端之间不是同一套协议）。想跳过「勾选模型」两步的客户端要先做一步重构：把 `ImportRequest.models/default_model` 改成 `Option`（见 `DEV-NOTES.local.md`）。
+- **`wire_api = "chat"` 已被 codex 删除**（0.134+ 硬报错）。中转站必须提供 `/v1/responses`；加客户端 = `src/clients/mod.rs` 加 `Agent` 变体 + 新建 `src/clients/<id>/` 子模块（写哪里 / 怎么写 / 怎么校验 / 怎么重载 / 怎么认出正在用的密钥）+ 补一条分派；面板（`app/import`、`ui/import`）不用改，文案全取自 `Agent::{label,badge,config_hint,reload_hint,default_model_step}`。**不要**给客户端写 YAML 配方（约定 2 的数据化范围是厂商协议；客户端之间不是同一套协议）。「选默认模型」这一步已经按客户端可关：`Agent::default_model_step()` 返回 `None` 就跳过（pi 就是这样），`ImportRequest.default_model` / `ImportReport.model` 都是 `Option`。
 
 导入面板的模型列表与 `m` 键**完全一致**（同一个解析函数，只取模型名）；**不做端点能力筛选** —— `supported_endpoint_types` 是 new-api 后台的端点映射、会漏报（实测 ikun 把 `gpt-6-sol` 标成只有 `openai`，实际能用），拿它筛选会藏掉能用的模型。
 - 模型条目是照 codex 官方字段手写的**迷你条目**（GLM/DeepSeek 官方文档 + cc-switch 实测模板，~1.5KB/模型，带 `supports_reasoning_summaries` 与 `supports_parallel_tool_calls` 以兼容老版 codex）；导入完用 `codex debug models` 反向校验。

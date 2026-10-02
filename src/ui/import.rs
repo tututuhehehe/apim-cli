@@ -132,9 +132,15 @@ fn draw_model_picker(frame: &mut Frame, flow: &ImportFlow, area: Rect) {
     }
 
     frame.render_widget(Paragraph::new(count_line(flow)), chunks[2]);
+    // ⏎ 的下一步是什么由客户端决定：codex 还有「选默认模型」一步，pi 直接开写
+    let next = if flow.agent.default_model_step().is_some() {
+        "⏎ 下一步（选默认模型）"
+    } else {
+        "⏎ 开始导入"
+    };
     frame.render_widget(
         Paragraph::new(Line::from(Span::styled(
-            " 空格 勾选  a 全选/清空  / 搜索  ⏎ 下一步（选默认模型）  Esc 取消 ",
+            format!(" 空格 勾选  a 全选/清空  / 搜索  {next}  Esc 取消 "),
             Style::new().fg(theme::MUTED),
         ))),
         chunks[3],

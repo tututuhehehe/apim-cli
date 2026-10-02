@@ -9,7 +9,7 @@
 //! 3. `Agent` 的新方法里加一条分派（通常一行）。
 //!
 //! 面板（`app/import`、`ui/import`）**不需要改**：它只经 `Agent` 的这些方法调客户端，
-//! 文案也全部取自 `Agent`（`label/badge/config_hint/reload_hint/default_model_hint`）。
+//! 文案也全部取自 `Agent`（`label/badge/config_hint/reload_hint/default_model_step`）。
 //!
 //! 各家的「导入规则」不一样（配置格式、鉴权变量名、有没有模型清单、生效方式都不同），
 //! 所以**不用 YAML 配方把客户端数据化**：那是厂商协议层的事（见 AGENTS.md 约定 2 ——
@@ -77,7 +77,7 @@ pub struct ImportReport {
 /// 把默认 provider 切走、删掉那个块），★ 会跟着变，而不是留在旧密钥上。
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ActiveProvider {
-    /// 客户端配置里的 provider 键（codex：`model_provider` 指向的表名；pi：`defaultProvider`）。
+    /// 客户端配置里的 provider 键（codex：`model_provider` 指向的表名；pi：`providers` 里的键）。
     pub provider_key: String,
     /// 该 provider 的 API 根地址（原样，未归一化）。
     pub base_url: String,

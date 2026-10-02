@@ -78,11 +78,16 @@ async fn undo_rechecks_the_star() {
 /// 面板不会停在第三步。
 #[tokio::test]
 async fn pi_skips_the_default_model_step() {
-    use std::sync::Arc;
+    use std::sync::{Arc, Mutex};
     let (mut app, _rx, _rx_task) = test_app(&[("alpha", &["a1"])]);
     app.focus = Focus::Keys;
-    // 真 runner 会去写用户真实的 ~/.pi，测试里换成假的
-    app.import_runner = Some(Arc::new(|_, _| Ok(report(&["gpt-6-sol"], "gpt-6-sol"))));
+    // 真 runner 会去写用户真实的 ~/.pi，测试里换成假的（顺便记下请求里的 default_model）
+    let seen: Arc<Mutex<Option<Option<String>>>> = Arc::new(Mutex::new(None));
+    let recorder = seen.clone();
+    app.import_runner = Some(Arc::new(move |_, request| {
+        *recorder.lock().unwrap() = Some(request.default_model.clone());
+        Ok(report(&["gpt-6-sol"], "gpt-6-sol"))
+    }));
 
     app.open_import();
     flow_mut(&mut app).agent = Agent::Pi;
@@ -97,6 +102,17 @@ async fn pi_skips_the_default_model_step() {
         flow(&app).step,
         ImportStep::Working,
         "pi 应直接开写，不停在「选默认模型」"
+    );
+
+    // 等后台任务把请求交给 runner，确认请求里没有默认模型
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(5);
+    while seen.lock().unwrap().is_none() && std::time::Instant::now() < deadline {
+        tokio::time::sleep(std::time::Duration::from_millis(10)).await;
+    }
+    assert_eq!(
+        seen.lock().unwrap().clone(),
+        Some(None),
+        "pi 的请求不该带默认模型"
     );
 }
 

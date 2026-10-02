@@ -968,18 +968,14 @@ pub(crate) mod tests {
         );
     }
 
-    /// 两个客户端都回读各自的现场：pi 认 `defaultProvider` 指向的那个 provider 的凭据
-    /// （`auth.json` 与 `models.json` 都看），用户手改了它也要能掉 ★。
+    /// 两个客户端都回读各自的现场：pi 扫它配置里的每一份凭据（`auth.json` 与 `models.json`），
+    /// 用户手改了凭据也要能掉 ★。
     #[test]
     fn pi_is_detected_from_its_own_config_too() {
         let (mut app, _rx, _rx_models) = test_app(&[("alpha", &["a1"])]);
         let home = app.agent_homes[&Agent::Pi].clone();
-        // 两样都要能认：用户自己起的 provider 名（没有 apim- 前缀）+ 凭据在 auth.json 里
-        std::fs::write(
-            home.join("settings.json"),
-            "{ \"defaultProvider\": \"my-relay\" }",
-        )
-        .unwrap();
+        // 两样都要能认：用户自己起的 provider 名（没有 apim- 前缀）+ 凭据在 auth.json 里。
+        // （settings.json 不参与判定，这里故意不写它。）
         std::fs::write(
             home.join("models.json"),
             "{ \"providers\": { \"my-relay\": { \"baseUrl\": \"https://example.invalid/v1\" } } }",

@@ -196,12 +196,13 @@ impl App {
             self.toast = Some(("至少勾选一个模型".into(), Instant::now()));
             return;
         }
-        // 没有「默认模型」这一步的客户端（pi：默认模型由用户自己在 /model 里挑）：勾完直接开写
+        // 没有「默认模型」这一步的客户端（pi：默认模型由用户自己在 /model 里挑）：勾完直接开写，
+        // 请求里也不带默认模型（`None`）。只勾一个模型时同理（codex 就把它当默认）。
         let needs_default = self
             .import_flow()
             .is_some_and(|flow| flow.agent.default_model_step().is_some());
         if checked.len() == 1 || !needs_default {
-            let only = checked.first().cloned();
+            let only = needs_default.then(|| checked[0].clone());
             self.start_import(checked, only);
             return;
         }

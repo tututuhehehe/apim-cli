@@ -243,6 +243,7 @@ apim status glm --json
 
 几个刻意的选择：
 
+- **不碰 `enabledModels` 的代价**：如果你设了它（非空），`/model` 默认停在 scoped 视图里，新模型不在其中（也不进 `Ctrl+P` 循环），直到你自己选一次并存成默认（`Ctrl+S`）—— 那一步 pi 自己会把它追加进去。apim 有意把这个决定留给你。
 - **`settings.json` 一个字都不动**。一键导入就是「往模型列表里加上我要的 provider 和模型」——默认 provider、默认模型、`enabledModels` 都是你自己的设定，而且 pi 里本来就有 `/model` + `Ctrl+S` 用来选默认。apim 不读也不写那个文件（有逐字节断言的测试守着）。
 
 - **provider 键一律带 `apim-` 前缀 —— 但这只管「写」**。Pi 自带一大批内置 provider（`deepseek` / `openai` / `openrouter` …），而 `models.json` 里同名的条目会**覆盖那个内置 provider 的 `baseUrl`** —— 等于悄悄把你的 OpenAI 模型指到中转站。加前缀永远不会撞名，`/model` 里也一眼看出是 apim 写的；而认 ★ 时**不看名字**：你用着 apim 里那把 key 的 provider（自己起的名字或 pi 内置的都行）都会亮。
@@ -264,7 +265,7 @@ apim status glm --json
 - `config.toml`：别名、分组（不含 token）
 - `secrets.toml`：真正的 token，键名是 `"厂商.别名"`
 
-导入目标在别处：`~/.codex/config.toml` + `~/.codex/apim-models.json`（Codex，备份为 `config.toml.apim.bak`）与 `~/.pi/agent/models.json` + `~/.pi/agent/settings.json`（Pi，`PI_CODING_AGENT_DIR` 可改整个目录，备份为 `<原名>.apim.bak`）。
+导入目标在别处：`~/.codex/config.toml` + `~/.codex/apim-models.json`（Codex，备份为 `config.toml.apim.bak`）与 `~/.pi/agent/models.json`（Pi，备份为 `models.json.apim.bak`；`PI_CODING_AGENT_DIR` 可改整个目录）。Pi 的 `settings.json` 一个字都不写；apim 只**读** `auth.json`（也不写它）来判断哪把 key 在用。
 
 apim 侧**不存**导入记录：密钥行上的 ★ 是按客户端自己的配置现场算出来的（见上文）。
 
