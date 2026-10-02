@@ -322,6 +322,42 @@ fn codex_leftovers_follows_apim_files() {
     );
 }
 
+/// Pi 残留要报 apim 写过的两处：models.json 里的 `providers.apim-*` 条目，
+/// 以及含明文 apiKey 的 `models.json.apim.bak` 备份。
+#[test]
+fn pi_leftovers_follows_apim_files() {
+    let dir = tmp("pi-agent");
+    assert!(
+        cleanup::pi_leftovers_in(&dir).is_empty(),
+        "没导入过就没有残留"
+    );
+
+    fs::write(
+        dir.join("models.json"),
+        r#"{ "providers": { "apim-ikun": { "apiKey": "sk-x" } } }"#,
+    )
+    .unwrap();
+    fs::write(dir.join("models.json.apim.bak"), r#"{ "providers": {} }"#).unwrap();
+    let found = cleanup::pi_leftovers_in(&dir);
+    assert_eq!(found.len(), 2, "条目与备份各一条：{found:?}");
+    assert!(
+        found.iter().any(|item| item.contains("apim.bak")),
+        "含密钥的备份必须报出来：{found:?}"
+    );
+}
+
+/// models.json 里只有用户自己的 provider（没有 `apim-` 前缀）= 不算残留。
+#[test]
+fn pi_leftovers_ignores_user_own_providers() {
+    let dir = tmp("pi-agent-own");
+    fs::write(
+        dir.join("models.json"),
+        r#"{ "providers": { "sensenova": { "apiKey": "sk-y" } } }"#,
+    )
+    .unwrap();
+    assert!(cleanup::pi_leftovers_in(&dir).is_empty());
+}
+
 /// 只有 config.toml 但没有 apim 的指针（用户自己写的文件）= 不算残留。
 #[test]
 fn codex_leftovers_ignores_user_own_config() {

@@ -202,7 +202,7 @@ apim status <id> --json
 
 ## 一键导入到 Codex / Pi（TUI `x` 键，暂无 CLI）
 
-密钥表里选中一把密钥按 `x`：把「这把密钥 + 它的厂商 + 勾选的模型」写进某个客户端配置。面板三步：选客户端（Codex 或 Pi）→ 勾选模型（列表与 `m` 键一致；`空格` 勾选、`a` 全选、`/` 搜索、`⏎` 下一步）→ 选默认模型（只勾一个时自动跳过）。导入后会让客户端自己读一遍新配置（`codex debug models` / `pi --list-models`）确认成功，密钥行上会打 ★ 角标（`★C`、多个客户端叠成 `★C,P`）标出**当前真正在用**的那几把 —— 它是回读客户端配置现场算出来的，你手改了它们的配置（换 token / 切走默认 provider），下次重算（切厂商 / `r` / 自动刷新）★ 就消失。
+密钥表里选中一把密钥按 `x`：把「这把密钥 + 它的厂商 + 勾选的模型」写进某个客户端配置。步骤：选客户端（Codex 或 Pi）→ 勾选模型（列表与 `m` 键一致；`空格` 勾选、`a` 全选、`/` 搜索、`⏎` 下一步）→（**只有 Codex**）选默认模型（只勾一个时自动跳过；Pi 没有这一步）。导入后会让客户端自己读一遍新配置（`codex debug models` / `pi --list-models`）确认成功，密钥行上会打 ★ 角标（`★C`、多个客户端叠成 `★C,P`）标出**当前真正在用**的那几把 —— 它是回读客户端配置现场算出来的，你手改了它们的配置（换 token / 切走默认 provider），下次重算（切厂商 / `r` / 自动刷新）★ 就消失。
 
 **Pi 那边只写一处**：`~/.pi/agent/models.json` 的 `providers.apim-<厂商id>`（`baseUrl` + `api: openai-completions` + `apiKey` + 勾选的 models）；**`settings.json` 一个字都不动**（默认 provider / 默认模型 / `enabledModels` 都是用户自己的设定，Pi 也没有「选默认模型」这一步）；provider 键带 `apim-` 前缀避免蹭到 pi 内置 provider 的 baseUrl（**只管写**）；模型条目只写 id/name/reasoning/input，其余用 pi 的保守默认；不需要重启，打开 `/model` 即可；只走 API key（订阅是 `/login` 的 OAuth，apim 不碰）。★ 判定只认 key：扫 pi 配置里的**每一份**凭据（`auth.json`（`/login` 存的，只读）+ `models.json` 里每个 `apiKey`）与 apim 密钥比 token，所以 provider 叫什么名字都行、`defaultProvider` 是哪个也不影响。
 

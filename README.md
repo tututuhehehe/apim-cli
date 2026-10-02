@@ -72,14 +72,19 @@ apim uninstall --yes       # skip the prompt (scripts / non-interactive)
 
 Your keys are **not** deleted unless you pass `--purge`, and `--purge` refuses any directory whose name is not `apim` (and refuses to recurse into a symlinked config dir, so a dotfiles-managed `~/.config/apim` is left to you). `--dry-run` prints every path it would touch — including the symlink target when apim was installed through one; `--json` has the same shape in every case (on a dev build / `cargo install` copy it reports `channel: null` and exits non-zero instead of silently doing nothing).
 
-What it deliberately leaves alone: anything in your shell rc / `PATH` (install.sh never writes those), and the files under `~/.codex/` written by the [one-click import](#one-click-import-into-codex) — they share a file with your hand-written config, so apim only reports them. To finish that cleanup by hand:
+What it deliberately leaves alone: anything in your shell rc / `PATH` (install.sh never writes those), and the files the [one-click import](#one-click-import-into-codex--pi) wrote under `~/.codex/` and `~/.pi/agent/` — they share a file with your hand-written config, so apim only **lists** them. To finish that cleanup by hand:
 
 ```bash
-rm ~/.codex/apim-models.json              # 1. the model catalog apim generated
+rm ~/.codex/apim-models.json                 # 1. the model catalog apim generated
 # 2. in ~/.codex/config.toml: drop the [model_providers.apim-*] blocks plus the
 #    top-level model_provider / model_catalog_json pointers
-rm ~/.codex/config.toml.apim.bak          # 3. the pre-edit backup — it holds a bearer token too
+rm ~/.codex/config.toml.apim.bak             # 3. the pre-import backup — it holds a plaintext key too
+
+# 4. in ~/.pi/agent/models.json: drop the providers.apim-* entries (plaintext apiKey)
+rm ~/.pi/agent/models.json.apim.bak          # 5. the pre-import backup — it holds a plaintext key too
 ```
+
+`apim uninstall` lists all five for you; it never deletes them itself.
 
 ## Usage
 
@@ -103,7 +108,7 @@ apim --version  # version
 | `i` | Provider details (auth / endpoints / balance script / origin / vars — values are hidden) | Key details (`r` toggles the full token, `c` copies) |
 | `Enter` | Open the provider homepage (console) in your default browser | — |
 | `m` | — | Fetch the model list with **the selected key** (visibility depends on the key/group; in the dialog `/` focuses the search box for live filtering, `Esc` leaves search back to the list (filter kept), `j`/`k` scroll, `c` copies a model name, `Esc` closes) |
-| `x` | — | One-click **import into Codex**: the selected key + its provider + the models you tick, written to `~/.codex/config.toml`. Three steps: `⏎` to advance → tick models (`space` toggles, `a` toggles all, `/` searches) → pick the default model (`j`/`k` move, `h` goes back, `⏎` imports; a single ticked model skips this step). See below |
+| `x` | — | One-click **import into Codex or Pi**: the selected key + its provider + the models you tick, written to the client's config. Steps: `⏎` to advance → pick a client → tick models (`space` toggles, `a` toggles all, `/` searches) → (Codex only) pick the default model (`j`/`k` move, `h` goes back, `⏎` imports; a single ticked model skips this step; Pi has no such step). See below |
 | `j` / `k` | Move up/down | Move up/down |
 | `Tab` / `h` / `l` | Switch panes (`h` = provider list, `l` = key table; no-op at the edge) | Same |
 | `/` | Filter providers (matches id or display name) | Filter keys (matches alias or group) |
@@ -199,7 +204,7 @@ apim status glm --json
 
 ## One-click import into Codex / Pi
 
-Select a key in the key table and press `x` to write "this key + its provider + the models you tick" into a client config — no more hand-editing `~/.codex/config.toml`. The panel has three steps: **pick a client** (Codex or Pi) → **tick models** (same list as the `m` key; `space` toggles, `a` toggles all, `/` searches, `⏎` advances) → **pick the default model** (one of the models you ticked becomes the client's default; `j`/`k` move, `h` goes back, `⏎` imports). With a single ticked model the third step is skipped automatically.
+Select a key in the key table and press `x` to write "this key + its provider + the models you tick" into a client config — no more hand-editing `~/.codex/config.toml`. Steps: **pick a client** (Codex or Pi) → **tick models** (same list as the `m` key; `space` toggles, `a` toggles all, `/` searches, `⏎` advances) → **pick the default model** — this last step is **Codex only**: one of the models you ticked becomes `config.toml`'s `model` (`j`/`k` move, `h` goes back, `⏎` imports); it is skipped automatically when you tick a single model, and Pi never shows it (see below).
 
 Before reporting success it makes **the client itself read the new config** (`codex debug models` / `pi --list-models`) and checks that every ticked model is there; on failure the reason is shown right in the panel.
 

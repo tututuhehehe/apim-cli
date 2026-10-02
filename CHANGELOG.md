@@ -12,7 +12,8 @@
   （默认 provider / 默认模型 / `enabledModels` 由用户自己在 `/model` 里选），所以 Pi 没有
   「选默认模型」这一步；写完跑 `pi --list-models` 让 pi 自己确认模型都在，失败用备份还原 models.json。provider 键一律带 `apim-` 前缀（否则会蹭到 pi 内置 provider 的 baseUrl）；
   只改 apim 负责的键，用户手写的 `headers` / `compat` / `modelOverrides` 与别的设置都保留；
-  不需要重启（打开 `/model` 即可）；`PI_CODING_AGENT_DIR` / `APIM_PI_BIN` 可重定向
+  不需要重启（打开 `/model` 即可）；`PI_CODING_AGENT_DIR` / `APIM_PI_BIN` 可重定向；`apim uninstall` 会一并
+  列出 Pi 那边的残留（`providers.apim-*` 条目与含明文密钥的 `models.json.apim.bak`）
 
 ### 变更
 

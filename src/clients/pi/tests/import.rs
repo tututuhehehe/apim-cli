@@ -201,7 +201,6 @@ fn rollback_removes_files_that_did_not_exist() {
     let bin = fake_pi_failing(&dir);
     assert!(import_in(&dir, &request_for(&["glm-5"]), Some(&bin)).is_err());
     assert!(!config::models_path(&dir).exists());
-    assert!(!config::settings_path(&dir).exists());
 }
 
 /// 勾选的模型 pi 没列出来（比如中转站根本不认这个 id）→ 报错并回滚。

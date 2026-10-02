@@ -31,7 +31,7 @@ fn pi_real_end_to_end() {
     let report = import_in(&dir, &request, Some(&bin)).expect("真机导入应成功");
 
     let models = fs::read_to_string(config::models_path(&dir)).unwrap();
-    let settings = fs::read_to_string(config::settings_path(&dir)).unwrap();
+    let settings = fs::read_to_string(config::settings_path(&dir)).ok();
     eprintln!(
         "pi {} → provider {} / 表名 {} / 默认（不写）{}；models.json {} 字节，settings.json {} 字节",
         bin.display(),
@@ -39,13 +39,13 @@ fn pi_real_end_to_end() {
         report.provider_key,
         report.model.is_none(),
         models.len(),
-        settings.len()
+        settings.as_deref().map_or(0, str::len)
     );
 
     // 一键导入只加 provider + 模型：用户的默认 provider / 默认模型设定一个字节都不许变
     assert_eq!(report.model, None, "pi 不写默认模型");
-    match settings_before {
-        Some(before_text) => assert_eq!(settings, before_text, "settings.json 必须原样"),
-        None => assert!(!config::settings_path(&dir).exists()),
-    }
+    assert_eq!(
+        settings, settings_before,
+        "settings.json 必须原样（原来没有就仍然没有）"
+    );
 }

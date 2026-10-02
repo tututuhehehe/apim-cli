@@ -116,6 +116,37 @@ async fn pi_skips_the_default_model_step() {
     );
 }
 
+/// 客户端没写默认模型时（pi），成功提示里不该出现「默认 …」。
+#[tokio::test]
+async fn success_toast_omits_the_default_model_when_none_was_written() {
+    let mut app = picker_app();
+    let mut result = outcome(
+        "alpha.a1",
+        Ok(ImportReport {
+            provider_key: "apim-alpha".into(),
+            // pi 那一侧的形态：没有默认模型、没有 detail
+            model: None,
+            models: vec!["gpt-6-sol".into()],
+            detail: None,
+            backups: Vec::new(),
+        }),
+    );
+    result.agent = Agent::Pi;
+    result.seq = seq_of(&app);
+
+    app.import_result(result);
+
+    let toast = app.toast_text().unwrap_or_default().to_string();
+    assert!(
+        !toast.contains("默认"),
+        "没写默认模型就不该在提示里提它：{toast}"
+    );
+    assert_eq!(
+        toast,
+        "已导入 Pi：alpha.a1 · 1 个模型 · 表名 apim-alpha · 在 Pi 里打开 /model（或重开）即可看到新模型"
+    );
+}
+
 #[tokio::test]
 async fn failed_import_keeps_panel_open_with_reason() {
     let mut app = picker_app();

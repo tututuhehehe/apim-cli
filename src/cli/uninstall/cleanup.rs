@@ -148,6 +148,36 @@ pub(super) fn purge_config_dir(dir: &Path) -> Result<Option<String>> {
     Ok(Some(dir.display().to_string()))
 }
 
+/// `~/.pi/agent` 里 apim 一键导入留下的文件（只报告、不删）。
+pub(super) fn pi_leftovers() -> Vec<String> {
+    pi_leftovers_in(&crate::clients::pi::agent_dir())
+}
+
+pub(super) fn pi_leftovers_in(dir: &Path) -> Vec<String> {
+    let models = dir.join("models.json");
+    let backup = crate::clients::file_io::backup_path_of(&models);
+    let mut out = Vec::new();
+    // models.json 里混着用户自己的 provider，只按 `apim-` 前缀的键判断 apim 有没有写过它
+    if let Ok(text) = fs::read_to_string(&models)
+        && let Ok(value) = serde_json::from_str::<serde_json::Value>(&text)
+        && let Some(providers) = value.get("providers").and_then(|p| p.as_object())
+        && providers.keys().any(|key| key.starts_with("apim-"))
+    {
+        out.push(format!(
+            "{} 里的 providers.apim-* 条目（apiKey 是明文）",
+            models.display()
+        ));
+    }
+    // 同 codex：改写前的备份里也有 apiKey 明文，必须一起报
+    if backup.exists() {
+        out.push(format!(
+            "{}（apim 改写 models.json 前留的备份，里面也有密钥）",
+            backup.display()
+        ));
+    }
+    out
+}
+
 /// `~/.codex` 里 apim 一键导入留下的文件（只报告、不删）。
 pub(super) fn codex_leftovers() -> Vec<String> {
     codex_leftovers_in(&crate::clients::codex::codex_home())

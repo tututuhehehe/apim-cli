@@ -107,7 +107,11 @@ fn run_with(args: &Args, exe: &Path, config_dir: &Path) -> Result<()> {
         removed: Vec::new(),
         left: Vec::new(),
         purged: None,
-        leftovers: cleanup::codex_leftovers(),
+        leftovers: {
+            let mut items = cleanup::codex_leftovers();
+            items.extend(cleanup::pi_leftovers());
+            items
+        },
     };
 
     if !json {

@@ -74,7 +74,7 @@ impl Report<'_> {
             ),
         }
         if !self.leftovers.is_empty() {
-            println!("\nCodex 那边 apim 写过的内容没动（跟手写配置混在同一个文件里）：");
+            println!("\napim 写进客户端配置的内容没动（跟手写配置混在同一个文件里）：");
             for item in &self.leftovers {
                 println!("  {item}");
             }

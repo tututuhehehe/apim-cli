@@ -156,6 +156,7 @@ recipes/              内置 recipe ×4（deepseek/openai/moonshot/openrouter，
     - **`auth.json` 只读不写**：那里面还有你的订阅凭据（`type:"oauth"`，含 refresh token），而且 pi 用 `proper-lockfile` 自己管、读取时**逐条校验**（任一条不合法整份加载失败）—— apim 写它既帮不上忙又可能把你登出订阅。apim 的 key 一律写在 `models.json` 的 `apiKey` 里。
     - **与 codex 侧的语义差别（有意为之）**：codex 同一时刻只有一个激活 provider → ★ = 当前激活的那个在用它；pi 是「配置里有的凭据都算在用」→ 导入过几把就有几个 `★P`。这是两个客户端的真实差别，不是实现偷懒。
     - **只支持 API key 这一路**：pi 的订阅渠道是 `/login` 的 OAuth（凭据在 `auth.json`），apim 拿不到也不该碰。
+    - **`apim uninstall` 要报 pi 残留**（同 codex：只报不删）：`models.json` 里的 `providers.apim-*` 条目与含明文 apiKey 的 `models.json.apim.bak`（`cli/uninstall/cleanup.rs::pi_leftovers_in`）。
 
 ## 验证命令速查
 

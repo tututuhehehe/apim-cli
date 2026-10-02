@@ -31,7 +31,7 @@ futures = "0.3"
 ratatui = "0.29"
 reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls"] }
 serde = { version = "1", features = ["derive"] }
-# serde 的派生与 JSON 值；preserve_order 让 pi 的 models.json / settings.json 改写后**保持用户的键顺序**
+# serde 的派生与 JSON 值；preserve_order 让 pi 的 models.json 改写后**保持用户的键顺序**
 # （同 codex 那边用 toml_edit 保注释保顺序的理由；indexmap 本来就在依赖树里）
 serde_json = { version = "1", features = ["preserve_order"] }
 serde_yaml = "0.9"

@@ -200,12 +200,9 @@ fn draw_default_picker(frame: &mut Frame, flow: &ImportFlow, area: Rect) {
                     },
                 ),
             ];
-            if is_cursor {
+            if is_cursor && let Some(hint) = flow.agent.default_model_step() {
                 spans.push(Span::styled(
-                    format!(
-                        "   ← {}",
-                        flow.agent.default_model_step().unwrap_or_default()
-                    ),
+                    format!("   ← {hint}"),
                     Style::new().fg(theme::GOLD),
                 ));
             }
