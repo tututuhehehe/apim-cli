@@ -126,10 +126,10 @@ Press `/` to open the search box; filtering is live and case-insensitive, and ea
 **Add a provider (`a` in the left pane)**: fill in the ID (lowercase letters / digits / `-`; keys reference it via `provider`), a display name, the base URL, and three optional fields — plus a **`非模型` checkbox** that turns it into a [non-model provider](#non-model-providers-translation-search-):
 
 - **Homepage URL** — the provider's console, opened in your default browser with `Enter` on the provider; empty means unset (`Enter` will tell you). **Do not paste a one-click login link that contains a token** — the homepage shows up in the list and in `provider ls` output.
-- **Health path** — defaults to `/models`, appended to the base URL; empty disables health checks. (Model providers only.)
+- **Health path** — defaults to `/models`, appended to the base URL; empty disables health checks. Tick `非模型` and this row disappears from the form (non-model providers have no probe).
 - **Script path** — the balance script (see [Custom balance scripts](#custom-balance-scripts-the-one-and-only-balance-mechanism)); empty disables balance queries.
 
-The checkbox defaults to the page you pressed `a` on (add from the `非模型` page and it is already ticked); the provider lands on the page matching its type.
+The checkbox defaults to the page you pressed `a` on (add from the `非模型` page and it is already ticked, and the health-path row is gone); the provider lands on the page matching its type.
 
 Saving creates `~/.config/apim/recipes/<id>.yaml`, after which `a` lets you add keys to it. You do not have to write the script yourself: paste `docs/quota-script-prompt.md` into any AI agent along with the provider's official query docs, and it will produce a script following apim's contract plus a verification command.
 
@@ -164,7 +164,7 @@ Not every API key you own belongs to an LLM. Tick `非模型` when adding a prov
 | Homepage (`Enter`), duplicate (`y`), undo, balance script, `provider ls`, `apim status` | ✓ | ✓ |
 | Model list (`m`) | ✓ | — (tells you instead of opening an empty dialog) |
 | One-click import into Codex / Pi (`x`) | ✓ | — |
-| HTTP health check (health path, `● 可用` from probing) | ✓ | — (status comes from the balance script) |
+| HTTP health check (health path, `● 可用` from probing) | ✓ | — (no such field; status comes from the balance script) |
 
 The type is **fixed at creation**: the edit form shows it read-only, and `apim provider set` rejects `--kind`. Duplicating (`y` / `provider copy`) keeps the type.
 

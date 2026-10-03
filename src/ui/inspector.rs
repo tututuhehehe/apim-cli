@@ -54,6 +54,8 @@ impl InspectRow {
 // ---- 行构建（纯函数，便于单测） ----------------------------------------
 
 /// 厂商详情行。vars 只列变量名，值一律遮掩为 ••••——变量可能存访问令牌。
+/// 只列真实适用的配置：鉴权与探活只服务 HTTP 请求（探活 / 模型列表），
+/// 非模型厂商两者都没有（也不列「类型」那种背景信息）。
 pub(crate) fn provider_rows(
     recipe: &Recipe,
     key_count: usize,
@@ -62,7 +64,6 @@ pub(crate) fn provider_rows(
     let mut rows = vec![
         InspectRow::new("名称", recipe.name.clone()),
         InspectRow::new("ID", recipe.id.clone()),
-        InspectRow::new("类型", format!("{}厂商", recipe.kind.label())),
         InspectRow::new(
             "来源",
             recipe
@@ -80,28 +81,29 @@ pub(crate) fn provider_rows(
                 .filter(|u| !u.is_empty())
                 .unwrap_or_else(|| "—".into()),
         ),
-        InspectRow::new("鉴权", auth_label(&recipe.auth)),
-        InspectRow::new(
-            "探活",
-            if recipe.is_model() {
-                recipe
-                    .health
-                    .as_ref()
-                    .map(|h| {
-                        let method = if h.method.is_empty() {
-                            "GET"
-                        } else {
-                            h.method.as_str()
-                        };
-                        format!("{method} {}", h.url)
-                    })
-                    .unwrap_or_else(|| "未配置".into())
-            } else {
-                "—（非模型厂商不探活）".into()
-            },
-        ),
-        InspectRow::new("额度", balance_label(recipe.balance.as_ref())),
     ];
+    if recipe.is_model() {
+        rows.push(InspectRow::new("鉴权", auth_label(&recipe.auth)));
+        rows.push(InspectRow::new(
+            "探活",
+            recipe
+                .health
+                .as_ref()
+                .map(|h| {
+                    let method = if h.method.is_empty() {
+                        "GET"
+                    } else {
+                        h.method.as_str()
+                    };
+                    format!("{method} {}", h.url)
+                })
+                .unwrap_or_else(|| "未配置".into()),
+        ));
+    }
+    rows.push(InspectRow::new(
+        "额度",
+        balance_label(recipe.balance.as_ref()),
+    ));
     let mut names: Vec<&String> = recipe.vars.keys().collect();
     names.sort();
     for name in names {
@@ -535,6 +537,51 @@ mod tests {
         assert_eq!(var_values, vec!["a_var = ••••", "b_var = ••••"]);
         assert_eq!(row(&rows, "主页"), "—");
         assert_eq!(row(&rows, "额度"), "未配置");
+    }
+
+    /// 非模型厂商的详情只列它真有的东西：没有鉴权/探活（它们只服务 HTTP 请求），
+    /// 也没有「类型」那种背景行。
+    #[test]
+    fn provider_rows_skip_http_rows_for_non_model() {
+        let mut recipe = recipe(
+            Some(ScriptSpec {
+                command: Some("~/.config/apim/scripts/deepl-quota.sh".into()),
+                ..Default::default()
+            }),
+            &[],
+            None,
+        );
+        let model_rows = provider_rows(&recipe, 2, &[]);
+        let labels: Vec<&str> = model_rows.iter().map(|r| r.label.as_str()).collect();
+        // 模型厂商：HTTP 相关的两行（鉴权/探活）照旧在
+        assert!(
+            labels.starts_with(&["名称", "ID", "来源", "Base URL", "主页", "鉴权", "探活"]),
+            "{labels:?}"
+        );
+        assert!(
+            !row(&model_rows, "探活").is_empty(),
+            "模型厂商照旧看得到探活"
+        );
+
+        recipe.kind = ProviderKind::NonModel;
+        let rows = provider_rows(&recipe, 2, &[]);
+        let labels: Vec<&str> = rows.iter().map(|r| r.label.as_str()).collect();
+        assert_eq!(
+            labels,
+            [
+                "名称",
+                "ID",
+                "来源",
+                "Base URL",
+                "主页",
+                "额度",
+                "密钥数",
+                "分组"
+            ]
+        );
+        assert!(row(&rows, "探活").is_empty(), "非模型不列探活");
+        assert!(row(&rows, "鉴权").is_empty(), "非模型的鉴权不适用");
+        assert!(row(&rows, "类型").is_empty());
     }
 
     // ---- 渲染路径（TestBackend，安全断言走真实 draw 输出） ------------------

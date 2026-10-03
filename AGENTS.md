@@ -161,6 +161,8 @@ recipes/              内置 recipe ×4（deepseek/openai/moonshot/openrouter，
 15. **厂商类型 = 两个分页，类型创建时定死**（模型 / 非模型）：
     - 数据源只有一个字段：recipe 的 `kind: model|non_model`（`ProviderKind`，缺省 model，所以老 YAML / 内置 recipe 不用动；序列化时 model 不写 kind）。非模型厂商 **没有模型列表（`m`）、不能导入客户端（`x`）、不探活**（`health` 恒空，`m`/`x` 给提示而不是静默）；密钥、别名/分组、主页 `⏎`、`c`、`y` 复制、`^Z`、额度脚本、`provider ls`、`apim status` 全都一样。
     - **类型的唯一入口是创建**：TUI 添加表单的「非模型」勾选框（默认跟随当前分页）、CLI `provider add --kind`。编辑表单里它只读，且 `save_provider_form` 一律取原值（规则落在保存这一处，不靠 UI 灰掉）；`provider set --kind` 与给非模型厂商传 `--health` 都报错。要换类型只能删了重建 / `provider copy`。
+    - **不适用当前类型的表单行直接不出现**：`Field::Toggle` 用 `.hides(下标)` 声明「勾上就把这一行收起来」，勾选状态一变由 Form 自己开关（构造时先按初值对齐）；隐藏的行不渲染、不占弹窗高度、Tab 跳过、也写不进去（`Field::Text{hidden}`）。添加/编辑表单的「探活路径」都靠它养活：勾上非模型就没了这一行（不是灰掉）。
+    - **详情弹窗只列真适用的**：鉴权/探活只服务 HTTP 请求（探活、模型列表），非模型厂商两行都不列；也不列「类型」那种背景信息（打开它的分页已经说明了一切）。
     - **分页状态在 App 里**：`tab: ProviderKind` + `tabs: [TabView; 2]`（每个分页自己的 `provider_ids` / `selected` / `filter`，下标 = `ProviderKind::ALL` 顺序）；取值一律走 `provider_ids()` / `provider_ids_filtered()` / `selected_provider()` / `provider_filter()`，**不要**再引入第三个「全局选中项」。`rebuild_provider_list` 两个分页各建一份（有密钥的在前，其余按 id 排序）；保存 / 复制厂商后必须 `focus_provider(id)`（分页跟着厂商类型跳，否则新建的厂商落在看不见的那一页）。
     - **快捷键**：`Tab` = 切分页（两栏焦点都生效），`h`/`l` 与 ←/→ = 切左右栏焦点。改按键提示时三个分支都要过一遍（厂商焦点 / 模型页密钥焦点 / 非模型页密钥焦点，非模型页不出现 `m`/`x`）。
     - **状态口径**：非模型厂商没有探活，密钥表状态列与左栏厂商摘要都用**额度脚本的成败**（`ui::script_status`，一处写、两个地方用；CLI `status` 同一口径）。

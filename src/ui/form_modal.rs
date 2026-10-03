@@ -11,7 +11,11 @@ use super::{centered, pane_block, theme};
 use crate::form::{Field, Form, LineEdit};
 
 pub(crate) fn draw_form(frame: &mut Frame, form: &Form, area: Rect) {
-    let n = form.fields.len() as u16;
+    // 不显示的行（勾选框收起的）不占位置、也不占高度
+    let visible: Vec<usize> = (0..form.fields.len())
+        .filter(|i| !form.fields[*i].is_hidden())
+        .collect();
+    let n = visible.len() as u16;
     let rect = centered(66, n + 5, area);
     frame.render_widget(Clear, rect);
 
@@ -29,25 +33,25 @@ pub(crate) fn draw_form(frame: &mut Frame, form: &Form, area: Rect) {
         })
         .split(inner);
 
-    let label_cols = form
-        .fields
+    let label_cols = visible
         .iter()
-        .map(|f| UnicodeWidthStr::width(f.label()))
+        .map(|i| UnicodeWidthStr::width(form.fields[*i].label()))
         .max()
         .unwrap_or(4)
         + 2;
 
     let mut cursor: Option<(u16, u16)> = None;
-    for (i, field) in form.fields.iter().enumerate() {
-        let active = i == form.active;
-        let (line, caret) = field_line(field, active, rows[i].width, label_cols);
+    for (row, index) in visible.iter().enumerate() {
+        let field = &form.fields[*index];
+        let active = *index == form.active;
+        let (line, caret) = field_line(field, active, rows[row].width, label_cols);
         let mut para = Paragraph::new(line);
         if active {
             para = para.style(Style::new().bg(theme::HIGHLIGHT_BG));
         }
-        frame.render_widget(para, rows[i]);
+        frame.render_widget(para, rows[row]);
         if let Some(caret) = caret {
-            cursor = Some((rows[i].x + label_cols as u16 + 1 + caret, rows[i].y));
+            cursor = Some((rows[row].x + label_cols as u16 + 1 + caret, rows[row].y));
         }
     }
 
@@ -82,6 +86,7 @@ fn field_line(
             label,
             edit,
             enabled,
+            ..
         } => {
             let field_width = row_width.saturating_sub(label_cols as u16 + 2);
             let line = Line::from(vec![
@@ -126,6 +131,7 @@ fn field_line(
             value,
             enabled,
             hint,
+            ..
         } => {
             let mark = if *value { "[x]" } else { "[ ]" };
             let mark_style = if *enabled {

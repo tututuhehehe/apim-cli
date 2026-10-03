@@ -241,8 +241,9 @@ pub(crate) async fn run_snapshot_key_form() -> Result<()> {
 
 /// 厂商表单快照。两种摆法：
 /// - 缺省：出「添加」表单（`APIM_SNAPSHOT_KIND=non-model` 出勾上「非模型」的样子，
-///   它在非模型分页里打开——添加表单的勾选框默认跟随当前分页）；
-/// - 指定厂商（`APIM_SNAPSHOT_PROVIDER=<id>`）：出「编辑」表单（ID / 类型 / 非模型的探活行只读）。
+///   它在非模型分页里打开——添加表单的勾选框默认跟随当前分页，探活那一行也就不出现）；
+/// - 指定厂商（`APIM_SNAPSHOT_PROVIDER=<id>`）：出「编辑」表单
+///   （ID 与类型只读；非模型没有探活路径这一行）。
 pub(crate) async fn run_snapshot_provider_form() -> Result<()> {
     let (mut app, _rx, _rx_task) = App::start()?;
     app.focus = Focus::Providers;
@@ -254,13 +255,13 @@ pub(crate) async fn run_snapshot_provider_form() -> Result<()> {
     app.show_tab(snapshot_kind_var("APIM_SNAPSHOT_KIND").unwrap_or_default());
     app.open_add();
     if let Modal::Form { form, .. } = &mut app.modal {
-        form.fields[0] = Field::text("ID", "my-relay");
-        form.fields[1] = Field::text("名称", "我的中转站");
-        form.fields[2] = Field::text("Base URL", "https://relay.example.com");
-        form.fields[3] = Field::text("主页 URL", "https://console.example.com");
-        form.fields[5] = Field::text("探活路径", "/v1/models");
-        form.fields[6] = Field::text("脚本路径", "~/.config/apim/scripts/my-relay.sh");
-        form.active = 6;
+        form.set_text(crate::form::PF_ID, "my-relay");
+        form.set_text(crate::form::PF_NAME, "我的中转站");
+        form.set_text(crate::form::PF_BASE, "https://relay.example.com");
+        form.set_text(crate::form::PF_HOMEPAGE, "https://console.example.com");
+        form.set_text(crate::form::PF_HEALTH, "/v1/models");
+        form.set_text(crate::form::PF_SCRIPT, "~/.config/apim/scripts/my-relay.sh");
+        form.active = crate::form::PF_SCRIPT;
     }
     render_snapshot(&app).await
 }

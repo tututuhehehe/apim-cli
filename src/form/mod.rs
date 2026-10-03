@@ -12,6 +12,8 @@ pub enum Field {
         label: String,
         edit: LineEdit,
         enabled: bool,
+        /// true = 这一行不渲染、Tab 跳过、也写不进去（当前类型不适用这个字段）。
+        hidden: bool,
     },
     Select {
         label: String,
@@ -20,11 +22,14 @@ pub enum Field {
         hint: String,
     },
     /// 勾选框（布尔选项）。`enabled: false` = 只读展示（如「类型创建后不可改」）。
+    /// `hides` 指向“勾上就不适用”的那一行（如勾上「非模型」后隐藏探活路径）：
+    /// 勾选状态翻转时由 Form 自动开关那一行，构造时先按初值对齐一次。
     Toggle {
         label: String,
         value: bool,
         enabled: bool,
         hint: String,
+        hides: Option<usize>,
     },
 }
 
@@ -34,6 +39,7 @@ impl Field {
             label: label.into(),
             edit: LineEdit::new(value),
             enabled: true,
+            hidden: false,
         }
     }
 
@@ -42,6 +48,7 @@ impl Field {
             label: label.into(),
             edit: LineEdit::new(value),
             enabled: false,
+            hidden: false,
         }
     }
 
@@ -60,6 +67,7 @@ impl Field {
             value,
             enabled: true,
             hint: hint.into(),
+            hides: None,
         }
     }
 
@@ -70,7 +78,16 @@ impl Field {
             value,
             enabled: false,
             hint: hint.into(),
+            hides: None,
         }
+    }
+
+    /// 勾上这个框时，`index` 那一行直接不出现（勾选框与它控制的字段成对声明）。
+    pub fn hides(mut self, index: usize) -> Self {
+        if let Self::Toggle { hides, .. } = &mut self {
+            *hides = Some(index);
+        }
+        self
     }
 
     pub fn label(&self) -> &str {
@@ -79,6 +96,11 @@ impl Field {
                 label
             }
         }
+    }
+
+    /// 这一行现在是否不显示（只有文本行会藏）。
+    pub fn is_hidden(&self) -> bool {
+        matches!(self, Self::Text { hidden: true, .. })
     }
 }
 
@@ -99,12 +121,15 @@ pub struct Form {
 impl Form {
     pub fn new(title: impl Into<String>, fields: Vec<Field>, active: usize) -> Self {
         let active = active.min(fields.len().saturating_sub(1));
-        Self {
+        let mut form = Self {
             title: title.into(),
             fields,
             active,
             error: None,
-        }
+        };
+        // 先把「勾选框 → 它控制的那一行」对齐一次（初值就可能带出隐藏，如非模型的探活路径）
+        form.sync_toggle_links();
+        form
     }
 
     pub fn text(&self, i: usize) -> &str {
@@ -131,9 +156,21 @@ impl Form {
         }
     }
 
+    /// 直接摆一个文本行的值（快照/测试填充用）。只换值，不动这一行的
+    /// 可编辑/显示状态——`hidden`、`enabled` 与勾选框的联动照旧。
+    pub fn set_text(&mut self, i: usize, value: impl Into<String>) {
+        if let Some(Field::Text { edit, .. }) = self.fields.get_mut(i) {
+            *edit = LineEdit::new(value);
+        }
+    }
+
     pub fn handle_paste(&mut self, text: &str) {
-        if let Some(Field::Text { edit, enabled, .. }) = self.fields.get_mut(self.active)
-            && *enabled
+        if let Some(Field::Text {
+            edit,
+            enabled: true,
+            hidden: false,
+            ..
+        }) = self.fields.get_mut(self.active)
         {
             edit.insert(text);
             self.error = None;
@@ -178,8 +215,12 @@ impl Form {
     }
 
     fn with_edit(&mut self, f: impl FnOnce(&mut LineEdit)) -> FormEvent {
-        if let Some(Field::Text { edit, enabled, .. }) = self.fields.get_mut(self.active)
-            && *enabled
+        if let Some(Field::Text {
+            edit,
+            enabled: true,
+            hidden: false,
+            ..
+        }) = self.fields.get_mut(self.active)
         {
             f(edit);
             self.error = None;
@@ -187,13 +228,20 @@ impl Form {
         FormEvent::None
     }
 
+    /// Tab/↑↓：跳过不显示的行（勾选框收起的那一行不参与跳转）。
     fn cycle(&mut self, dir: i32) {
         let n = self.fields.len();
         if n == 0 {
             return;
         }
-        let i = (self.active as i32 + dir).rem_euclid(n as i32);
-        self.active = i as usize;
+        let mut i = self.active;
+        for _ in 0..n {
+            i = (i as i32 + dir).rem_euclid(n as i32) as usize;
+            if !self.fields[i].is_hidden() {
+                self.active = i;
+                return;
+            }
+        }
     }
 
     fn on_left(&mut self) {
@@ -246,6 +294,32 @@ impl Form {
             *value = !*value;
             self.error = None;
         }
+        self.sync_toggle_links();
+        // 当前行可能刚被自己藏掉（理论上只有勾选框能藏别的行，防一手）
+        if self.fields.get(self.active).is_some_and(Field::is_hidden) {
+            self.cycle(1);
+        }
+    }
+
+    /// 把每个勾选框的「勾上就藏起来的那一行」按当前值对齐。
+    fn sync_toggle_links(&mut self) {
+        let hides: Vec<(usize, bool)> = self
+            .fields
+            .iter()
+            .filter_map(|field| match field {
+                Field::Toggle {
+                    hides: Some(target),
+                    value,
+                    ..
+                } => Some((*target, *value)),
+                _ => None,
+            })
+            .collect();
+        for (target, hide) in hides {
+            if let Some(Field::Text { hidden, .. }) = self.fields.get_mut(target) {
+                *hidden = hide;
+            }
+        }
     }
 }
 
@@ -295,13 +369,14 @@ pub const PF_SCRIPT: usize = 6;
 /// 主页 URL 一般填该厂商的控制面板，TUI 选中厂商按 Enter 用默认浏览器打开。
 /// 额度查询只走脚本；声明式 http recipe 属于手写 YAML 的地盘（内置 DeepSeek、
 /// new-api 系），表单不再提供预设类型。
-/// 「非模型」勾选框：勾上 = 没有模型列表、不探活、不能一键导入客户端，探活路径
-/// 的值保存时被忽略（表单不动态增删字段，提示文案说清楚）。
+/// 「非模型」勾选框：勾上 = 没有模型列表、不探活、不能一键导入客户端，
+/// 并且「探活路径」那一行当场消失（不是灰掉——非模型没有这个参数）。
 /// 「非模型」勾选框的提示文案（添加表单里空格键切换它）。
-const NON_MODEL_HINT: &str = "空格切换；勾上=无模型列表、不探活";
+const NON_MODEL_HINT: &str = "空格切换（无模型列表、不探活）";
 
 /// 添加表单的默认类型 = 当前分页（在非模型页按 a，多半就是要加非模型厂商）。
 /// 无论如何勾选框都看得见，想反着来就空格取消。
+/// 勾上后「探活路径」那一行直接不出现（`hides` 声明了联动，Form 自己维护）。
 pub fn provider_add(initial_kind: crate::recipe::ProviderKind) -> Form {
     Form::new(
         "添加厂商",
@@ -310,7 +385,7 @@ pub fn provider_add(initial_kind: crate::recipe::ProviderKind) -> Form {
             Field::text("名称", ""),
             Field::text("Base URL", ""),
             Field::text("主页 URL", ""),
-            Field::toggle("非模型", !initial_kind.is_model(), NON_MODEL_HINT),
+            Field::toggle("非模型", !initial_kind.is_model(), NON_MODEL_HINT).hides(PF_HEALTH),
             Field::text("探活路径", "/models"),
             Field::text("脚本路径", ""),
         ],
@@ -324,18 +399,9 @@ pub fn provider_edit(recipe: &crate::recipe::Recipe, health_path: &str) -> Form 
         .as_ref()
         .and_then(|s| s.command.clone())
         .unwrap_or_default();
-    // 类型创建后不可改：只读展示（保存逻辑同样不读这个勾选框）
-    let kind = if recipe.is_model() {
-        Field::toggle_locked("非模型", false, "创建后不可改")
-    } else {
-        Field::toggle_locked("非模型", true, "创建后不可改")
-    };
-    // 非模型没有 HTTP 探活，这一行只读；保存时也一律不读（health 恒为空）
-    let health = if recipe.is_model() {
-        Field::text("探活路径", health_path)
-    } else {
-        Field::readonly("探活路径", "—（非模型不探活）")
-    };
+    // 类型创建后不可改：只读展示（保存逻辑同样不读这个勾选框）；非模型时
+    // 它把探活路径那一行一起收起来（编辑表单里也不需要那个不存在的参数）
+    let kind = Field::toggle_locked("非模型", !recipe.is_model(), "创建后不可改").hides(PF_HEALTH);
     Form::new(
         format!("编辑厂商 · {}", recipe.id),
         vec![
@@ -344,7 +410,7 @@ pub fn provider_edit(recipe: &crate::recipe::Recipe, health_path: &str) -> Form 
             Field::text("Base URL", recipe.base_url.clone()),
             Field::text("主页 URL", recipe.homepage.clone().unwrap_or_default()),
             kind,
-            health,
+            Field::text("探活路径", health_path),
             Field::text("脚本路径", script_cmd),
         ],
         PF_NAME,
