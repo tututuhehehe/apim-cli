@@ -19,6 +19,13 @@ pub enum Field {
         selected: usize,
         hint: String,
     },
+    /// 勾选框（布尔选项）。`enabled: false` = 只读展示（如「类型创建后不可改」）。
+    Toggle {
+        label: String,
+        value: bool,
+        enabled: bool,
+        hint: String,
+    },
 }
 
 impl Field {
@@ -47,9 +54,30 @@ impl Field {
         }
     }
 
+    pub fn toggle(label: &str, value: bool, hint: &str) -> Self {
+        Self::Toggle {
+            label: label.into(),
+            value,
+            enabled: true,
+            hint: hint.into(),
+        }
+    }
+
+    /// 只读勾选框：空格/←→ 不响应，保存逻辑也不该从这里取值。
+    pub fn toggle_locked(label: &str, value: bool, hint: &str) -> Self {
+        Self::Toggle {
+            label: label.into(),
+            value,
+            enabled: false,
+            hint: hint.into(),
+        }
+    }
+
     pub fn label(&self) -> &str {
         match self {
-            Self::Text { label, .. } | Self::Select { label, .. } => label,
+            Self::Text { label, .. } | Self::Select { label, .. } | Self::Toggle { label, .. } => {
+                label
+            }
         }
     }
 }
@@ -95,6 +123,14 @@ impl Form {
         }
     }
 
+    /// 勾选框当前值（不是勾选框就返回 false）。
+    pub fn toggle(&self, i: usize) -> bool {
+        match self.fields.get(i) {
+            Some(Field::Toggle { value, .. }) => *value,
+            _ => false,
+        }
+    }
+
     pub fn handle_paste(&mut self, text: &str) {
         if let Some(Field::Text { edit, enabled, .. }) = self.fields.get_mut(self.active)
             && *enabled
@@ -131,6 +167,11 @@ impl Form {
             KeyCode::End => self.with_edit(LineEdit::end),
             KeyCode::Backspace => self.with_edit(LineEdit::backspace),
             KeyCode::Delete => self.with_edit(LineEdit::delete),
+            // 空格在勾选框上是「切换」，在文本框里是一个空格（名称可以带空格）
+            KeyCode::Char(' ') if self.toggle_at(self.active).is_some() => {
+                self.flip_toggle(self.active);
+                FormEvent::None
+            }
             KeyCode::Char(c) => self.with_edit(move |e| e.insert(&c.to_string())),
             _ => FormEvent::None,
         }
@@ -168,6 +209,7 @@ impl Form {
                     }
                 }
             }
+            Some(Field::Toggle { .. }) => self.flip_toggle(self.active),
             Some(Field::Text { edit, .. }) => edit.left(),
             None => {}
         }
@@ -182,8 +224,27 @@ impl Form {
                     *selected = (*selected + 1) % options.len();
                 }
             }
+            Some(Field::Toggle { .. }) => self.flip_toggle(self.active),
             Some(Field::Text { edit, .. }) => edit.right(),
             None => {}
+        }
+    }
+
+    /// 勾选框的「是否是勾选框」判断与翻转（只读的不响应）。
+    fn toggle_at(&self, i: usize) -> Option<bool> {
+        match self.fields.get(i) {
+            Some(Field::Toggle { value, enabled, .. }) if *enabled => Some(*value),
+            _ => None,
+        }
+    }
+
+    fn flip_toggle(&mut self, i: usize) {
+        if self.toggle_at(i).is_none() {
+            return;
+        }
+        if let Some(Field::Toggle { value, .. }) = self.fields.get_mut(i) {
+            *value = !*value;
+            self.error = None;
         }
     }
 }
@@ -226,14 +287,22 @@ pub const PF_ID: usize = 0;
 pub const PF_NAME: usize = 1;
 pub const PF_BASE: usize = 2;
 pub const PF_HOMEPAGE: usize = 3;
-pub const PF_HEALTH: usize = 4;
-pub const PF_SCRIPT: usize = 5;
+pub const PF_NON_MODEL: usize = 4;
+pub const PF_HEALTH: usize = 5;
+pub const PF_SCRIPT: usize = 6;
 
-/// 厂商表单：ID / 名称 / Base URL / 主页 URL / 探活路径 / 脚本路径。
+/// 厂商表单：ID / 名称 / Base URL / 主页 URL / 非模型 / 探活路径 / 脚本路径。
 /// 主页 URL 一般填该厂商的控制面板，TUI 选中厂商按 Enter 用默认浏览器打开。
 /// 额度查询只走脚本；声明式 http recipe 属于手写 YAML 的地盘（内置 DeepSeek、
 /// new-api 系），表单不再提供预设类型。
-pub fn provider_add() -> Form {
+/// 「非模型」勾选框：勾上 = 没有模型列表、不探活、不能一键导入客户端，探活路径
+/// 的值保存时被忽略（表单不动态增删字段，提示文案说清楚）。
+/// 「非模型」勾选框的提示文案（添加表单里空格键切换它）。
+const NON_MODEL_HINT: &str = "空格切换；勾上=无模型列表、不探活";
+
+/// 添加表单的默认类型 = 当前分页（在非模型页按 a，多半就是要加非模型厂商）。
+/// 无论如何勾选框都看得见，想反着来就空格取消。
+pub fn provider_add(initial_kind: crate::recipe::ProviderKind) -> Form {
     Form::new(
         "添加厂商",
         vec![
@@ -241,6 +310,7 @@ pub fn provider_add() -> Form {
             Field::text("名称", ""),
             Field::text("Base URL", ""),
             Field::text("主页 URL", ""),
+            Field::toggle("非模型", !initial_kind.is_model(), NON_MODEL_HINT),
             Field::text("探活路径", "/models"),
             Field::text("脚本路径", ""),
         ],
@@ -254,6 +324,18 @@ pub fn provider_edit(recipe: &crate::recipe::Recipe, health_path: &str) -> Form 
         .as_ref()
         .and_then(|s| s.command.clone())
         .unwrap_or_default();
+    // 类型创建后不可改：只读展示（保存逻辑同样不读这个勾选框）
+    let kind = if recipe.is_model() {
+        Field::toggle_locked("非模型", false, "创建后不可改")
+    } else {
+        Field::toggle_locked("非模型", true, "创建后不可改")
+    };
+    // 非模型没有 HTTP 探活，这一行只读；保存时也一律不读（health 恒为空）
+    let health = if recipe.is_model() {
+        Field::text("探活路径", health_path)
+    } else {
+        Field::readonly("探活路径", "—（非模型不探活）")
+    };
     Form::new(
         format!("编辑厂商 · {}", recipe.id),
         vec![
@@ -261,7 +343,8 @@ pub fn provider_edit(recipe: &crate::recipe::Recipe, health_path: &str) -> Form 
             Field::text("名称", recipe.name.clone()),
             Field::text("Base URL", recipe.base_url.clone()),
             Field::text("主页 URL", recipe.homepage.clone().unwrap_or_default()),
-            Field::text("探活路径", health_path),
+            kind,
+            health,
             Field::text("脚本路径", script_cmd),
         ],
         PF_NAME,

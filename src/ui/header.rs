@@ -42,10 +42,18 @@ pub(crate) fn draw_header(frame: &mut Frame, app: &App, area: Rect) {
 
 pub(crate) fn draw_footer(frame: &mut Frame, app: &App, area: Rect) {
     let toast = app.toast_text();
-    let keys = if app.focus == Focus::Providers {
-        " j/k 移动  Tab/hl 切换  ⏎ 主页  c 复制URL  y 复制厂商  i 详情  a 添加  e 编辑  d 删除  r 刷新  ^Z 撤销  q 退出 "
-    } else {
-        " j/k 移动  Tab/hl 切换  m 模型  x 导入  c 复制密钥  i 详情  a 添加  e 编辑  d 删除  r 刷新  ^Z 撤销  q 退出 "
+    let keys = match (app.focus, app.tab.is_model()) {
+        // Tab 切分页（模型/非模型），h/l 与 ←/→ 切左右栏焦点
+        (Focus::Providers, _) => {
+            " j/k 移动  Tab 分页  hl 切换  ⏎ 主页  c 复制URL  y 复制厂商  i 详情  a 添加  e 编辑  d 删除  r 刷新  ^Z 撤销  q 退出 "
+        }
+        (Focus::Keys, true) => {
+            " j/k 移动  Tab 分页  hl 切换  m 模型  x 导入  c 复制密钥  i 详情  a 添加  e 编辑  d 删除  r 刷新  ^Z 撤销  q 退出 "
+        }
+        // 非模型厂商没有模型列表与导入（m/x 也不在提示里）
+        (Focus::Keys, false) => {
+            " j/k 移动  Tab 分页  hl 切换  c 复制密钥  i 详情  a 添加  e 编辑  d 删除  r 刷新  ^Z 撤销  q 退出 "
+        }
     };
     let mut spans = Vec::new();
     if let Some(toast) = toast {
@@ -65,6 +73,7 @@ pub(crate) fn draw_footer(frame: &mut Frame, app: &App, area: Rect) {
 }
 
 /// 过滤生效时底栏的「筛选: xxx (命中/总数)  Esc 清除」提示。
+/// 厂商过滤词是分页自己的（切到另一页看不到它的过滤）。
 fn filter_hint(app: &App) -> Option<String> {
     let key = app.key_filter.as_deref().map(|f| {
         (
@@ -73,10 +82,13 @@ fn filter_hint(app: &App) -> Option<String> {
             app.keys_in_provider().len(),
         )
     });
-    let provider = app
-        .provider_filter
-        .as_deref()
-        .map(|f| (f, app.provider_ids_filtered().len(), app.provider_ids.len()));
+    let provider = app.provider_filter().map(|f| {
+        (
+            f,
+            app.provider_ids_filtered().len(),
+            app.provider_ids().len(),
+        )
+    });
     let both = key.is_some() && provider.is_some();
     let mut parts: Vec<String> = Vec::new();
     if let Some((f, m, n)) = provider {

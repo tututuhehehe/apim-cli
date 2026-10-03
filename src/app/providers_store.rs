@@ -6,11 +6,13 @@ use std::time::Instant;
 use super::undo::UndoAction;
 use super::{App, Focus, Modal};
 use crate::form::Form;
-use crate::recipe::{self, Auth, AuthKind, HttpCall, Recipe, ScriptSpec};
+use crate::recipe::{self, Auth, AuthKind, HttpCall, ProviderKind, Recipe, ScriptSpec};
 
 impl App {
     pub(crate) fn save_provider_form(&mut self, form: &Form, original: Option<&str>) {
-        use crate::form::{PF_BASE, PF_HEALTH, PF_HOMEPAGE, PF_ID, PF_NAME, PF_SCRIPT};
+        use crate::form::{
+            PF_BASE, PF_HEALTH, PF_HOMEPAGE, PF_ID, PF_NAME, PF_NON_MODEL, PF_SCRIPT,
+        };
 
         let id = match original {
             Some(id) => id.to_string(),
@@ -19,10 +21,27 @@ impl App {
         let name = form.text(PF_NAME).trim().to_string();
         let mut base_url = form.text(PF_BASE).trim().to_string();
         let homepage = form.text(PF_HOMEPAGE).trim().to_string();
-        let health_path = normalize_path(form.text(PF_HEALTH).trim());
         let script_cmd = form.text(PF_SCRIPT).trim().to_string();
         // 记撤销用：编辑前的旧 recipe（origin=None 表示当时还是内置定义）
         let before = original.and_then(|id| self.recipes.get(id).cloned());
+        // 类型只在**创建**时从勾选框取；编辑一律沿用原值（表单里那个框是只读展示），
+        // 所以「模型 ⇄ 非模型」不可改是由这条规则保证的，不靠 UI 灰掉。
+        let kind = match &before {
+            Some(prev) => prev.kind,
+            None => {
+                if form.toggle(PF_NON_MODEL) {
+                    ProviderKind::NonModel
+                } else {
+                    ProviderKind::Model
+                }
+            }
+        };
+        // 非模型不探活：探活路径根本不读（只读字段里显示的是一句提示文字，不是路径）
+        let health_path = if kind.is_model() {
+            normalize_path(form.text(PF_HEALTH).trim())
+        } else {
+            String::new()
+        };
 
         if original.is_none() {
             if id.is_empty() {
@@ -61,14 +80,11 @@ impl App {
             return;
         }
 
-        let mut recipe = match original {
-            Some(id) => self
-                .recipes
-                .get(id)
-                .cloned()
-                .unwrap_or_else(|| default_recipe(id, &name, &base_url)),
-            None => default_recipe(&id, &name, &base_url),
-        };
+        // 编辑 = 在旧 recipe 上改（保留手写 YAML 里的 auth/vars/models_url 等）；新建 = 默认定义
+        let mut recipe = before
+            .clone()
+            .unwrap_or_else(|| default_recipe(&id, &name, &base_url));
+        recipe.kind = kind;
         recipe.name = name;
         recipe.base_url = base_url;
         recipe.homepage = (!homepage.is_empty()).then_some(homepage);
@@ -120,12 +136,8 @@ impl App {
         self.modal = Modal::None;
         self.toast = Some((format!("已保存厂商 {id}"), Instant::now()));
         self.rebuild_provider_list();
-        self.selected_provider = self
-            .provider_ids_filtered()
-            .iter()
-            .position(|p| p == &id)
-            .unwrap_or(self.selected_provider);
-        self.selected_key = 0;
+        // 分页跟着厂商类型走：在非模型分页新建模型厂商时，别让它落在看不见的那一页
+        self.focus_provider(&id);
         self.focus = Focus::Keys;
         // 用新配置重探（invalidate 已清掉旧在途，这里能真正发起）
         self.refresh_provider(&id);
@@ -195,12 +207,8 @@ impl App {
         });
         self.recipes.insert(new_id.clone(), recipe);
         self.rebuild_provider_list();
-        self.selected_provider = self
-            .provider_ids_filtered()
-            .iter()
-            .position(|p| *p == new_id)
-            .unwrap_or(self.selected_provider);
-        self.selected_key = 0;
+        // 副本与原厂商同类型，分页不变（focus_provider 只是把选中项落上去）
+        self.focus_provider(&new_id);
         self.toast = Some((
             format!("已复制 {id} → {new_id}{script_note}"),
             Instant::now(),
@@ -224,6 +232,7 @@ fn default_recipe(id: &str, name: &str, base_url: &str) -> Recipe {
     Recipe {
         id: id.into(),
         name: name.into(),
+        kind: ProviderKind::Model,
         base_url: base_url.into(),
         homepage: None,
         models_url: None,

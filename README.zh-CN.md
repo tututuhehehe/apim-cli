@@ -105,10 +105,11 @@ apim --version  # 版本
 | `y` | 复制厂商：整份 recipe 另存为新厂商（id 自动 `<id>-copy`，名称加「副本」），绑定的外部额度脚本复制成独立文件，改两边的脚本互不影响；`secrets.toml` 里的密钥不跟随 | — |
 | `i` | 厂商详情（鉴权 / 端点 / 额度脚本 / 来源 / vars，值不外显） | 密钥详情（`r` 显隐完整 token，`c` 复制） |
 | `Enter` | 用默认浏览器打开厂商主页（控制面板） | — |
-| `m` | — | 用**当前选中的这把 key** 拉取它的模型列表（模型可见性随 key/分组不同；弹窗内 `/` 聚焦搜索框实时过滤、`Esc` 退出搜索回到列表（过滤保留）、`j/k` 滚动、`c` 复制模型名、`Esc` 关闭弹窗） |
-| `x` | — | 把选中密钥 + 它的厂商 + 勾选的模型**一键导入到 Codex 或 Pi**（写进对应客户端的配置）：`⏎` 下一步 → 选客户端 → 勾选模型（`空格` 勾选、`a` 全选/清空、`/` 搜索）→（仅 Codex）选默认模型（`j/k` 移动、`h` 返回上一步、`⏎` 导入；只勾一个模型时跳过这步；Pi 没有这一步）。详见下节 |
+| `m` | — | 用**当前选中的这把 key** 拉取它的模型列表（仅模型厂商；模型可见性随 key/分组不同；弹窗内 `/` 聚焦搜索框实时过滤、`Esc` 退出搜索回到列表（过滤保留）、`j/k` 滚动、`c` 复制模型名、`Esc` 关闭弹窗） |
+| `x` | — | 把选中密钥 + 它的厂商 + 勾选的模型**一键导入到 Codex 或 Pi**（仅模型厂商；写进对应客户端的配置）：`⏎` 下一步 → 选客户端 → 勾选模型（`空格` 勾选、`a` 全选/清空、`/` 搜索）→（仅 Codex）选默认模型（`j/k` 移动、`h` 返回上一步、`⏎` 导入；只勾一个模型时跳过这步；Pi 没有这一步）。详见下节 |
 | `j` / `k` | 上下移动 | 上下移动 |
-| `Tab` / `h` / `l` | 切换左右栏（h 左 = 厂商栏，l 右 = 密钥栏；已在边缘侧时不动） | 同左 |
+| `Tab` | 切换厂商分页：`模型` ⇄ `非模型`（两个分页各自记着选中项与过滤词） | 同左 |
+| `h` / `l` | 切换左右栏（h 左 = 厂商栏，l 右 = 密钥栏；已在边缘侧时不动） | 同左 |
 | `/` | 过滤厂商（匹配 id 或显示名） | 过滤密钥（匹配别名或分组） |
 | `r` | 刷新状态和额度 | 同左 |
 | `Ctrl+Z` | 撤销上一次写操作（本次打开面板后新增/修改/删除的厂商与密钥，含复制产生的文件）；可连续按逐步回退 | 同左 |
@@ -120,15 +121,17 @@ apim --version  # 版本
 
 **添加密钥（右侧按 `a`）**：填别名、分组（可空）、密钥，厂商用 `←`/`→` 切换。密钥可以直接 `⌘V` 粘贴。`Enter` 保存，立即写盘并自动检测。
 
-**添加厂商（左侧按 `a`）**：填 ID（小写字母/数字/-，密钥配置里 `provider` 引用它）、显示名称、Base URL，以及三个可选项：
+**添加厂商（左侧按 `a`）**：填 ID（小写字母/数字/-，密钥配置里 `provider` 引用它）、显示名称、Base URL，以及三个可选项，外加一个**「非模型」勾选框**（勾上就是[非模型厂商](#非模型厂商翻译搜索)：翻译 / 搜索这类 API）：
 
 - 主页 URL：该厂商的控制面板地址，选中厂商按 `Enter` 用默认浏览器打开；留空 = 未配置（按 Enter 会提示）。**别把带 token 的一键登录链接贴进来**——主页会出现在列表和 `provider ls` 输出里
-- 探活路径：默认 `/models`，拼在 Base URL 后面；留空 = 不探活
+- 探活路径：默认 `/models`，拼在 Base URL 后面；留空 = 不探活（仅模型厂商）
 - 脚本路径：额度查询脚本（见下「自定义脚本额度」）；留空 = 不查额度
+
+勾选框默认跟随当前分页（在`非模型`页按 `a`，它已经勾上了），保存后厂商也会落在与它类型相符的那一页。
 
 保存后生成 `~/.config/apim/recipes/<id>.yaml`，接着按 `a` 就能给它加密钥。脚本不用自己写：把 `docs/quota-script-prompt.md` 整体复制给任意 AI Agent，附上厂商的官方查询方式，它会按 apim 预留的接口契约写好并给验证命令。
 
-**编辑（`e`）**：密钥表单带出当前值，改别名就是重命名。厂商表单编辑时 ID 锁定；探活路径/脚本路径没改就保存，不会动原 YAML 里手写的配置（内联脚本、`vars` 访问令牌等都原样保留）。清空脚本路径保存即取消脚本额度。**改了厂商配置保存后，该厂商的旧读数与在途探针会作废、立刻用新配置重探**（避免面板显示按旧配置算出的数字）；撤销厂商配置变更同样会重探。
+**编辑（`e`）**：密钥表单带出当前值，改别名就是重命名。厂商表单编辑时 ID **与「非模型」类型**都锁定（类型在创建时定死；真要换类型就 `y` 复制或删了重建）；探活路径/脚本路径没改就保存，不会动原 YAML 里手写的配置（内联脚本、`vars` 访问令牌等都原样保留）。清空脚本路径保存即取消脚本额度。**改了厂商配置保存后，该厂商的旧读数与在途探针会作废、立刻用新配置重探**（避免面板显示按旧配置算出的数字）；撤销厂商配置变更同样会重探。
 
 **删除（`d`）**：都弹确认框。厂商下面还有密钥时会拒绝，先删密钥。内置厂商（DeepSeek / OpenAI / Moonshot AI / OpenRouter）不可删除，但可以 `e` 编辑覆盖（会在用户目录生成同名 YAML）。
 
@@ -136,7 +139,7 @@ apim --version  # 版本
 
 **撤销（`Ctrl+Z`）**：本次打开面板后的写操作都进历史（新增/修改/删除厂商、密钥，以及复制厂商连带产生的 YAML / 脚本副本），在主界面按 `Ctrl+Z` 逐步回退最近一步——内存和磁盘一起回退，底部 toast 会说明撤销了哪一步（弹窗内不响应）。只读动作（探活、复制到剪贴板、打开主页、浏览/搜索）不进历史；历史是本次会话的，退出 TUI 即清空。
 
-**查**：状态列是探活结果（`● 可用` / `● 失败` / `● 无额度`），右下角额度面板显示选中密钥的余额。按 `i` 打开详情检查器：厂商栏看 recipe 全貌（鉴权 / 端点 / 额度脚本 / 来源 / vars——变量值只显示 `••••`），密钥栏看完整信息，`r` 直接在弹窗里显隐完整 token（不用复制出剪贴板），`c` 复制。刷新节奏：**打开时所有厂商各刷一次，之后每 5 分钟自动全量刷新**（探活 + 额度一起）；切换厂商只读缓存、不触发请求；`r` 随时手动刷新当前厂商，刚保存的密钥会立即探测。
+**查**：状态列是探活结果（`● 可用` / `● 失败` / `● 无额度`）——非模型厂商没有探活，这一列显示额度脚本跑没跑通——右下角额度面板显示选中密钥的余额。按 `i` 打开详情检查器：厂商栏看 recipe 全貌（类型 / 鉴权 / 端点 / 额度脚本 / 来源 / vars——变量值只显示 `••••`），密钥栏看完整信息，`r` 直接在弹窗里显隐完整 token（不用复制出剪贴板），`c` 复制。刷新节奏：**打开时所有厂商各刷一次，之后每 5 分钟自动全量刷新**（探活 + 额度一起）；切换厂商只读缓存、不触发请求；`r` 随时手动刷新当前厂商，刚保存的密钥会立即探测。
 
 表单内：
 
@@ -149,22 +152,59 @@ apim --version  # 版本
 
 必填项为空、ID 重复、Base URL 不以 `http(s)://` 开头等，底部红字提示，不会写盘。
 
+### 非模型厂商（翻译 / 搜索…）
+
+你手上的 API Key 不都是大模型的。添加厂商时勾上「非模型」,它就落在`非模型`分页（`Tab` 切分页）里当个**非模型厂商**：一样有密钥（别名 / 分组 / 复制）、主页快捷打开、额度脚本、复制厂商、撤销，只是砍掉只对模型 API 有意义的那几样：
+
+| | 模型厂商 | 非模型厂商 |
+|---|---|---|
+| 密钥（增删改查 / 复制 / 分组） | ✓ | ✓ |
+| 主页（`Enter`）/ `y` 复制 / `^Z` 撤销 / 额度脚本 / `provider ls` / `apim status` | ✓ | ✓ |
+| 模型列表（`m`） | ✓ | —（按键会告诉你，不弹空窗） |
+| 一键导入 Codex / Pi（`x`） | ✓ | — |
+| HTTP 探活（探活路径、`● 可用`） | ✓ | —（状态由额度脚本的成败来说） |
+
+类型**创建时定死**：编辑表单里它是只读的，`apim provider set` 也不接受 `--kind`；`y` 复制（`provider copy`）会把类型一起带走。
+
+这家 API 的协议差异（调哪个端点、key 怎么传、算不算额度）全在**额度脚本**里，它是非模型厂商唯一的接入点：脚本从 env 拿到 `APIM_TOKEN` / `APIM_BASE_URL` / `APIM_ALIAS` / `APIM_PROVIDER` / `APIM_VAR_*`，stdout 一行就是面板一行。「翻译 API 还剩多少字符」和「大模型还剩多少钱」是同一种形状。
+
+```yaml
+# ~/.config/apim/recipes/deepl.yaml
+id: deepl
+name: DeepL 翻译
+kind: non_model            # 模型厂商省略这一行（或写 `model`）即可
+base_url: https://api-free.deepl.com
+homepage: https://www.deepl.com/your-account
+balance:
+  kind: script
+  command: ~/.config/apim/scripts/deepl-quota.sh
+auth: {kind: bearer}
+```
+
+或者走 CLI：
+
+```bash
+apim provider add deepl --name 'DeepL 翻译' --base-url https://api-free.deepl.com \
+  --kind non-model --homepage https://www.deepl.com/your-account \
+  --script ~/.config/apim/scripts/deepl-quota.sh
+```
+
 ## CLI（AI / 脚本友好）
 
 TUI 管人，CLI 管机器：`cargo install --path .` 之后所有操作都能走命令行（`apim help` 看全量用法）。数据同一份，CLI 改完 TUI 立即可见，反之亦然。
 
 | 命令 | 作用 |
 |---|---|
-| `apim provider ls [--json]` | 列厂商（含额度绑定方式、密钥数） |
-| `apim provider add <id> --name <名> --base-url <URL> [--homepage <主页URL>\|none] [--health <路径>\|none] [--script <脚本路径>\|none]` | 建厂商 |
-| `apim provider set <id> [--name <名>] [--base-url <URL>] [--homepage <主页URL>\|none] [--health <路径>\|none] [--script <脚本路径>\|none]` | 改厂商（只动传了的字段） |
+| `apim provider ls [--json]` | 列厂商（含类型、额度绑定方式、密钥数；非模型厂商带 `[非模型]` 标记） |
+| `apim provider add <id> --name <名> --base-url <URL> [--homepage <主页URL>\|none] [--kind model\|non-model] [--health <路径>\|none] [--script <脚本路径>\|none]` | 建厂商（`--kind` 缺省 `model`；非模型厂商给 `--health` 直接报错） |
+| `apim provider set <id> [--name <名>] [--base-url <URL>] [--homepage <主页URL>\|none] [--health <路径>\|none] [--script <脚本路径>\|none]` | 改厂商（只动传了的字段）。类型不可改——那是 `provider add` 的事 |
 | `apim provider rm <id> [--force]` | 删厂商（有密钥时拒绝，`--force` 连带删密钥；内置不可删） |
 | `apim provider copy <源id> [新id] [--name 名]` | 整份复制厂商（auth/vars/探活/额度全带走，`secrets.toml` 里的密钥不跟随）；外部额度脚本复制成独立文件（命名跟随新 id，同名已存在则顺延 `-2`）；新 id 缺省 `<源id>-copy`，被占自动顺延 |
 | `apim key ls [<provider>] [--json]` | 列密钥（token 掩码显示） |
 | `apim key add <provider> <别名> [--group <分组>]` | 加密钥；已存在则更新 token |
 | `apim key set <厂商.别名> [--alias <新别名>] [--group <分组>\|none]` | 改别名 / 分组 |
 | `apim key rm <厂商.别名>` | 删密钥 |
-| `apim status [<provider>] [--json]` | 真实探活 + 额度（跑绑定的脚本） |
+| `apim status [<provider>] [--json]` | 真实探活 + 额度（跑绑定的脚本）。非模型厂商没有探活，状态就是脚本的成败（`● 可用` / `● 失败` / `● 未绑定额度脚本`） |
 | `apim copy <厂商.别名> [--base-url]` | 复制密钥 / Base URL 到剪贴板 |
 | `apim use <厂商.别名>` | 输出 `export OPENAI_API_KEY=... OPENAI_BASE_URL=...`（`eval $(apim use x)` 用） |
 | `apim update [--check] [--force] [--json]` | 自动识别当前是从哪条渠道装的（**npm / Homebrew / install.sh**），走同一条渠道更新。install.sh 渠道会下载**该 tag 的**官方脚本、校验 sha256 之后才执行（不是 `curl \| sh`）。`--check` 只报当前/最新版本不动手；`--force` 版本相同时也重装一遍 |
@@ -299,7 +339,7 @@ chmod 600 ~/.config/apim/config.toml ~/.config/apim/secrets.toml
 
 内置厂商开箱即用：**DeepSeek、OpenAI、Moonshot AI、OpenRouter** 已编译进二进制，不用写 recipe，在 TUI 左侧选中后按 `a` 直接加密钥即可（OpenAI 的余额接口仅部分账户有权限，无权限时额度面板报 HTTP 错误属预期）。同 id 放一份 YAML 到 `~/.config/apim/recipes/` 即可覆盖内置定义。
 
-自定义厂商首选在 TUI 左侧按 `a`，表单保存即生成 `~/.config/apim/recipes/<id>.yaml`。
+自定义厂商首选在 TUI 左侧按 `a`，表单保存即生成 `~/.config/apim/recipes/<id>.yaml`。非大模型的 API（翻译、搜索……）就是同一套东西勾上「非模型」——见[非模型厂商](#非模型厂商翻译搜索)。
 
 复杂厂商（自定义鉴权头、多级 JSON 解析）可以直接写 YAML 放进同一目录，可参考 `recipes/deepseek.yaml`：
 

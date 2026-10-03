@@ -3,6 +3,7 @@
 > **用法**：把本文件从下一行的分隔线开始、整体复制给任意 AI Agent（ZCode / Claude / ChatGPT 都行），
 > 然后把最末「厂商信息」一节填上你要接的厂商的官方查询方式（文档、curl 示例、或口述），
 > Agent 会产出两个文件 + 验证命令。密钥永远不要贴给 Agent，验证时用环境变量自己传。
+> 接的不是大模型（翻译、搜索这类 API）时，在「厂商信息」里说清楚，Agent 会按 1.5 节走非模型厂商那套。
 
 ---
 
@@ -57,6 +58,35 @@ balance:
 3. `~` 开头的路径只在 recipe 的 `command:` 里会被展开，脚本内部自己引用路径要展开或用绝对路径。
 4. 密钥只在 env 里，**绝不能**写进脚本、写进 recipe、echo 到输出。
 5. 脚本可以用本机任何工具：curl、jq、python3 等；macOS 无 jq 时提醒用户 `brew install jq`。
+
+### 1.5 非模型厂商（翻译 / 搜索这类 API）
+
+大模型以外的 API（翻译、搜索、图像……）在 apim 里是**非模型厂商**，`kind: non_model` 标明。
+它一样有密钥 / 别名 / 分组 / 主页 / 额度脚本，但**没有模型列表、不能导入客户端、也没有探活**
+——所以 recipe 里不写 `health`，`auth` 也可以整段省略（只服务 HTTP 请求，非模型没有请求）：
+
+```yaml
+# ~/.config/apim/recipes/deepl.yaml
+id: deepl
+name: DeepL 翻译
+kind: non_model        # 关键：非模型厂商
+base_url: https://api-free.deepl.com
+homepage: https://www.deepl.com/your-account
+balance:
+  kind: script
+  command: ~/.config/apim/scripts/deepl-quota.sh
+```
+
+要点：
+
+- **额度脚本是这类厂商唯一的接入点**：调哪个端点、key 放 header 还是 query、怎么算「还剩多少」，
+  全在脚本里。面板与 `apim status` 的状态列就是**脚本的成败**（脚本跑通 = 可用），所以失败路径更要写准
+  （坏 key 必须 stderr + exit 1，不能吐假数字）。
+- 注册用 `apim provider add <id> --name <名> --base-url <URL> --kind non-model --script <路径>`；
+  **不要传 `--health`**（给非模型厂商传探活会被直接拒绝）。
+- 双凭据（Access Key + Secret、或需要 region / project id 这类额外参数）的厂商：把额外值放 recipe 的
+  `vars:`，脚本里是 `APIM_VAR_<大写名>`；TUI 表单不编辑 `vars`，直接写 YAML。
+- 类型创建后不可改（`provider set --kind` 会被拒绝），要换就删了重建或 `provider copy`。
 
 ## 2. 参考实现（GLM Coding Plan，实测可用）
 
@@ -184,8 +214,12 @@ echo "MCP    本月已用 ${MCP_USED} · ${LEVEL}"
 
 ```bash
 # 1. 写入两个文件后，注册厂商并绑定脚本：
+#    模型厂商：
 apim provider add <厂商id> --name <名称> --base-url <https://...> \
   --health <探活路径> --script ~/.config/apim/scripts/<厂商id>-quota.sh
+#    非模型厂商（翻译 / 搜索…，无探活、无模型列表）：
+apim provider add <厂商id> --name <名称> --base-url <https://...> \
+  --kind non-model --script ~/.config/apim/scripts/<厂商id>-quota.sh
 
 # 2. 密钥由用户自己配（token 只走 stdin，AI 不要经手）：
 echo 'sk-你的密钥' | apim key add <厂商id> main
@@ -209,6 +243,7 @@ echo "exit=$?"   # 期望 exit=0 且输出额度行
 
 ## 5. 厂商信息（用户填这里）
 
+- 是不是大模型厂商？（是 / 不是；不是就是非模型厂商，写 `kind: non_model`、不写 health）
 - 厂商名称 / 想用的 id：
 - base_url：
 - 官方查询方式（文档链接 / curl 示例 / 接口返回样例，尽量贴全）：

@@ -94,6 +94,24 @@ fn draw_body(frame: &mut Frame, app: &App, area: Rect) {
     balance::draw_balance(frame, app, right[1]);
 }
 
+/// 非模型厂商的状态口径：它没有 HTTP 探活，只能用额度脚本的成败说话
+/// （脚本跑通 = vendor 的 API 拿这把 key 真答上了）。
+/// `None` = 模型厂商，调用方照旧看 Health；密钥表与左栏厂商摘要共用这一处。
+pub(crate) fn script_status(
+    app: &App,
+    provider: &str,
+    key: &crate::config::KeyEntry,
+) -> Option<(Style, &'static str)> {
+    if app.recipes.get(provider).is_none_or(|r| r.is_model()) {
+        return None;
+    }
+    Some(match &app.state_for(key).balance {
+        Some(balance) if balance.error.is_none() => (Style::new().fg(theme::OK), "● 可用"),
+        Some(_) => (Style::new().fg(theme::ERR), "● 失败"),
+        None => (Style::new().fg(theme::MUTED), "—"),
+    })
+}
+
 pub(crate) fn pane_block<'a>(
     title: impl Into<ratatui::text::Line<'a>>,
     focused: bool,

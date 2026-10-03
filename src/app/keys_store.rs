@@ -79,11 +79,13 @@ impl App {
         self.toast = Some((format!("已保存 {new_id}"), Instant::now()));
         self.rebuild_provider_list();
         // 定位走过滤后的视图：有过滤时选中项要落在可见行上
-        self.selected_provider = self
+        let fallback = self.selected_provider();
+        let pos = self
             .provider_ids_filtered()
             .iter()
             .position(|p| p == &provider)
-            .unwrap_or(self.selected_provider);
+            .unwrap_or(fallback);
+        self.tab_view_mut().selected = pos;
         self.selected_key = self
             .keys_in_provider_filtered()
             .iter()

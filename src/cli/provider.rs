@@ -6,7 +6,7 @@ use anyhow::{Result, bail};
 use serde_json::json;
 
 use super::{Args, Ctx};
-use crate::recipe::{HttpCall, Recipe, ScriptSpec};
+use crate::recipe::{HttpCall, ProviderKind, Recipe, ScriptSpec};
 
 pub(crate) async fn run(ctx: &Ctx, argv: &[String]) -> Result<()> {
     let args = Args::parse(argv)?;
@@ -34,6 +34,7 @@ fn ls(ctx: &Ctx, args: &Args) -> Result<()> {
                 json!({
                     "id": r.id,
                     "name": r.name,
+                    "kind": r.kind.as_str(),
                     "base_url": r.base_url,
                     "homepage": r.homepage,
                     "health": r.health.as_ref().map(|h| h.url.clone()),
@@ -54,7 +55,9 @@ fn ls(ctx: &Ctx, args: &Args) -> Result<()> {
             None => "—".into(),
         };
         let origin = if r.origin.is_none() { " [内置]" } else { "" };
-        println!("{id:<14} {:<18} {}{origin}", r.name, r.base_url);
+        // 非模型厂商一眼可辨（人类输出与 JSON 的 kind 字段同义）
+        let kind_note = if r.is_model() { "" } else { " [非模型]" };
+        println!("{id:<14} {:<18} {}{origin}{kind_note}", r.name, r.base_url);
         let homepage = r
             .homepage
             .as_deref()
@@ -83,7 +86,7 @@ fn balance_json(balance: Option<&ScriptSpec>) -> serde_json::Value {
 fn add(ctx: &Ctx, args: &Args) -> Result<()> {
     let Some(id) = args.pos(1).map(str::to_string) else {
         bail!(
-            "用法：apim provider add <id> --name <名> --base-url <URL> [--homepage <URL>|none] [--health 路径] [--script 脚本路径]"
+            "用法：apim provider add <id> --name <名> --base-url <URL> [--homepage <URL>|none] [--kind model|non-model] [--health 路径] [--script 脚本路径]"
         );
     };
     let Some(name) = args.flag("name").map(str::to_string) else {
@@ -96,6 +99,11 @@ fn add(ctx: &Ctx, args: &Args) -> Result<()> {
     let Some(base_url) = args.flag("base-url").map(str::to_string) else {
         bail!("--base-url 必填");
     };
+    // 类型只能在创建时定（--kind 缺省 = 模型）
+    let kind = kind_flag(args)?;
+    if !kind.is_model() && args.flag("health").is_some() {
+        bail!("非模型厂商不探活：不要给非模型厂商传 --health");
+    }
 
     let recipes = ctx.load_recipes()?;
     if recipes.contains_key(&id) {
@@ -111,6 +119,7 @@ fn add(ctx: &Ctx, args: &Args) -> Result<()> {
     let mut recipe = Recipe {
         id: id.clone(),
         name,
+        kind,
         base_url,
         homepage: homepage_opt(args)?,
         models_url: None,
@@ -123,8 +132,22 @@ fn add(ctx: &Ctx, args: &Args) -> Result<()> {
     };
     recipe.normalize();
     let path = ctx.save_recipe(&recipe)?;
-    println!("已添加厂商 {id}（{}）", path.display());
+    println!("已添加{}厂商 {id}（{}）", kind_label(kind), path.display());
     Ok(())
+}
+
+/// `--kind` 的值 → 类型；缺省 = 模型，写错就报错（不猜）。
+fn kind_flag(args: &Args) -> Result<ProviderKind> {
+    match args.flag("kind") {
+        None => Ok(ProviderKind::Model),
+        Some(raw) => ProviderKind::parse(raw)
+            .ok_or_else(|| anyhow::anyhow!("--kind 只认 model / non-model，得到：{raw}")),
+    }
+}
+
+/// 人类输出里的类型后缀（模型厂商不加后缀）。
+fn kind_label(kind: ProviderKind) -> &'static str {
+    if kind.is_model() { "" } else { "非模型" }
 }
 
 fn set(ctx: &Ctx, args: &Args) -> Result<()> {
@@ -137,6 +160,13 @@ fn set(ctx: &Ctx, args: &Args) -> Result<()> {
     let Some(recipe) = recipes.get_mut(id) else {
         bail!("厂商 {id} 不存在");
     };
+    // 类型只能在创建时定（TUI 里那个勾选框同样只读）：要换类型就 provider copy / rm + add
+    if args.flag("kind").is_some() {
+        bail!("类型只能在创建时定（provider add --kind），要换类型请 provider rm + add");
+    }
+    if !recipe.is_model() && args.flag("health").is_some() {
+        bail!("厂商 {id} 是非模型厂商，不探活（--health 不适用）");
+    }
 
     if let Some(name) = args.flag("name") {
         if name.is_empty() {

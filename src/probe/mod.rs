@@ -243,13 +243,14 @@ fn compact_error(err: &anyhow::Error) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::recipe::Recipe;
+    use crate::recipe::{ProviderKind, Recipe};
     use std::collections::HashMap;
 
     fn candidates_recipe(models_url: Option<&str>, health_url: Option<&str>) -> Recipe {
         Recipe {
             id: "p".into(),
             name: "P".into(),
+            kind: ProviderKind::Model,
             base_url: "https://p.example".into(),
             homepage: None,
             models_url: models_url.map(String::from),

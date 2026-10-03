@@ -62,6 +62,7 @@ pub(crate) fn provider_rows(
     let mut rows = vec![
         InspectRow::new("名称", recipe.name.clone()),
         InspectRow::new("ID", recipe.id.clone()),
+        InspectRow::new("类型", format!("{}厂商", recipe.kind.label())),
         InspectRow::new(
             "来源",
             recipe
@@ -82,18 +83,22 @@ pub(crate) fn provider_rows(
         InspectRow::new("鉴权", auth_label(&recipe.auth)),
         InspectRow::new(
             "探活",
-            recipe
-                .health
-                .as_ref()
-                .map(|h| {
-                    let method = if h.method.is_empty() {
-                        "GET"
-                    } else {
-                        h.method.as_str()
-                    };
-                    format!("{method} {}", h.url)
-                })
-                .unwrap_or_else(|| "未配置".into()),
+            if recipe.is_model() {
+                recipe
+                    .health
+                    .as_ref()
+                    .map(|h| {
+                        let method = if h.method.is_empty() {
+                            "GET"
+                        } else {
+                            h.method.as_str()
+                        };
+                        format!("{method} {}", h.url)
+                    })
+                    .unwrap_or_else(|| "未配置".into())
+            } else {
+                "—（非模型厂商不探活）".into()
+            },
         ),
         InspectRow::new("额度", balance_label(recipe.balance.as_ref())),
     ];
@@ -338,7 +343,7 @@ fn truncate_cols(s: &str, max_cols: usize) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::recipe::{HttpCall, ScriptSpec};
+    use crate::recipe::{HttpCall, ProviderKind, ScriptSpec};
     use std::collections::HashMap;
     use std::path::PathBuf;
     use std::time::Instant;
@@ -347,6 +352,7 @@ mod tests {
         Recipe {
             id: "demo".into(),
             name: "Demo".into(),
+            kind: ProviderKind::Model,
             base_url: "https://api.demo.com".into(),
             homepage: None,
             models_url: None,
@@ -543,8 +549,15 @@ mod tests {
         App {
             recipes,
             keys: vec![key],
-            provider_ids: vec!["demo".into()],
-            selected_provider: 0,
+            tab: crate::recipe::ProviderKind::Model,
+            // 这个弹窗按当前分页的选中厂商取数据：分页视图里摆一个 demo
+            tabs: [
+                crate::app::TabView {
+                    provider_ids: vec!["demo".into()],
+                    ..Default::default()
+                },
+                Default::default(),
+            ],
             selected_key: 0,
             focus: crate::app::Focus::Keys,
             states: HashMap::new(),
@@ -557,7 +570,6 @@ mod tests {
             probe_seq: HashMap::new(),
             next_probe_seq: 0,
             key_filter: None,
-            provider_filter: None,
             tx,
             tx_task,
             client: reqwest::Client::new(),

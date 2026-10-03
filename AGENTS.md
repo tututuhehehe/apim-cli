@@ -37,18 +37,18 @@ src/
 │       └── tests/     沙盒测试（假 pi 脚本）+ 真机 opt-in（`--ignored pi_real_end_to_end`）
 ├── cli/               CLI 子命令（AI/脚本的机器接口，与 TUI 共用底层）
 │   ├── mod.rs         Args 解析（--flag 值/布尔）、Ctx（config+recipes 目录，可注入测试）、分发与帮助
-│   ├── provider.rs    provider ls/add/set/rm/copy（--script 绑定/解绑；copy 整份复制含脚本文件）
+│   ├── provider.rs    provider ls/add/set/rm/copy（--script 绑定/解绑、--kind 只在 add；copy 整份复制含脚本文件）
 │   ├── keys.rs        key ls/add/set/rm（token 只走 stdin，不进 argv）
 │   ├── query.rs       status（并发探活+额度，--json）/ copy / use
 │   ├── uninstall/     apim uninstall：mod.rs 流程 / cleanup.rs 删程序（含软链）与 --purge 配置目录 / report.rs 人机两套输出
 │   ├── update/        apim update：channel.rs 认渠道 / install_sh.rs 下载+校验+执行 / http.rs 取 tag
 │   └── tests.rs       CLI 沙盒测试（临时目录全流程）
 ├── form/              通用表单引擎（密钥表单、厂商表单共用）
-│   ├── mod.rs         Field（文本/选择/只读）、Form、按键分发、表单构造器
+│   ├── mod.rs         Field（文本/选择/勾选框/只读）、Form、按键分发、表单构造器（PF_* 字段下标）
 │   ├── edit.rs        LineEdit：单行编辑（值 + 光标）
 │   └── tests.rs       表单引擎测试
 ├── app/               应用状态机
-│   ├── mod.rs         App 结构、start、导航、探活调度（探针代际：配置变更后旧结果丢弃）
+│   ├── mod.rs         App 结构、分页（Kind::ALL 顺序的 tabs）、start、导航、探活调度（探针代际：配置变更后旧结果丢弃）
 │   ├── import/        一键导入面板：mod.rs 流程控制 + flow.rs 状态 + apply.rs 写盘回执 + keys.rs 按键
 │   │                  （tests/ 按 flow / apply 分）
 │   ├── modal.rs       Modal 枚举 + 打开/保存分发/删除确认分发
@@ -58,7 +58,7 @@ src/
 ├── ui/                一个面板一个文件
 │   ├── mod.rs         draw 分发 + theme + pane_block/centered + 滚动偏移
 │   ├── header.rs      顶栏/底栏（底栏按焦点显示 c 复制什么）
-│   ├── providers.rs   左栏厂商列表
+│   ├── providers.rs   左栏分页条（模型/非模型）+ 当前分页的厂商列表
 │   ├── keys.rs        右侧密钥表 + 状态标签（含 ★ 角标）
 │   ├── balance.rs     右下额度面板
 │   ├── inspector.rs   详情弹窗（密钥 / 厂商）
@@ -69,7 +69,7 @@ src/
 │   └── confirm.rs     删除确认弹窗
 ├── util.rs            跨模块小工具（truncate、expand_tilde；只放「多处各写了一遍」的东西）
 ├── recipe/            厂商协议
-│   ├── mod.rs         Recipe/Auth/HttpCall 模型、YAML 加载（builtin→manifest→user 逐级覆盖，加载期校验 id 字符集）、is_valid_id、{token}/{base_url} 模板替换
+│   ├── mod.rs         Recipe/ProviderKind/Auth/HttpCall 模型、YAML 加载（builtin→manifest→user 逐级覆盖，加载期校验 id 字符集）、is_valid_id、{token}/{base_url} 模板替换
 │   ├── script.rs      ScriptSpec（balance.kind=script，command/run 二选一，自定义 serde 校验）
 │   ├── dup.rs         厂商整份复制（新 id 自动顺延 + 额度脚本文件副本）
 │   └── store.rs       用户 recipe 读写（~/.config/apim/recipes/*.yaml）
@@ -99,7 +99,7 @@ recipes/              内置 recipe ×4（deepseek/openai/moonshot/openrouter，
 
 - `~/.config/apim/config.toml` — 密钥清单（provider/alias/group，无 token）
 - `~/.config/apim/secrets.toml` — token，键名 `"厂商.别名"`，600 权限
-- `~/.config/apim/recipes/*.yaml` — 用户厂商 recipe，同 id 覆盖内置
+- `~/.config/apim/recipes/*.yaml` — 用户厂商 recipe，同 id 覆盖内置；非模型厂商靠 `kind: non_model` 标识（缺省即模型）
 - `~/.codex/config.toml`、`~/.codex/apim-models.json` — 一键导入到 Codex（`x` 键）写的，前者每次改写前备份成 `config.toml.apim.bak`
 - `~/.pi/agent/models.json` — 一键导入到 Pi（`x` 键）写的，备份成 `models.json.apim.bak`；`PI_CODING_AGENT_DIR` 可改整个目录。`settings.json` / `auth.json` **都不写**（前者完全不碰，后者只读来判断哪把 key 在用）
 - `APIM_CONFIG_DIR` 环境变量可重定向整个配置目录（测试用）
@@ -109,10 +109,10 @@ recipes/              内置 recipe ×4（deepseek/openai/moonshot/openrouter，
 ## 核心约定
 
 1. **密钥永不进仓库**。`.gitignore` 已排除 secrets.toml/.env；写文档、注释、提交信息时一律用 `sk-...` 占位。动手前 `grep -r "sk-"` 扫一遍。
-2. **加厂商不改 Rust，额度一律走脚本**。厂商表单只配：ID/名称/Base URL/主页/探活路径/**脚本路径**（指向 ~/.config/apim/scripts/ 下可执行脚本）；编辑时路径没改就保留手写配置，清空即取消。每个厂商一个额度脚本（`balance.kind: script`，env 注入 APIM_TOKEN/APIM_VAR_*，stdout 逐行直显），声明式 http 解析已退役；不要再扩 DSL，也不要往表单加预设类型。AI 代写脚本的标准提示词在 docs/quota-script-prompt.md。
+2. **加厂商不改 Rust，额度一律走脚本**。厂商表单只配：ID/名称/Base URL/主页/**非模型勾选框**/探活路径/**脚本路径**（指向 ~/.config/apim/scripts/ 下可执行脚本）；编辑时路径没改就保留手写配置，清空即取消。每个厂商一个额度脚本（`balance.kind: script`，env 注入 APIM_TOKEN/APIM_VAR_*，stdout 逐行直显），声明式 http 解析已退役；不要再扩 DSL，也不要往表单加预设类型（厂商类型就两种，见约定 15）。AI 代写脚本的标准提示词在 docs/quota-script-prompt.md。
 3. **Recipe 覆盖顺序**：builtin(include_str) → `<repo>/recipes/`（开发时）→ `~/.config/apim/recipes/`，后读的同 id 覆盖先读的。`origin: None` = 内置，不可删除只可编辑覆盖。
 4. **模块路径稳定**：子模块类型经 mod.rs re-export（如 `crate::app::Modal`），拆文件不破坏外部 import。
-5. **改完必跑**：`cargo fmt && cargo clippy -q --all-targets -- -W clippy::all`（零警告）+ `cargo test`。UI 改动跑 `cargo run -- --snapshot`（主界面）/ `--snapshot-form` / `--snapshot-provider-form` / `--snapshot-inspector` 出纯文本渲染核对。
+5. **改完必跑**：`cargo fmt && cargo clippy -q --all-targets -- -W clippy::all`（零警告）+ `cargo test`。UI 改动跑 `cargo run -- --snapshot`（主界面，`APIM_SNAPSHOT_TAB=non-model` 出非模型分页）/ `--snapshot-form` / `--snapshot-provider-form`（`APIM_SNAPSHOT_KIND=non-model` 出勾上非模型的添加表单；`APIM_SNAPSHOT_PROVIDER=<id>` 出编辑表单）/ `--snapshot-inspector` 出纯文本渲染核对。
 6. **添加功能前先确认 git 状态，全程用 git 管理便于回退**。动手前 `git status` 看工作区：有未提交的旧改动就先提交或 `git stash`，别和新功能混在一起；`git log --oneline -3` 确认当前在哪个提交上，心里有可回退的锚点。功能完成（fmt+clippy+test 通过）后一次性提交：先 `git status` + `git diff --stat` 核对只包含本次功能相关文件（不混入 secrets/临时文件），再提交。要回退用 `git checkout <提交号> -- <路径>`（局部）或 `git revert`（整体）。
 7. **README 默认英文**（`README.md`），中文版在 `README.zh-CN.md`，两版内容保持同步：改一版必须同步另一版，顶部语言切换链接别删。
 8. 提交信息中文，一行主题 + 要点列表；功能一次一提交。
@@ -158,11 +158,22 @@ recipes/              内置 recipe ×4（deepseek/openai/moonshot/openrouter，
     - **只支持 API key 这一路**：pi 的订阅渠道是 `/login` 的 OAuth（凭据在 `auth.json`），apim 拿不到也不该碰。
     - **`apim uninstall` 要报 pi 残留**（同 codex：只报不删）：`models.json` 里的 `providers.apim-*` 条目与含明文 apiKey 的 `models.json.apim.bak`（`cli/uninstall/cleanup.rs::pi_leftovers_in`）。
 
+15. **厂商类型 = 两个分页，类型创建时定死**（模型 / 非模型）：
+    - 数据源只有一个字段：recipe 的 `kind: model|non_model`（`ProviderKind`，缺省 model，所以老 YAML / 内置 recipe 不用动；序列化时 model 不写 kind）。非模型厂商 **没有模型列表（`m`）、不能导入客户端（`x`）、不探活**（`health` 恒空，`m`/`x` 给提示而不是静默）；密钥、别名/分组、主页 `⏎`、`c`、`y` 复制、`^Z`、额度脚本、`provider ls`、`apim status` 全都一样。
+    - **类型的唯一入口是创建**：TUI 添加表单的「非模型」勾选框（默认跟随当前分页）、CLI `provider add --kind`。编辑表单里它只读，且 `save_provider_form` 一律取原值（规则落在保存这一处，不靠 UI 灰掉）；`provider set --kind` 与给非模型厂商传 `--health` 都报错。要换类型只能删了重建 / `provider copy`。
+    - **分页状态在 App 里**：`tab: ProviderKind` + `tabs: [TabView; 2]`（每个分页自己的 `provider_ids` / `selected` / `filter`，下标 = `ProviderKind::ALL` 顺序）；取值一律走 `provider_ids()` / `provider_ids_filtered()` / `selected_provider()` / `provider_filter()`，**不要**再引入第三个「全局选中项」。`rebuild_provider_list` 两个分页各建一份（有密钥的在前，其余按 id 排序）；保存 / 复制厂商后必须 `focus_provider(id)`（分页跟着厂商类型跳，否则新建的厂商落在看不见的那一页）。
+    - **快捷键**：`Tab` = 切分页（两栏焦点都生效），`h`/`l` 与 ←/→ = 切左右栏焦点。改按键提示时三个分支都要过一遍（厂商焦点 / 模型页密钥焦点 / 非模型页密钥焦点，非模型页不出现 `m`/`x`）。
+    - **状态口径**：非模型厂商没有探活，密钥表状态列与左栏厂商摘要都用**额度脚本的成败**（`ui::script_status`，一处写、两个地方用；CLI `status` 同一口径）。
+    - `health` / `models_url` 对非模型照旧保留在 YAML 里（加载期不拒收，只是没人用）；`auth` 已可省略（`#[serde(default)]`）——非模型厂商没有 HTTP 请求。
+
 ## 验证命令速查
 
 ```bash
 cargo run                              # 进 TUI（跑当前代码）
 cargo run -- --snapshot                # 真实接口拉数据渲染成文本（不进 TUI）
+APIM_SNAPSHOT_TAB=non-model cargo run -- --snapshot          # 非模型分页的主界面快照
+APIM_SNAPSHOT_KIND=non-model cargo run -- --snapshot-provider-form   # 添加表单：勾上「非模型」的样子
+APIM_SNAPSHOT_PROVIDER=<id> cargo run -- --snapshot-provider-form   # 编辑表单（类型只读；非模型那行探活也是只读）
 cargo run -- --snapshot-inspector      # 详情弹窗快照：假状态不拉接口；=provider 出厂商详情
 cargo run -- --snapshot-import         # 一键导入面板快照：第一步选客户端
 cargo run -- --snapshot-import-models  # 一键导入面板快照：第二步勾选模型

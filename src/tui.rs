@@ -196,7 +196,9 @@ fn handle_key(app: &mut App, key: KeyEvent) {
             // vim 方向：h 左 = 厂商栏，l 右 = 密钥栏；已在边缘侧时不动
             KeyCode::Char('h') if app.focus == Focus::Keys => app.toggle_focus(),
             KeyCode::Char('l') if app.focus == Focus::Providers => app.toggle_focus(),
-            KeyCode::Tab | KeyCode::Left | KeyCode::Right => app.toggle_focus(),
+            // Tab 切厂商分页（模型 / 非模型）；左右栏焦点由 h/l 与 ←/→ 切
+            KeyCode::Tab => app.switch_tab(),
+            KeyCode::Left | KeyCode::Right => app.toggle_focus(),
             _ => {}
         },
     }
@@ -206,10 +208,16 @@ fn handle_key(app: &mut App, key: KeyEvent) {
 
 pub(crate) async fn run_snapshot() -> Result<()> {
     let (mut app, _rx, _rx_task) = App::start()?;
-    if let Ok(id) = std::env::var("APIM_SNAPSHOT_PROVIDER")
-        && let Some(pos) = app.provider_ids.iter().position(|p| p == &id)
-    {
-        app.selected_provider = pos;
+    if let Ok(id) = std::env::var("APIM_SNAPSHOT_PROVIDER") {
+        app.focus_provider(&id);
+    }
+    // 想看另一个分页：APIM_SNAPSHOT_TAB=non-model（模型页是默认）；
+    // 想看密钥栏视角（底栏提示不同）：APIM_SNAPSHOT_FOCUS=keys
+    if let Some(kind) = snapshot_kind_var("APIM_SNAPSHOT_TAB") {
+        app.show_tab(kind);
+    }
+    if std::env::var("APIM_SNAPSHOT_FOCUS").as_deref() == Ok("keys") {
+        app.focus = Focus::Keys;
     }
     app.refresh_blocking().await;
     render_snapshot(&app).await
@@ -217,6 +225,10 @@ pub(crate) async fn run_snapshot() -> Result<()> {
 
 pub(crate) async fn run_snapshot_key_form() -> Result<()> {
     let (mut app, _rx, _rx_task) = App::start()?;
+    // 密钥表单的厂商下拉吃当前分页：APIM_SNAPSHOT_TAB=non-model 出非模型页的那份
+    if let Some(kind) = snapshot_kind_var("APIM_SNAPSHOT_TAB") {
+        app.show_tab(kind);
+    }
     app.focus = Focus::Keys;
     app.open_add();
     if let Modal::Form { form, .. } = &mut app.modal {
@@ -227,20 +239,38 @@ pub(crate) async fn run_snapshot_key_form() -> Result<()> {
     render_snapshot(&app).await
 }
 
+/// 厂商表单快照。两种摆法：
+/// - 缺省：出「添加」表单（`APIM_SNAPSHOT_KIND=non-model` 出勾上「非模型」的样子，
+///   它在非模型分页里打开——添加表单的勾选框默认跟随当前分页）；
+/// - 指定厂商（`APIM_SNAPSHOT_PROVIDER=<id>`）：出「编辑」表单（ID / 类型 / 非模型的探活行只读）。
 pub(crate) async fn run_snapshot_provider_form() -> Result<()> {
     let (mut app, _rx, _rx_task) = App::start()?;
     app.focus = Focus::Providers;
+    if let Ok(id) = std::env::var("APIM_SNAPSHOT_PROVIDER") {
+        app.focus_provider(&id);
+        app.open_edit();
+        return render_snapshot(&app).await;
+    }
+    app.show_tab(snapshot_kind_var("APIM_SNAPSHOT_KIND").unwrap_or_default());
     app.open_add();
     if let Modal::Form { form, .. } = &mut app.modal {
         form.fields[0] = Field::text("ID", "my-relay");
         form.fields[1] = Field::text("名称", "我的中转站");
         form.fields[2] = Field::text("Base URL", "https://relay.example.com");
         form.fields[3] = Field::text("主页 URL", "https://console.example.com");
-        form.fields[4] = Field::text("探活路径", "/v1/models");
-        form.fields[5] = Field::text("脚本路径", "~/.config/apim/scripts/my-relay.sh");
-        form.active = 5;
+        form.fields[5] = Field::text("探活路径", "/v1/models");
+        form.fields[6] = Field::text("脚本路径", "~/.config/apim/scripts/my-relay.sh");
+        form.active = 6;
     }
     render_snapshot(&app).await
+}
+
+/// `APIM_SNAPSHOT_*` 里的分页/类型取值（`non-model` / `non_model`，缺省 = 模型）。
+fn snapshot_kind_var(name: &str) -> Option<crate::recipe::ProviderKind> {
+    std::env::var(name)
+        .ok()
+        .as_deref()
+        .and_then(crate::recipe::ProviderKind::parse)
 }
 
 /// 一键导入面板快照（第一步：选客户端）。不拉接口、不写盘，直接摆出面板状态。
@@ -354,10 +384,11 @@ fn snapshot_key_id(app: &App) -> String {
 /// 数据来自 APIM_CONFIG_DIR（测试时指向假配置目录）。
 pub(crate) async fn run_snapshot_inspector() -> Result<()> {
     let (mut app, _rx, _rx_task) = App::start()?;
-    if let Ok(id) = std::env::var("APIM_SNAPSHOT_PROVIDER")
-        && let Some(pos) = app.provider_ids.iter().position(|p| p == &id)
-    {
-        app.selected_provider = pos;
+    if let Ok(id) = std::env::var("APIM_SNAPSHOT_PROVIDER") {
+        app.focus_provider(&id);
+    }
+    if let Some(kind) = snapshot_kind_var("APIM_SNAPSHOT_TAB") {
+        app.show_tab(kind);
     }
     if let Some(key) = app.selected_key_entry().cloned() {
         // 清掉启动自动探测的在途标记，否则快照里「健康」行永远显示「检查中」，

@@ -107,10 +107,11 @@ apim --version  # version
 | `y` | Duplicate the provider: copy the whole recipe into a new provider (id becomes `<id>-copy`, name gets a "副本" / copy suffix); an external balance script is copied to its own file so the two providers evolve independently. Keys in `secrets.toml` are not copied | — |
 | `i` | Provider details (auth / endpoints / balance script / origin / vars — values are hidden) | Key details (`r` toggles the full token, `c` copies) |
 | `Enter` | Open the provider homepage (console) in your default browser | — |
-| `m` | — | Fetch the model list with **the selected key** (visibility depends on the key/group; in the dialog `/` focuses the search box for live filtering, `Esc` leaves search back to the list (filter kept), `j`/`k` scroll, `c` copies a model name, `Esc` closes) |
-| `x` | — | One-click **import into Codex or Pi**: the selected key + its provider + the models you tick, written to the client's config. Steps: `⏎` to advance → pick a client → tick models (`space` toggles, `a` toggles all, `/` searches) → (Codex only) pick the default model (`j`/`k` move, `h` goes back, `⏎` imports; a single ticked model skips this step; Pi has no such step). See below |
+| `m` | — | Fetch the model list with **the selected key** (model providers only; visibility depends on the key/group; in the dialog `/` focuses the search box for live filtering, `Esc` leaves search back to the list (filter kept), `j`/`k` scroll, `c` copies a model name, `Esc` closes) |
+| `x` | — | One-click **import into Codex or Pi** (model providers only): the selected key + its provider + the models you tick, written to the client's config. Steps: `⏎` to advance → pick a client → tick models (`space` toggles, `a` toggles all, `/` searches) → (Codex only) pick the default model (`j`/`k` move, `h` goes back, `⏎` imports; a single ticked model skips this step; Pi has no such step). See below |
 | `j` / `k` | Move up/down | Move up/down |
-| `Tab` / `h` / `l` | Switch panes (`h` = provider list, `l` = key table; no-op at the edge) | Same |
+| `Tab` | Switch the provider page: `模型` (model providers) ⇄ `非模型` (non-model APIs). Each page remembers its own selection and filter | Same |
+| `h` / `l` | Switch panes (`h` = provider list, `l` = key table; no-op at the edge) | Same |
 | `/` | Filter providers (matches id or display name) | Filter keys (matches alias or group) |
 | `r` | Refresh health and balance | Same |
 | `Ctrl+Z` | Undo the last write (providers/keys added, edited or deleted since the app opened, including files created by duplication); press repeatedly to step back | Same |
@@ -122,15 +123,17 @@ Press `/` to open the search box; filtering is live and case-insensitive, and ea
 
 **Add a key (`a` in the right pane)**: fill in the alias, an optional group, and the key; switch providers with `←`/`→`. You can paste the key with `⌘V`. `Enter` saves, writes to disk immediately, and probes it.
 
-**Add a provider (`a` in the left pane)**: fill in the ID (lowercase letters / digits / `-`; keys reference it via `provider`), a display name, the base URL, and three optional fields:
+**Add a provider (`a` in the left pane)**: fill in the ID (lowercase letters / digits / `-`; keys reference it via `provider`), a display name, the base URL, and three optional fields — plus a **`非模型` checkbox** that turns it into a [non-model provider](#non-model-providers-translation-search-):
 
 - **Homepage URL** — the provider's console, opened in your default browser with `Enter` on the provider; empty means unset (`Enter` will tell you). **Do not paste a one-click login link that contains a token** — the homepage shows up in the list and in `provider ls` output.
-- **Health path** — defaults to `/models`, appended to the base URL; empty disables health checks.
+- **Health path** — defaults to `/models`, appended to the base URL; empty disables health checks. (Model providers only.)
 - **Script path** — the balance script (see [Custom balance scripts](#custom-balance-scripts-the-one-and-only-balance-mechanism)); empty disables balance queries.
+
+The checkbox defaults to the page you pressed `a` on (add from the `非模型` page and it is already ticked); the provider lands on the page matching its type.
 
 Saving creates `~/.config/apim/recipes/<id>.yaml`, after which `a` lets you add keys to it. You do not have to write the script yourself: paste `docs/quota-script-prompt.md` into any AI agent along with the provider's official query docs, and it will produce a script following apim's contract plus a verification command.
 
-**Edit (`e`)**: the key form is pre-filled; changing the alias renames the key. In the provider form the ID is locked; if the health/script path is unchanged, saving leaves hand-written YAML untouched (inline scripts, `vars` access tokens, etc. are preserved). Clearing the script path removes the script balance. **After you save a changed provider config, that provider's cached readings and in-flight probes are invalidated and it is re-probed immediately with the new config** (so the panel never shows numbers computed from stale config); undoing a provider config change re-probes too.
+**Edit (`e`)**: the key form is pre-filled; changing the alias renames the key. In the provider form the ID **and the `非模型` type** are locked (a provider's type is fixed when you create it; `y`/delete + re-add if you really need the other kind); if the health/script path is unchanged, saving leaves hand-written YAML untouched (inline scripts, `vars` access tokens, etc. are preserved). Clearing the script path removes the script balance. **After you save a changed provider config, that provider's cached readings and in-flight probes are invalidated and it is re-probed immediately with the new config** (so the panel never shows numbers computed from stale config); undoing a provider config change re-probes too.
 
 **Delete (`d`)**: both ask for confirmation. A provider that still has keys is refused — delete the keys first. Built-in providers (DeepSeek / OpenAI / Moonshot AI / OpenRouter) cannot be deleted, but you can override them with `e` (this writes a YAML with the same id under your config dir).
 
@@ -138,7 +141,7 @@ Saving creates `~/.config/apim/recipes/<id>.yaml`, after which `a` lets you add 
 
 **Undo (`Ctrl+Z`)**: every write since the app opened is recorded (provider/key add, edit and delete, plus YAML/script files created by duplication). Press `Ctrl+Z` on the main screen to step back one action at a time — memory and disk roll back together, and a toast at the bottom says what was undone (dialogs do not respond). Read-only actions (probing, copying to the clipboard, opening the homepage, browsing/searching) are not recorded; history is per-session and cleared when you quit the TUI.
 
-**Inspect**: the status column shows the probe result (`● 可用` available / `● 失败` failed / `● 无额度` no balance), and the balance panel at the bottom right shows the selected key's balance. Press `i` for the details inspector: in the provider pane you see the whole recipe (auth / endpoints / balance script / origin / vars — variable values are shown only as `••••`); in the key pane you see everything, and `r` toggles the full token right there (no clipboard round-trip), while `c` copies. Refresh cadence: **every provider is probed once on open, then all of them are refreshed every 5 minutes** (health + balance together); switching providers reads the cache and triggers no request; `r` manually refreshes the current provider, and a newly saved key is probed immediately.
+**Inspect**: the status column shows the probe result (`● 可用` available / `● 失败` failed / `● 无额度` no balance) — for non-model providers it shows whether the balance script ran, since there is no health check — and the balance panel at the bottom right shows the selected key's balance. Press `i` for the details inspector: in the provider pane you see the whole recipe (type / auth / endpoints / balance script / origin / vars — variable values are shown only as `••••`); in the key pane you see everything, and `r` toggles the full token right there (no clipboard round-trip), while `c` copies. Refresh cadence: **every provider is probed once on open, then all of them are refreshed every 5 minutes** (health + balance together); switching providers reads the cache and triggers no request; `r` manually refreshes the current provider, and a newly saved key is probed immediately.
 
 Inside a form:
 
@@ -151,22 +154,59 @@ Inside a form:
 
 An empty required field, a duplicate ID, a base URL that does not start with `http(s)://`, and so on show a red message at the bottom and nothing is written.
 
+### Non-model providers (translation, search, …)
+
+Not every API key you own belongs to an LLM. Tick `非模型` when adding a provider and it lands on the `非模型` page (press `Tab` to switch pages) as a **non-model provider**: still a provider with its own keys, alias/groups, clipboard copy, homepage shortcut and balance script — minus everything that only makes sense for model APIs:
+
+| | Model provider | Non-model provider |
+|---|---|---|
+| Keys (add / edit / delete / copy / groups) | ✓ | ✓ |
+| Homepage (`Enter`), duplicate (`y`), undo, balance script, `provider ls`, `apim status` | ✓ | ✓ |
+| Model list (`m`) | ✓ | — (tells you instead of opening an empty dialog) |
+| One-click import into Codex / Pi (`x`) | ✓ | — |
+| HTTP health check (health path, `● 可用` from probing) | ✓ | — (status comes from the balance script) |
+
+The type is **fixed at creation**: the edit form shows it read-only, and `apim provider set` rejects `--kind`. Duplicating (`y` / `provider copy`) keeps the type.
+
+The whole protocol difference (which endpoint, how the key travels, what counts as quota) lives in the **balance script**, which is the non-model provider's only integration point: it gets `APIM_TOKEN` / `APIM_BASE_URL` / `APIM_ALIAS` / `APIM_PROVIDER` / `APIM_VAR_*` in the environment and prints one panel line per stdout line. A translation API's "how much is left" is the same shape as an LLM's.
+
+```yaml
+# ~/.config/apim/recipes/deepl.yaml
+id: deepl
+name: DeepL 翻译
+kind: non_model            # omit this line (or write `model`) for a model provider
+base_url: https://api-free.deepl.com
+homepage: https://www.deepl.com/your-account
+balance:
+  kind: script
+  command: ~/.config/apim/scripts/deepl-quota.sh
+auth: {kind: bearer}
+```
+
+Or from the CLI:
+
+```bash
+apim provider add deepl --name 'DeepL 翻译' --base-url https://api-free.deepl.com \
+  --kind non-model --homepage https://www.deepl.com/your-account \
+  --script ~/.config/apim/scripts/deepl-quota.sh
+```
+
 ## CLI (AI / script friendly)
 
 The TUI is for humans, the CLI is for machines: after `cargo install --path .` every operation is available from the command line (`apim help` lists everything). They share the same data — a CLI change is immediately visible in the TUI and vice versa.
 
 | Command | Description |
 |---|---|
-| `apim provider ls [--json]` | List providers (including balance binding mode and key count) |
-| `apim provider add <id> --name <name> --base-url <URL> [--homepage <URL>\|none] [--health <path>\|none] [--script <path>\|none]` | Create a provider |
-| `apim provider set <id> [--name <name>] [--base-url <URL>] [--homepage <URL>\|none] [--health <path>\|none] [--script <path>\|none]` | Update a provider (only the fields you pass) |
+| `apim provider ls [--json]` | List providers (including kind, balance binding mode and key count; non-model providers are tagged `[非模型]`) |
+| `apim provider add <id> --name <name> --base-url <URL> [--homepage <URL>\|none] [--kind model\|non-model] [--health <path>\|none] [--script <path>\|none]` | Create a provider (`--kind` defaults to `model`; `--health` is rejected for non-model providers) |
+| `apim provider set <id> [--name <name>] [--base-url <URL>] [--homepage <URL>\|none] [--health <path>\|none] [--script <path>\|none]` | Update a provider (only the fields you pass). The kind cannot be changed — that is what `provider add` is for |
 | `apim provider rm <id> [--force]` | Delete a provider (refused if it has keys; `--force` deletes them too; built-ins cannot be deleted) |
 | `apim provider copy <src-id> [new-id] [--name <name>]` | Duplicate a provider (auth/vars/health/balance included; keys in `secrets.toml` are not); an external balance script is copied to its own file (named after the new id, existing names bumped to `-2`); the new id defaults to `<src-id>-copy` and auto-increments if taken |
 | `apim key ls [<provider>] [--json]` | List keys (tokens masked) |
 | `apim key add <provider> <alias> [--group <group>]` | Add a key; if it already exists, update its token |
 | `apim key set <provider.alias> [--alias <new-alias>] [--group <group>\|none]` | Change alias / group |
 | `apim key rm <provider.alias>` | Delete a key |
-| `apim status [<provider>] [--json]` | Real health check + balance (runs the bound script) |
+| `apim status [<provider>] [--json]` | Real health check + balance (runs the bound script). Non-model providers have no health check, so their status is the script's outcome (`● 可用` / `● 失败` / `● 未绑定额度脚本`) |
 | `apim copy <provider.alias> [--base-url]` | Copy the key / base URL to the clipboard |
 | `apim use <provider.alias>` | Print `export OPENAI_API_KEY=... OPENAI_BASE_URL=...` (for `eval $(apim use x)`) |
 | `apim update [--check] [--force] [--json]` | Detects which channel installed this apim (**npm / Homebrew / install.sh**) and updates through the same one. The install.sh channel downloads **that release tag's** script and verifies its published sha256 before running it (no `curl \| sh`). `--check` only reports current-vs-latest; `--force` reinstalls even when versions match |
@@ -302,7 +342,7 @@ Set `APIM_CONFIG_DIR` to relocate the whole config directory (used by the tests)
 
 Built-in providers work out of the box: **DeepSeek, OpenAI, Moonshot AI and OpenRouter** are compiled into the binary — no recipe needed. Select one in the left pane and press `a` to add a key. (OpenAI's balance endpoint is only available to some accounts; an HTTP error in the balance panel is expected otherwise.) Dropping a YAML with the same id into `~/.config/apim/recipes/` overrides the built-in definition.
 
-For a custom provider the easiest path is `a` in the left pane; saving the form generates `~/.config/apim/recipes/<id>.yaml`.
+For a custom provider the easiest path is `a` in the left pane; saving the form generates `~/.config/apim/recipes/<id>.yaml`. Non-LLM APIs (translation, search, …) are the same thing with the `非模型` checkbox ticked — see [Non-model providers](#non-model-providers-translation-search-).
 
 For complex providers (custom auth headers, multi-level JSON parsing) you can write the YAML directly into the same directory — see `recipes/deepseek.yaml`:
 

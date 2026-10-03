@@ -3,7 +3,7 @@ use std::fs;
 use std::os::unix::fs::PermissionsExt;
 use std::path::{Path, PathBuf};
 
-use super::super::{Auth, AuthKind, ScriptSpec, load_dir};
+use super::super::{Auth, AuthKind, ProviderKind, ScriptSpec, load_dir};
 use super::*;
 
 fn temp_dir(name: &str) -> PathBuf {
@@ -20,6 +20,7 @@ fn base_recipe(id: &str) -> Recipe {
     Recipe {
         id: id.into(),
         name: format!("{id} 站"),
+        kind: ProviderKind::Model,
         base_url: "https://relay.example.com/v1".into(),
         homepage: Some("https://console.example.com".into()),
         models_url: None,
@@ -58,6 +59,20 @@ fn with_script(mut r: Recipe, script: &Path, timeout_secs: Option<u64>) -> Recip
 
 fn one_recipe_map(recipe: &Recipe) -> HashMap<String, Recipe> {
     HashMap::from([(recipe.id.clone(), recipe.clone())])
+}
+
+/// 整份复制连类型一起带走（非模型厂商的副本仍是非模型）。
+#[test]
+fn duplicate_keeps_the_provider_kind() {
+    let recipes_dir = temp_dir("kind");
+    let scripts_dir = temp_dir("kind-scripts");
+    let mut src = base_recipe("deepl");
+    src.kind = ProviderKind::NonModel;
+    src.health = None;
+    let map = one_recipe_map(&src);
+
+    let (recipe, _) = duplicate_recipe(&map, &src, None, None, &recipes_dir, &scripts_dir).unwrap();
+    assert_eq!(recipe.kind, ProviderKind::NonModel);
 }
 
 #[test]

@@ -113,6 +113,7 @@ mod tests {
         Recipe {
             id: "demo".into(),
             name: "Demo".into(),
+            kind: crate::recipe::ProviderKind::Model,
             base_url: "https://example.com".into(),
             homepage: None,
             models_url: None,

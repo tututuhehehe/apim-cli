@@ -3,7 +3,6 @@
 use super::*;
 
 // ---- 打开面板 ----------------------------------------------------------
-
 #[test]
 fn open_requires_key_focus_and_a_selected_key() {
     let (mut app, _rx, _rx_task) = test_app(&[("alpha", &["a1"])]);
@@ -29,6 +28,20 @@ fn open_without_keys_toasts_instead_of_opening() {
     app.open_import();
     assert!(matches!(app.modal, Modal::None), "没有密钥不该开面板");
     assert!(app.toast.is_some());
+}
+
+/// 非模型厂商没有模型列表，导入客户端无从谈起：给提示而不是开一个空面板。
+#[test]
+fn open_refuses_for_non_model_provider() {
+    let (mut app, _rx, _rx_task) = test_app(&[("deepl", &["main"])]);
+    app.recipes.get_mut("deepl").unwrap().kind = crate::recipe::ProviderKind::NonModel;
+    app.focus = Focus::Keys;
+    app.open_import();
+    assert!(matches!(app.modal, Modal::None));
+    assert_eq!(
+        app.toast_text(),
+        Some("deepl 假厂商 是非模型厂商，不能导入到客户端")
+    );
 }
 
 // ---- 第一步：选客户端 → 拉模型 ----------------------------------------

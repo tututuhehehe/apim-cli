@@ -122,8 +122,8 @@ pub(crate) fn print_help() {
          \n\
          厂商：\n\
          \x20 apim provider ls [--json]\n\
-         \x20 apim provider add <id> --name <名> --base-url <URL> [--homepage <URL>|none] [--health <路径>|none] [--script <脚本路径>|none]\n\
-         \x20 apim provider set <id> [--name <名>] [--base-url <URL>] [--homepage <URL>|none] [--health <路径>|none] [--script <脚本路径>|none]\n\
+         \x20 apim provider add <id> --name <名> --base-url <URL> [--homepage <URL>|none] [--kind model|non-model] [--health <路径>|none] [--script <脚本路径>|none]\n\
+         \x20 apim provider set <id> [--name <名>] [--base-url <URL>] [--homepage <URL>|none] [--health <路径>|none] [--script <路径>|none]   # --kind 只能在 add 时用\n\
          \x20 apim provider rm <id> [--force]\n\
          \x20 apim provider copy <源id> [新id] [--name 名]   # 整份复制厂商（额度脚本一并另存）\n\
          密钥（token 一律走 stdin：echo 'KEY' | apim key add ...）：\n\
@@ -132,7 +132,7 @@ pub(crate) fn print_help() {
          \x20 apim key set <厂商.别名> [--alias <新别名>] [--group <分组>|none]\n\
          \x20 apim key rm <厂商.别名>\n\
          查询：\n\
-         \x20 apim status [<provider>] [--json]      # 真实探活+额度（跑绑定脚本）\n\
+         \x20 apim status [<provider>] [--json]      # 真实探活+额度（跑绑定脚本；非模型厂商只看脚本）\n\
          \x20 apim copy <厂商.别名> [--base-url]     # 复制密钥 / Base URL\n\
          \x20 apim use <厂商.别名>                   # 输出 export OPENAI_API_KEY=... （shell eval 用）\n\
          自维护：\n\

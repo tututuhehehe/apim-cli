@@ -21,7 +21,7 @@ use crate::clients::Agent;
 use crate::clipboard;
 use crate::config::{self, KeyEntry};
 use crate::probe::{self, BalanceSnapshot, Health, ProbeResult};
-use crate::recipe::Recipe;
+use crate::recipe::{ProviderKind, Recipe};
 
 pub(crate) use undo::UndoAction;
 
@@ -29,6 +29,15 @@ pub(crate) use undo::UndoAction;
 pub enum Focus {
     Providers,
     Keys,
+}
+
+/// 一个分页（模型 / 非模型）自己的列表视图状态：厂商列表、选中项、过滤词。
+/// 两个分页各存一份，所以切来切去都各自停在原处；下标记法同 `ProviderKind::ALL`。
+#[derive(Debug, Default)]
+pub struct TabView {
+    pub provider_ids: Vec<String>,
+    pub selected: usize,
+    pub filter: Option<String>,
 }
 
 #[derive(Debug, Clone)]
@@ -70,8 +79,10 @@ pub type ProbeMsg = (u64, ProbeResult);
 pub struct App {
     pub recipes: HashMap<String, Recipe>,
     pub keys: Vec<KeyEntry>,
-    pub provider_ids: Vec<String>,
-    pub selected_provider: usize,
+    /// 当前分页：模型 / 非模型（Tab 键切换）。
+    pub tab: ProviderKind,
+    /// 两个分页各自的视图状态（下标 = `ProviderKind::ALL` 的顺序）。
+    pub(crate) tabs: [TabView; 2],
     pub selected_key: usize,
     pub focus: Focus,
     pub states: HashMap<String, KeyState>,
@@ -81,8 +92,6 @@ pub struct App {
     /// 密钥过滤关键字（alias/分组包含，大小写不敏感）；None = 未过滤。
     /// 只影响视图与导航，keys 始终是全集。
     pub key_filter: Option<String>,
-    /// 厂商过滤关键字（id/显示名包含，大小写不敏感）；只影响视图与导航。
-    pub provider_filter: Option<String>,
     /// 在途探针：key_id → 代际号。既作「该 key 是否在探」的去重依据，
     /// 也用于丢弃过期结果（代际不匹配即作废）。空 = 没有在途探针。
     pub(crate) probe_seq: HashMap<String, u64>,
@@ -126,8 +135,8 @@ impl App {
         let mut app = App {
             recipes,
             keys,
-            provider_ids: Vec::new(),
-            selected_provider: 0,
+            tab: ProviderKind::Model,
+            tabs: Default::default(),
             selected_key: 0,
             focus: Focus::Providers,
             states: HashMap::new(),
@@ -135,7 +144,6 @@ impl App {
             last_refresh: None,
             modal: Modal::None,
             key_filter: None,
-            provider_filter: None,
             probe_seq: HashMap::new(),
             next_probe_seq: 0,
             tx,
@@ -210,6 +218,72 @@ impl App {
         self.config_dir.join("recipes")
     }
 
+    // ---- 分页（模型 / 非模型）与列表视图 ----------------------------------
+
+    fn tab_view(&self) -> &TabView {
+        &self.tabs[self.tab as usize]
+    }
+
+    fn tab_view_mut(&mut self) -> &mut TabView {
+        &mut self.tabs[self.tab as usize]
+    }
+
+    /// 当前分页的全部厂商 id（未被过滤词收窄）。
+    pub fn provider_ids(&self) -> &[String] {
+        &self.tab_view().provider_ids
+    }
+
+    /// 当前分页里选中的厂商下标（过滤生效时是过滤后视图的下标）。
+    pub fn selected_provider(&self) -> usize {
+        self.tab_view().selected
+    }
+
+    pub fn provider_filter(&self) -> Option<&str> {
+        self.tab_view().filter.as_deref()
+    }
+
+    pub fn set_provider_filter(&mut self, value: Option<String>) {
+        self.tab_view_mut().filter = value;
+        // 过滤词一改，原来的选中下标可能越界——选中项必须始终落在可见列表里
+        self.clamp_selections();
+    }
+
+    /// 某分页的厂商 id（含该分页自己的过滤词）。分页条与当前列表都走它。
+    pub fn provider_ids_in(&self, kind: ProviderKind) -> Vec<String> {
+        filter_provider_ids(&self.tabs[kind as usize], &self.recipes)
+    }
+
+    /// `Tab`：切换厂商分页（模型 ↔ 非模型）。
+    ///
+    /// 分页各自记着选中项与过滤词，这里只切指针 + 密钥选中归零（选中厂商变了）。
+    /// 顺手重算 ★：与切厂商同款，用户可能刚在别的窗口手改了客户端配置。
+    pub fn switch_tab(&mut self) {
+        let next = match self.tab {
+            ProviderKind::Model => ProviderKind::NonModel,
+            ProviderKind::NonModel => ProviderKind::Model,
+        };
+        self.show_tab(next);
+    }
+
+    /// 切到指定分页。
+    pub fn show_tab(&mut self, kind: ProviderKind) {
+        self.tab = kind;
+        self.selected_key = 0;
+        self.refresh_active_keys();
+    }
+
+    /// 把某厂商设为当前分页的选中项——分页跟着厂商的类型走。
+    /// 保存 / 复制厂商后必须这么做：否则新建的厂商在另一个分页里，用户看不见它。
+    pub(crate) fn focus_provider(&mut self, id: &str) {
+        if let Some(kind) = self.recipes.get(id).map(|r| r.kind) {
+            self.show_tab(kind);
+        }
+        let fallback = self.selected_provider();
+        let pos = self.provider_ids_filtered().iter().position(|p| p == id);
+        self.tab_view_mut().selected = pos.unwrap_or(fallback);
+        self.selected_key = 0;
+    }
+
     /// 额度脚本目录（复制厂商时脚本副本落这里）。
     pub(crate) fn scripts_dir(&self) -> PathBuf {
         self.config_dir.join("scripts")
@@ -218,35 +292,18 @@ impl App {
     /// 当前焦点厂商（provider_filter 生效时 selected_provider 是过滤后视图的下标）。
     pub fn current_provider_id(&self) -> Option<&str> {
         let filtered = self.provider_ids_filtered();
-        let id = filtered.get(self.selected_provider)?;
+        let id = filtered.get(self.selected_provider())?;
         // 借用必须出自全集 provider_ids，不能出自临时的过滤 Vec
-        self.provider_ids
+        self.provider_ids()
             .iter()
             .find(|p| p == &id)
             .map(String::as_str)
     }
 
     /// 过滤后的厂商 id 列表（id 或显示名命中 provider_filter，大小写不敏感）。
-    /// 无过滤时等于 provider_ids 全集；provider_ids 本身不被动。
+    /// 无过滤时等于当前分页的 provider_ids 全集；provider_ids 本身不被动。
     pub fn provider_ids_filtered(&self) -> Vec<String> {
-        match self.provider_filter.as_deref() {
-            None | Some("") => self.provider_ids.clone(),
-            Some(f) => {
-                let needle = f.to_lowercase();
-                self.provider_ids
-                    .iter()
-                    .filter(|id| {
-                        let name = self
-                            .recipes
-                            .get(*id)
-                            .map(|r| r.name.as_str())
-                            .unwrap_or(id.as_str());
-                        text_contains(&needle, id) || text_contains(&needle, name)
-                    })
-                    .cloned()
-                    .collect()
-            }
-        }
+        self.provider_ids_in(self.tab)
     }
 
     pub fn current_recipe(&self) -> Option<&Recipe> {
@@ -315,32 +372,38 @@ impl App {
         self.active_keys = Agent::detect_active_keys(&self.keys, &self.recipes, &self.agent_homes);
     }
 
+    /// 重建两个分页各自的厂商列表：有密钥的厂商排在前面（顺序同密钥清单），
+    /// 其余按 id 排序。两个分页互不干扰，各自只收自己类型的厂商。
     pub(crate) fn rebuild_provider_list(&mut self) {
-        let mut ids: Vec<String> = Vec::new();
-        for key in &self.keys {
-            if !ids.iter().any(|p| p == &key.provider) {
-                ids.push(key.provider.clone());
+        for (i, kind) in ProviderKind::ALL.iter().enumerate() {
+            let mut ids: Vec<String> = Vec::new();
+            for key in &self.keys {
+                let mine = self.recipes.get(&key.provider).map(|r| r.kind) == Some(*kind);
+                if mine && !ids.iter().any(|p| p == &key.provider) {
+                    ids.push(key.provider.clone());
+                }
             }
+            let mut rest: Vec<String> = self
+                .recipes
+                .iter()
+                .filter(|(id, r)| r.kind == *kind && !ids.iter().any(|p| p == *id))
+                .map(|(id, _)| id.clone())
+                .collect();
+            rest.sort();
+            ids.extend(rest);
+            self.tabs[i].provider_ids = ids;
         }
-        for id in self.recipes.keys() {
-            if !ids.iter().any(|p| p == id) {
-                ids.push(id.clone());
-            }
-        }
-        if ids.len() > 1 {
-            ids[1..].sort();
-        }
-        self.provider_ids = ids;
         self.clamp_selections();
     }
 
     /// 过滤/增删后把选中项钳回过滤后视图的有效范围（无过滤时即全集范围）。
+    /// **两个分页都钳**：非当前分页的列表也可能刚缩水（在另一页撤销/删厂商），
+    /// 留着越界的选中下标，切回去就是「有厂商但一个都没选中」。
     pub(crate) fn clamp_selections(&mut self) {
-        let np = self.provider_ids_filtered().len();
-        if np == 0 {
-            self.selected_provider = 0;
-        } else if self.selected_provider >= np {
-            self.selected_provider = np - 1;
+        for i in 0..self.tabs.len() {
+            let n = filter_provider_ids(&self.tabs[i], &self.recipes).len();
+            let selected = self.tabs[i].selected;
+            self.tabs[i].selected = if n == 0 { 0 } else { selected.min(n - 1) };
         }
         let nk = self.keys_in_provider_filtered().len();
         if nk == 0 {
@@ -352,40 +415,36 @@ impl App {
 
     /// 是否有任何过滤生效（决定无弹窗 Esc 是清过滤还是退出）。
     pub fn has_filter(&self) -> bool {
-        self.key_filter.is_some() || self.provider_filter.is_some()
+        self.key_filter.is_some() || self.provider_filter().is_some()
     }
 
-    /// 无弹窗 Esc：优先清当前焦点列表的过滤，焦点侧没有则清另一侧。
+    /// 无弹窗 Esc：优先清当前焦点列表的过滤，焦点侧没有则清另一侧（一次只清一个）。
     /// 返回是否清掉了过滤（清掉了就不退出 TUI）。
     pub fn clear_filter(&mut self) -> bool {
-        let key_first = self.focus == Focus::Keys;
-        if key_first {
-            if self.key_filter.take().is_some() {
-                self.clamp_selections();
-                return true;
-            }
-            if self.provider_filter.take().is_some() {
-                self.clamp_selections();
-                return true;
-            }
+        let (keys_set, provider_set) =
+            (self.key_filter.is_some(), self.tab_view().filter.is_some());
+        let clear_keys = match (self.focus, keys_set, provider_set) {
+            (_, false, false) => return false,
+            (Focus::Keys, true, _) => true,
+            (Focus::Keys, false, true) => false,
+            (Focus::Providers, _, true) => false,
+            (Focus::Providers, true, false) => true,
+        };
+        if clear_keys {
+            self.key_filter = None;
         } else {
-            if self.provider_filter.take().is_some() {
-                self.clamp_selections();
-                return true;
-            }
-            if self.key_filter.take().is_some() {
-                self.clamp_selections();
-                return true;
-            }
+            self.tab_view_mut().filter = None;
         }
-        false
+        self.clamp_selections();
+        true
     }
 
     pub fn move_up(&mut self) {
         match self.focus {
             Focus::Providers => {
-                if self.selected_provider > 0 {
-                    self.select_provider(self.selected_provider - 1);
+                let selected = self.selected_provider();
+                if selected > 0 {
+                    self.select_provider(selected - 1);
                 }
             }
             Focus::Keys => {
@@ -399,8 +458,9 @@ impl App {
     pub fn move_down(&mut self) {
         match self.focus {
             Focus::Providers => {
-                if self.selected_provider + 1 < self.provider_ids_filtered().len() {
-                    self.select_provider(self.selected_provider + 1);
+                let selected = self.selected_provider();
+                if selected + 1 < self.provider_ids_filtered().len() {
+                    self.select_provider(selected + 1);
                 }
             }
             Focus::Keys => {
@@ -417,7 +477,7 @@ impl App {
     /// 顺手把 ★ 的现场重算一遍：用户常常在另一个窗口/编辑器里手改了客户端配置再切回来，
     /// 按一下键就该看到真话，不用等 `r` 或 5 分钟的自动刷新（只读一个小文件，无网络）。
     fn select_provider(&mut self, pos: usize) {
-        self.selected_provider = pos;
+        self.tab_view_mut().selected = pos;
         self.selected_key = 0;
         self.refresh_active_keys();
     }
@@ -568,6 +628,27 @@ fn text_contains(needle_lower: &str, haystack: &str) -> bool {
     haystack.to_lowercase().contains(needle_lower)
 }
 
+/// 分页视图 + 过滤词 → 命中的厂商 id（顺序沿 provider_ids）。
+fn filter_provider_ids(view: &TabView, recipes: &HashMap<String, Recipe>) -> Vec<String> {
+    match view.filter.as_deref() {
+        None | Some("") => view.provider_ids.clone(),
+        Some(f) => {
+            let needle = f.to_lowercase();
+            view.provider_ids
+                .iter()
+                .filter(|id| {
+                    let name = recipes
+                        .get(*id)
+                        .map(|r| r.name.as_str())
+                        .unwrap_or(id.as_str());
+                    text_contains(&needle, id) || text_contains(&needle, name)
+                })
+                .cloned()
+                .collect()
+        }
+    }
+}
+
 #[cfg(test)]
 pub(crate) mod tests {
     use super::*;
@@ -588,6 +669,7 @@ pub(crate) mod tests {
                 Recipe {
                     id: (*pid).to_string(),
                     name: format!("{pid} 假厂商"),
+                    kind: ProviderKind::Model,
                     base_url: "https://example.invalid".into(),
                     homepage: None,
                     models_url: None,
@@ -613,8 +695,8 @@ pub(crate) mod tests {
         let mut app = App {
             recipes,
             keys,
-            provider_ids: Vec::new(),
-            selected_provider: 0,
+            tab: ProviderKind::Model,
+            tabs: Default::default(),
             selected_key: 0,
             focus: Focus::Keys,
             states: HashMap::new(),
@@ -622,7 +704,6 @@ pub(crate) mod tests {
             last_refresh: None,
             modal: Modal::None,
             key_filter: None,
-            provider_filter: None,
             probe_seq: HashMap::new(),
             next_probe_seq: 0,
             tx,
@@ -832,12 +913,12 @@ pub(crate) mod tests {
                 ..Default::default()
             },
         );
-        let mut form = crate::form::provider_add();
+        let mut form = crate::form::provider_add(ProviderKind::Model);
         form.fields[0] = crate::form::Field::text("ID", "p");
         form.fields[1] = crate::form::Field::text("名称", "改过");
         form.fields[2] = crate::form::Field::text("Base URL", "https://p2.example.invalid");
-        form.fields[4] = crate::form::Field::text("探活路径", ""); // 不联网
-        form.fields[5] = crate::form::Field::text("脚本路径", "");
+        form.fields[5] = crate::form::Field::text("探活路径", ""); // 不联网
+        form.fields[6] = crate::form::Field::text("脚本路径", "");
 
         app.save_provider_form(&form, Some("p"));
 
@@ -928,17 +1009,17 @@ pub(crate) mod tests {
     #[test]
     fn provider_filter_matches_id_or_display_name() {
         let (mut app, _rx, _rx_models) = test_app(&[("alpha", &["a1"]), ("beta", &["b1"])]);
-        app.provider_filter = Some("ALP".into());
+        app.set_provider_filter(Some("ALP".into()));
         assert_eq!(app.provider_ids_filtered(), ["alpha"]);
         assert_eq!(app.current_provider_id(), Some("alpha"));
         // 显示名「alpha 假厂商」命中
-        app.provider_filter = Some("假厂".into());
+        app.set_provider_filter(Some("假厂".into()));
         assert_eq!(app.provider_ids_filtered().len(), 2);
         // 导航吃过滤后的列表：只看 beta
-        app.provider_filter = Some("beta".into());
-        app.selected_provider = 0;
+        app.set_provider_filter(Some("beta".into()));
+        app.select_provider(0);
         app.move_down();
-        assert_eq!(app.selected_provider, 0, "过滤后只有一项，不应移动");
+        assert_eq!(app.selected_provider(), 0, "过滤后只有一项，不应移动");
     }
 
     /// 切厂商（`j`/`k`）时顺手重算 ★ 现场：用户在别的窗口手改了客户端配置，
@@ -1041,13 +1122,185 @@ pub(crate) mod tests {
     fn clear_filter_prefers_focused_side_then_other() {
         let (mut app, _rx, _rx_models) = test_app(&[("alpha", &["a1"])]);
         app.key_filter = Some("a".into());
-        app.provider_filter = Some("b".into());
+        app.set_provider_filter(Some("b".into()));
         app.focus = Focus::Keys;
         assert!(app.clear_filter());
         assert_eq!(app.key_filter, None);
-        assert_eq!(app.provider_filter.as_deref(), Some("b"));
+        assert_eq!(app.provider_filter(), Some("b"));
         assert!(app.clear_filter(), "焦点侧没有过滤时应清另一侧");
         assert!(!app.clear_filter());
         assert!(!app.has_filter());
+    }
+
+    // ---- 分页（模型 / 非模型）---------------------------------------------
+
+    /// 按类型造两个厂商：模型页与非模型页各自成列表，互不混入。
+    fn two_kind_app() -> App {
+        let (mut app, _rx, _rx_models) = test_app(&[("alpha", &["a1"]), ("deepl", &["main"])]);
+        app.recipes.get_mut("deepl").unwrap().kind = ProviderKind::NonModel;
+        app.rebuild_provider_list();
+        app
+    }
+
+    #[test]
+    fn providers_are_split_across_tabs_by_kind() {
+        let mut app = two_kind_app();
+        assert_eq!(app.tab, ProviderKind::Model, "默认停在模型页");
+        assert_eq!(app.provider_ids(), ["alpha"]);
+        assert_eq!(app.current_provider_id(), Some("alpha"));
+        app.switch_tab();
+        assert_eq!(app.tab, ProviderKind::NonModel);
+        assert_eq!(app.provider_ids(), ["deepl"]);
+        assert_eq!(app.current_provider_id(), Some("deepl"));
+    }
+
+    /// 分页各自记着选中项与过滤词：切来切去都停在原处，过滤词不泄到另一页。
+    #[test]
+    fn each_tab_keeps_its_own_selection_and_filter() {
+        let (mut app, _rx, _rx_models) =
+            test_app(&[("alpha", &["a1"]), ("beta", &["b1"]), ("deepl", &["main"])]);
+        app.recipes.get_mut("deepl").unwrap().kind = ProviderKind::NonModel;
+        app.rebuild_provider_list();
+        app.select_provider(1); // 模型页选 beta
+        app.set_provider_filter(Some("beta".into()));
+        app.switch_tab(); // → 非模型页
+        assert_eq!(app.current_provider_id(), Some("deepl"));
+        assert_eq!(app.provider_filter(), None, "过滤词不跨页");
+        assert_eq!(app.provider_ids_filtered(), ["deepl"]);
+
+        app.switch_tab(); // 切回模型页
+        assert_eq!(app.current_provider_id(), Some("beta"));
+        assert_eq!(app.provider_filter(), Some("beta"));
+    }
+
+    /// 有密钥的厂商排前面，其余按 id 排序；两个分页各自按这套规则排。
+    #[test]
+    fn rebuilt_lists_put_providers_with_keys_first() {
+        let (mut app, _rx, _rx_models) = test_app(&[("zeta", &["z1"])]);
+        for id in ["alpha", "mu", "nu"] {
+            app.recipes.insert(
+                id.into(),
+                Recipe {
+                    id: id.into(),
+                    name: id.into(),
+                    kind: ProviderKind::Model,
+                    base_url: "https://example.invalid".into(),
+                    homepage: None,
+                    models_url: None,
+                    supports_groups: false,
+                    vars: HashMap::new(),
+                    auth: Auth::default(),
+                    health: None,
+                    balance: None,
+                    origin: None,
+                },
+            );
+        }
+        app.rebuild_provider_list();
+        assert_eq!(app.provider_ids(), ["zeta", "alpha", "mu", "nu"]);
+    }
+
+    /// 保存 / 复制厂商后分页跟着厂商类型走，否则新建的厂商落在看不见的那一页。
+    #[tokio::test]
+    async fn saving_a_provider_switches_to_its_tab() {
+        let (mut app, _rx, _rx_models) = test_app(&[("alpha", &["a1"])]);
+        app.config_dir = test_config_dir("save-tab");
+        app.focus = Focus::Providers;
+        app.switch_tab(); // 停在非模型页
+        assert_eq!(app.tab, ProviderKind::NonModel);
+
+        let mut form = crate::form::provider_add(ProviderKind::Model);
+        form.fields[0] = crate::form::Field::text("ID", "beta");
+        form.fields[1] = crate::form::Field::text("名称", "Beta");
+        form.fields[2] = crate::form::Field::text("Base URL", "https://beta.example.invalid");
+        app.save_provider_form(&form, None);
+
+        assert_eq!(
+            app.tab,
+            ProviderKind::Model,
+            "新建的模型厂商应让分页跳回模型页"
+        );
+        assert_eq!(app.current_provider_id(), Some("beta"));
+    }
+
+    /// 勾上「非模型」保存：类型落盘，探活路径（表单里还带着默认 /models）一律忽略。
+    #[tokio::test]
+    async fn saving_non_model_provider_drops_health() {
+        let (mut app, _rx, _rx_models) = test_app(&[("alpha", &["a1"])]);
+        app.config_dir = test_config_dir("save-non-model");
+        app.focus = Focus::Providers;
+        app.switch_tab();
+
+        let mut form = crate::form::provider_add(ProviderKind::NonModel);
+        form.fields[0] = crate::form::Field::text("ID", "deepl");
+        form.fields[1] = crate::form::Field::text("名称", "DeepL");
+        form.fields[2] = crate::form::Field::text("Base URL", "https://api.deepl.example/v2");
+        app.save_provider_form(&form, None);
+
+        let recipe = &app.recipes["deepl"];
+        assert_eq!(recipe.kind, ProviderKind::NonModel);
+        assert!(
+            recipe.health.is_none(),
+            "非模型厂商不探活：探活路径的值即使非空也要丢掉"
+        );
+        // 落盘也带上了类型（YAML 里写 kind: non_model）
+        let yaml = std::fs::read_to_string(app.config_dir.join("recipes/deepl.yaml")).unwrap();
+        assert!(yaml.contains("kind: non_model"), "{yaml}");
+    }
+
+    /// 类型只在创建时定：编辑时就算把勾选框翻过来，保存后类型也不变。
+    #[tokio::test]
+    async fn editing_never_changes_the_kind() {
+        let (mut app, _rx, _rx_models) = test_app(&[("alpha", &["a1"])]);
+        app.config_dir = test_config_dir("edit-kind");
+        app.focus = Focus::Providers;
+        let mut form = crate::form::provider_edit(&app.recipes["alpha"].clone(), "/models");
+        assert!(
+            !form.toggle(crate::form::PF_NON_MODEL),
+            "模型厂商只读显示不勾"
+        );
+        // 绕过只读直接改投保状态（模拟脏路径）：保存仍要沿用原类型
+        form.fields[crate::form::PF_NON_MODEL] = crate::form::Field::toggle("非模型", true, "");
+        app.save_provider_form(&form, Some("alpha"));
+        assert_eq!(app.recipes["alpha"].kind, ProviderKind::Model);
+    }
+
+    /// 非当前分页的列表缩水时也要把它的选中项钳回来：切回去别变成「有厂商但没选中」。
+    #[test]
+    fn inactive_tab_selection_is_clamped_when_its_list_shrinks() {
+        let (mut app, _rx, _rx_models) = test_app(&[
+            ("alpha", &["a1"]),
+            ("deepl", &["main"]),
+            ("tavily", &["main"]),
+        ]);
+        for id in ["deepl", "tavily"] {
+            app.recipes.get_mut(id).unwrap().kind = ProviderKind::NonModel;
+        }
+        app.rebuild_provider_list();
+        app.switch_tab(); // 非模型页：[deepl, tavily]
+        app.select_provider(1);
+        app.switch_tab(); // 回模型页，非模型页仍记着选中 tavily
+
+        // 在模型页把 tavily 删掉（模拟在另一页删厂商 / 撤销）
+        app.recipes.remove("tavily");
+        app.rebuild_provider_list();
+
+        app.switch_tab(); // 切回非模型页
+        assert_eq!(app.selected_provider(), 0, "选中下标应被钳回列表范围");
+        assert_eq!(app.current_provider_id(), Some("deepl"));
+    }
+
+    /// 非模型厂商的服务对象不同：`m`（模型列表）直接提示，不开弹窗也不发请求。
+    #[test]
+    fn open_models_refuses_for_non_model_provider() {
+        let mut app = two_kind_app();
+        app.focus = Focus::Keys;
+        app.switch_tab();
+        app.open_models();
+        assert!(matches!(app.modal, Modal::None), "非模型厂商不该开模型弹窗");
+        assert_eq!(
+            app.toast_text(),
+            Some("deepl 假厂商 是非模型厂商，没有模型列表")
+        );
     }
 }

@@ -9,7 +9,6 @@ use ratatui::widgets::{Cell, Clear, Paragraph, Row, Table, TableState};
 use super::{App, Focus, pane_block, theme};
 use crate::config::KeyEntry;
 use crate::probe::Health;
-
 pub(crate) fn draw_keys(frame: &mut Frame, app: &App, area: Rect) {
     frame.render_widget(Clear, area);
     let focused = app.focus == Focus::Keys;
@@ -93,7 +92,7 @@ pub(crate) fn draw_keys(frame: &mut Frame, app: &App, area: Rect) {
     if n == 0 {
         let hint = if app.key_filter.is_some() {
             " 没有匹配的密钥，Esc 清除过滤 "
-        } else if app.provider_filter.is_some() {
+        } else if app.provider_filter().is_some() {
             // 厂商全被滤掉时没有选中厂商，别误导用户去按 a
             " 没有匹配的厂商，Esc 清除过滤 "
         } else {
@@ -124,6 +123,10 @@ fn import_badge(app: &App, key_id: &str) -> Option<String> {
 fn status_label(app: &App, key: &KeyEntry) -> (Style, String) {
     if app.is_checking(&key.id()) {
         return (Style::new().fg(theme::MUTED), "… 检查中".into());
+    }
+    // 非模型厂商不探活：看额度脚本（口径见 ui::script_status）
+    if let Some((style, label)) = super::script_status(app, &key.provider, key) {
+        return (style, label.to_string());
     }
     let state = app.state_for(key);
     match &state.health {

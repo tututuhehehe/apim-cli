@@ -121,6 +121,25 @@ fn field_line(
             ]);
             (line, None)
         }
+        Field::Toggle {
+            label,
+            value,
+            enabled,
+            hint,
+        } => {
+            let mark = if *value { "[x]" } else { "[ ]" };
+            let mark_style = if *enabled {
+                Style::new().fg(theme::ACCENT).add_modifier(Modifier::BOLD)
+            } else {
+                Style::new().fg(theme::MUTED)
+            };
+            let line = Line::from(vec![
+                pad_span(label, label_cols),
+                Span::styled(format!("{mark} "), mark_style),
+                Span::styled(hint.to_string(), Style::new().fg(theme::MUTED)),
+            ]);
+            (line, None)
+        }
     }
 }
 

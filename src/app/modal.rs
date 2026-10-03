@@ -96,7 +96,7 @@ impl App {
             Focus::Providers => {
                 self.modal = Modal::Form {
                     kind: FormKind::Provider,
-                    form: form::provider_add(),
+                    form: form::provider_add(self.tab),
                     original: None,
                 };
             }
@@ -106,9 +106,10 @@ impl App {
                     self.toast = Some(("先添加一个厂商".into(), Instant::now()));
                     return;
                 }
+                let selected = self.selected_provider();
                 self.modal = Modal::Form {
                     kind: FormKind::Key,
-                    form: form::key_add(providers, self.selected_provider),
+                    form: form::key_add(providers, selected),
                     original: None,
                 };
             }
@@ -212,7 +213,10 @@ impl App {
     /// `/`：按当前焦点打开搜索弹窗（密钥表 / 厂商栏），输入框预填现有过滤值。
     pub fn open_search(&mut self) {
         let (target, original) = match self.focus {
-            Focus::Providers => (SearchTarget::Provider, self.provider_filter.clone()),
+            Focus::Providers => (
+                SearchTarget::Provider,
+                self.provider_filter().map(String::from),
+            ),
             Focus::Keys => (SearchTarget::Key, self.key_filter.clone()),
         };
         self.modal = Modal::Search {
@@ -232,7 +236,8 @@ impl App {
         let value = (!value.is_empty()).then_some(value);
         match target {
             SearchTarget::Key => self.key_filter = value,
-            SearchTarget::Provider => self.provider_filter = value,
+            // 厂商过滤词属于当前分页，不泄到另一个分页
+            SearchTarget::Provider => self.set_provider_filter(value),
         }
         self.clamp_selections();
     }
@@ -252,7 +257,7 @@ impl App {
             let (target, original) = (*target, original.clone());
             match target {
                 SearchTarget::Key => self.key_filter = original,
-                SearchTarget::Provider => self.provider_filter = original,
+                SearchTarget::Provider => self.set_provider_filter(original),
             }
             self.clamp_selections();
         }
@@ -390,6 +395,14 @@ impl App {
         let Some(recipe) = self.recipes.get(&key.provider).cloned() else {
             return;
         };
+        // 非模型厂商没有模型列表（Tab 分页里也没有 `m` 的提示）：说清楚，别静默
+        if !recipe.is_model() {
+            self.toast = Some((
+                format!("{} 是非模型厂商，没有模型列表", recipe.name),
+                Instant::now(),
+            ));
+            return;
+        }
         let key_id = key.id();
         self.modal = Modal::Models {
             key_id: key_id.clone(),
@@ -537,7 +550,7 @@ impl App {
 mod tests {
     use super::*;
     use crate::config::KeyEntry;
-    use crate::recipe::Recipe;
+    use crate::recipe::{ProviderKind, Recipe};
     use std::collections::HashMap;
 
     fn one_key_app() -> App {
@@ -547,6 +560,7 @@ mod tests {
             Recipe {
                 id: "p".into(),
                 name: "P".into(),
+                kind: ProviderKind::Model,
                 base_url: "https://p.example".into(),
                 homepage: None,
                 models_url: None,
@@ -568,8 +582,8 @@ mod tests {
                 group: None,
                 token: "sk-full-token-value".into(),
             }],
-            provider_ids: Vec::new(),
-            selected_provider: 0,
+            tab: ProviderKind::Model,
+            tabs: Default::default(),
             selected_key: 0,
             focus: Focus::Keys,
             states: HashMap::new(),
@@ -579,7 +593,6 @@ mod tests {
             probe_seq: HashMap::new(),
             next_probe_seq: 0,
             key_filter: None,
-            provider_filter: None,
             tx,
             tx_task,
             client: crate::probe::client().expect("client"),

@@ -63,9 +63,17 @@ impl App {
             self.toast = Some(("没有可导入的密钥".into(), Instant::now()));
             return;
         };
-        if !self.recipes.contains_key(&key.provider) {
+        let Some(recipe) = self.recipes.get(&key.provider) else {
             self.toast = Some((
                 format!("厂商 {} 的协议不存在，先修好再导入", key.provider),
+                Instant::now(),
+            ));
+            return;
+        };
+        // 导入客户端靠模型列表：非模型厂商没有模型可勾（Tab 分页里也没有 `x` 的提示）
+        if !recipe.is_model() {
+            self.toast = Some((
+                format!("{} 是非模型厂商，不能导入到客户端", recipe.name),
                 Instant::now(),
             ));
             return;

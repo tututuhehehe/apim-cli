@@ -47,7 +47,7 @@ mod tests {
     use std::fs;
     use std::path::PathBuf;
 
-    use super::super::{Auth, AuthKind, HttpCall, Recipe, ScriptSpec, load_dir};
+    use super::super::{Auth, AuthKind, HttpCall, ProviderKind, Recipe, ScriptSpec, load_dir};
     use super::*;
 
     fn temp_dir(name: &str) -> PathBuf {
@@ -63,6 +63,7 @@ mod tests {
         Recipe {
             id: "my-relay".into(),
             name: "我的中转站".into(),
+            kind: ProviderKind::Model,
             base_url: "https://relay.example.com/v1".into(),
             homepage: None,
             models_url: None,

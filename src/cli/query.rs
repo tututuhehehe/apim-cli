@@ -6,6 +6,7 @@ use serde_json::json;
 use super::{Args, Ctx};
 use crate::config::KeyEntry;
 use crate::probe::{self, Health, ProbeResult};
+use crate::recipe::ProviderKind;
 
 pub(crate) async fn status(ctx: &Ctx, argv: &[String]) -> Result<()> {
     let args = Args::parse(argv)?;
@@ -40,17 +41,20 @@ pub(crate) async fn status(ctx: &Ctx, argv: &[String]) -> Result<()> {
         };
         let key = key.clone();
         let id = key.id();
+        // 非模型厂商没有探活：它的「能不能用」只能看额度脚本跑不跑得通
+        let kind = recipe.kind;
         let client = client.clone();
-        futs.push(async move { (id, probe::probe(&client, &recipe, &key).await) });
+        futs.push(async move { (id, kind, probe::probe(&client, &recipe, &key).await) });
     }
-    let results: Vec<(String, ProbeResult)> = futures::future::join_all(futs).await;
+    let results: Vec<(String, ProviderKind, ProbeResult)> = futures::future::join_all(futs).await;
 
     if args.has("json") {
         let out: Vec<_> = results
             .iter()
-            .map(|(id, r)| {
+            .map(|(id, kind, r)| {
                 json!({
                     "id": id,
+                    "kind": kind.as_str(),
                     "health": health_json(&r.health),
                     "balance": balance_json(&r.balance),
                 })
@@ -60,12 +64,21 @@ pub(crate) async fn status(ctx: &Ctx, argv: &[String]) -> Result<()> {
         return Ok(());
     }
 
-    for (id, r) in &results {
-        match &r.health {
-            Health::Live { ms } => println!("{id:<24} ● 可用 {ms}ms"),
-            Health::Down { ms, message } => println!("{id:<24} ● 失败 {ms}ms  {message}"),
-            Health::Unknown => println!("{id:<24} ● 未配置探活"),
-            Health::Checking => println!("{id:<24} … 检查中"),
+    for (id, kind, r) in &results {
+        if kind.is_model() {
+            match &r.health {
+                Health::Live { ms } => println!("{id:<24} ● 可用 {ms}ms"),
+                Health::Down { ms, message } => println!("{id:<24} ● 失败 {ms}ms  {message}"),
+                Health::Unknown => println!("{id:<24} ● 未配置探活"),
+                Health::Checking => println!("{id:<24} … 检查中"),
+            }
+        } else {
+            // 非模型厂商不探活：额度脚本跑通 = 这把 key 现在真能用
+            match &r.balance {
+                Some(b) if b.error.is_none() => println!("{id:<24} ● 可用"),
+                Some(_) => println!("{id:<24} ● 失败"),
+                None => println!("{id:<24} ● 未绑定额度脚本"),
+            }
         }
         if let Some(b) = &r.balance {
             if let Some(err) = &b.error {

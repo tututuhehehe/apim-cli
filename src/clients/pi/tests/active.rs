@@ -10,7 +10,7 @@ use std::fs;
 use super::helpers::temp_dir;
 use crate::clients::pi::{active, config};
 use crate::config::KeyEntry;
-use crate::recipe::{Auth, Recipe};
+use crate::recipe::{Auth, ProviderKind, Recipe};
 
 fn key(provider: &str, alias: &str, token: &str) -> KeyEntry {
     KeyEntry {
@@ -27,6 +27,7 @@ fn recipes(provider: &str, base_url: &str) -> HashMap<String, Recipe> {
         Recipe {
             id: provider.into(),
             name: provider.into(),
+            kind: ProviderKind::Model,
             base_url: base_url.into(),
             homepage: None,
             models_url: None,

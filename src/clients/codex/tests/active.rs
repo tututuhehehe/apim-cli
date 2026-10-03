@@ -9,7 +9,7 @@ use std::fs;
 use crate::clients::codex::active::{active_key_ids, active_provider};
 use crate::clients::codex::provider_key;
 use crate::config::KeyEntry;
-use crate::recipe::{Auth, Recipe};
+use crate::recipe::{Auth, ProviderKind, Recipe};
 
 use super::helpers::temp_dir;
 
@@ -30,6 +30,7 @@ fn recipes(provider: &str, base_url: &str) -> HashMap<String, Recipe> {
         Recipe {
             id: provider.into(),
             name: provider.into(),
+            kind: ProviderKind::Model,
             base_url: base_url.into(),
             homepage: None,
             models_url: None,

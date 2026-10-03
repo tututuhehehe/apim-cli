@@ -26,6 +26,73 @@ fn ctrl_z_routes_to_undo() {
     assert_eq!(app.keys.len(), 1, "删除的密钥要回到内存");
 }
 
+// ---- 分页（Tab）------------------------------------------------------
+
+/// Tab 切分页（不再是切焦点）；h/l 与 ←/→ 仍然切左右栏焦点。
+#[test]
+fn tab_switches_provider_pages_and_arrows_switch_focus() {
+    let (mut app, _rx, _rx_models) = test_app(&[("p", &["main"])]);
+    app.focus = Focus::Providers;
+    assert_eq!(app.tab, crate::recipe::ProviderKind::Model);
+
+    handle_key(&mut app, KeyEvent::from(KeyCode::Tab));
+    assert_eq!(app.tab, crate::recipe::ProviderKind::NonModel);
+    assert_eq!(app.focus, Focus::Providers, "Tab 不再动左右栏焦点");
+    handle_key(&mut app, KeyEvent::from(KeyCode::Tab));
+    assert_eq!(app.tab, crate::recipe::ProviderKind::Model);
+
+    // 焦点在密钥栏时 Tab 同样切分页
+    app.focus = Focus::Keys;
+    handle_key(&mut app, KeyEvent::from(KeyCode::Tab));
+    assert_eq!(app.tab, crate::recipe::ProviderKind::NonModel);
+    assert_eq!(app.focus, Focus::Keys);
+
+    handle_key(&mut app, KeyEvent::from(KeyCode::Left));
+    assert_eq!(app.focus, Focus::Providers);
+    handle_key(&mut app, KeyEvent::from(KeyCode::Char('l')));
+    assert_eq!(app.focus, Focus::Keys);
+}
+
+/// 全链路：在非模型分页按 `a` → 勾选框默认已勾上 → 填表保存 →
+/// 类型落盘、分页停在非模型页、旧的分页选中项不受影响。
+#[tokio::test]
+async fn add_non_model_provider_from_its_page_end_to_end() {
+    let (mut app, _rx, _rx_models) = test_app(&[("alpha", &["a1"])]);
+    app.config_dir = crate::app::tests::test_config_dir("tui-non-model");
+    app.focus = Focus::Providers;
+
+    handle_key(&mut app, KeyEvent::from(KeyCode::Tab));
+    handle_key(&mut app, KeyEvent::from(KeyCode::Char('a')));
+    let Modal::Form { form, .. } = &app.modal else {
+        panic!("a 应打开添加厂商表单");
+    };
+    assert!(
+        form.toggle(crate::form::PF_NON_MODEL),
+        "在非模型页添加，勾选框默认跟随分页已勾上"
+    );
+    if let Modal::Form { form, .. } = &mut app.modal {
+        form.fields[crate::form::PF_ID] = Field::text("ID", "deepl");
+        form.fields[crate::form::PF_NAME] = Field::text("名称", "DeepL 翻译");
+        form.fields[crate::form::PF_BASE] =
+            Field::text("Base URL", "https://api-free.deepl.example");
+    }
+    handle_key(&mut app, KeyEvent::from(KeyCode::Enter));
+
+    assert!(matches!(app.modal, Modal::None), "保存后弹窗关闭");
+    let recipe = &app.recipes["deepl"];
+    assert_eq!(recipe.kind, crate::recipe::ProviderKind::NonModel);
+    assert!(
+        recipe.health.is_none(),
+        "非模型不探活（探活路径默认值被忽略）"
+    );
+    assert_eq!(app.tab, crate::recipe::ProviderKind::NonModel);
+    assert_eq!(app.current_provider_id(), Some("deepl"));
+    assert_eq!(app.focus, Focus::Keys, "保存后焦点落到密钥表");
+    // 落盘可回读（YAML 里带 kind: non_model）
+    let yaml = std::fs::read_to_string(app.config_dir.join("recipes/deepl.yaml")).unwrap();
+    assert!(yaml.contains("kind: non_model"), "{yaml}");
+}
+
 /// 空历史上按 Ctrl+Z：只提示，不能 panic。
 #[test]
 fn ctrl_z_with_empty_history_is_harmless() {

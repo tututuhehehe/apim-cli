@@ -166,6 +166,119 @@ async fn provider_add_validates() {
 }
 
 #[tokio::test]
+async fn non_model_provider_kind_rules() -> Result<()> {
+    let ctx = temp_ctx("non-model");
+    let script = fake_script(&ctx, "deepl.sh", "#!/bin/sh\necho '剩余 42 万字符'\n");
+
+    // --kind 两种写法都认（non-model / non_model）
+    provider::run(
+        &ctx,
+        &argv(&[
+            "add",
+            "deepl",
+            "--name",
+            "DeepL",
+            "--base-url",
+            "https://api-free.deepl.com",
+            "--kind",
+            "non-model",
+            "--script",
+            &script,
+        ]),
+    )
+    .await?;
+    let recipes = ctx.load_recipes()?;
+    let deepl = &recipes["deepl"];
+    assert!(!deepl.is_model());
+    assert!(deepl.health.is_none(), "非模型厂商不落探活配置");
+    assert!(deepl.balance.is_some());
+
+    // 缺省 = 模型；--kind 写错直接报错（不猜）
+    provider::run(
+        &ctx,
+        &argv(&[
+            "add",
+            "relay",
+            "--name",
+            "中转",
+            "--base-url",
+            "https://r.io",
+        ]),
+    )
+    .await?;
+    assert!(ctx.load_recipes()?["relay"].is_model());
+    assert!(
+        provider::run(
+            &ctx,
+            &argv(&[
+                "add",
+                "x",
+                "--name",
+                "X",
+                "--base-url",
+                "https://x.io",
+                "--kind",
+                "service"
+            ])
+        )
+        .await
+        .is_err()
+    );
+
+    // 非模型厂商给 --health 是矛盾指令，两种路径都报错（不能默默丢掉用户意图）
+    assert!(
+        provider::run(
+            &ctx,
+            &argv(&[
+                "add",
+                "y",
+                "--name",
+                "Y",
+                "--base-url",
+                "https://y.io",
+                "--kind",
+                "non-model",
+                "--health",
+                "/usage"
+            ])
+        )
+        .await
+        .is_err()
+    );
+    assert!(
+        provider::run(&ctx, &argv(&["set", "deepl", "--health", "/usage"]))
+            .await
+            .is_err()
+    );
+    // 类型只能在创建时定
+    assert!(
+        provider::run(&ctx, &argv(&["set", "deepl", "--kind", "model"]))
+            .await
+            .is_err()
+    );
+    assert!(
+        provider::run(&ctx, &argv(&["set", "relay", "--kind", "non-model"]))
+            .await
+            .is_err()
+    );
+
+    // status：非模型厂商不探活，只看额度脚本（按脚本成败报状态）
+    keys::add(
+        &ctx,
+        &Args::parse(&argv(&["add", "deepl", "main"]))?,
+        "sk-deepl",
+    )
+    .unwrap();
+    query::status(&ctx, &argv(&["deepl"])).await?;
+    query::status(&ctx, &argv(&["deepl", "--json"])).await?;
+
+    // 脚本解绑后仍然能跑（报「未绑定额度脚本」，不发探活请求）
+    provider::run(&ctx, &argv(&["set", "deepl", "--script", "none"])).await?;
+    query::status(&ctx, &argv(&["deepl"])).await?;
+    Ok(())
+}
+
+#[tokio::test]
 async fn provider_add_set_reject_empty_name() {
     let ctx = temp_ctx("empty-name");
     // `--name --base-url x` 会被解析成 name=""，必须报错而不是落盘空名

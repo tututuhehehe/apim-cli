@@ -28,6 +28,10 @@ const BUILTIN_OPENROUTER: &str = include_str!("../../recipes/openrouter.yaml");
 pub struct Recipe {
     pub id: String,
     pub name: String,
+    /// 厂商类型。模型提供商（默认）才有模型列表 / 探活 / 导入客户端；
+    /// 非模型（翻译、搜索这类纯 API）只存密钥 + 跑额度脚本，类型创建后不可改。
+    #[serde(default, skip_serializing_if = "is_model_kind")]
+    pub kind: ProviderKind,
     pub base_url: String,
     /// 控制面板主页，TUI 选中厂商按 Enter 用默认浏览器打开。
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -41,6 +45,9 @@ pub struct Recipe {
     /// 自定义模板变量，可进 {placeholder} 替换并注入脚本 env。存敏感值时整个文件 600。
     #[serde(default, skip_serializing_if = "HashMap::is_empty")]
     pub vars: HashMap<String, String>,
+    /// 鉴权方式，只服务 HTTP 请求（探活 / 模型列表）。缺省 bearer；
+    /// 非模型厂商没有 HTTP 请求，可省略（表单生成的 YAML 仍会写上一行）。
+    #[serde(default)]
     pub auth: Auth,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub health: Option<HttpCall>,
@@ -53,6 +60,11 @@ pub struct Recipe {
 }
 
 impl Recipe {
+    /// 模型提供商才有模型列表（`m`）/ 探活 / 一键导入（`x`）。
+    pub fn is_model(&self) -> bool {
+        self.kind.is_model()
+    }
+
     pub fn normalize(&mut self) {
         while self.base_url.ends_with('/') {
             self.base_url.pop();
@@ -102,6 +114,54 @@ impl HttpCall {
 
 fn default_get() -> String {
     "GET".into()
+}
+
+/// 厂商类型：模型 / 非模型。缺省是模型，所以老 YAML 与内置 recipe 一个字都不用改。
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Deserialize, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ProviderKind {
+    #[default]
+    Model,
+    NonModel,
+}
+
+impl ProviderKind {
+    /// 两个分页的顺序，也是 App 里 `tabs` 数组的下标顺序。
+    pub const ALL: [ProviderKind; 2] = [ProviderKind::Model, ProviderKind::NonModel];
+    pub fn is_model(self) -> bool {
+        matches!(self, ProviderKind::Model)
+    }
+
+    /// 分页标签、表单勾选项、CLI 输出共用的短名。
+    pub fn label(self) -> &'static str {
+        match self {
+            ProviderKind::Model => "模型",
+            ProviderKind::NonModel => "非模型",
+        }
+    }
+
+    /// YAML / CLI 里的值。
+    pub fn as_str(self) -> &'static str {
+        match self {
+            ProviderKind::Model => "model",
+            ProviderKind::NonModel => "non_model",
+        }
+    }
+
+    /// CLI `--kind` 的解析：`non-model` / `non_model` 都认，别让用户猜连字符；
+    /// 写错了（例如 `service`）返回 None，由调用方报错而不是猜。
+    pub fn parse(raw: &str) -> Option<ProviderKind> {
+        match raw {
+            "model" => Some(ProviderKind::Model),
+            "non-model" | "non_model" => Some(ProviderKind::NonModel),
+            _ => None,
+        }
+    }
+}
+
+/// 序列化时省掉默认值（模型厂商的 YAML 不出现 `kind`）。serde 的谓词收引用。
+fn is_model_kind(kind: &ProviderKind) -> bool {
+    kind.is_model()
 }
 
 /// 厂商标识的合法字符集：小写字母、数字、`-`。表单/CLI/复制/加载都用这一处判断，
@@ -240,6 +300,47 @@ mod tests {
             ("a".to_string(), "{b}".to_string()),
             ("b".to_string(), "x".to_string()),
         ])
+    }
+
+    #[test]
+    fn kind_defaults_to_model_and_non_model_round_trips() {
+        // 老 YAML（不写 kind）与内置 recipe 一个字都不用改
+        let plain: Recipe = serde_yaml::from_str(
+            "id: p\nname: P\nbase_url: 'https://p.example'\nauth: {kind: bearer}\n",
+        )
+        .unwrap();
+        assert_eq!(plain.kind, ProviderKind::Model);
+
+        // 非模型：kind 落盘，auth 可以省（它只服务 HTTP 请求，非模型没有）
+        let service: Recipe = serde_yaml::from_str(
+            "id: deepl\nname: DeepL\nkind: non_model\nbase_url: 'https://api.deepl.example'\n",
+        )
+        .unwrap();
+        assert_eq!(service.kind, ProviderKind::NonModel);
+        assert!(matches!(service.auth.kind, AuthKind::Bearer), "缺省 bearer");
+        let yaml = serde_yaml::to_string(&service).unwrap();
+        assert!(yaml.contains("kind: non_model"), "{yaml}");
+
+        // 模型厂商不写 kind（默认值不入盘）
+        let yaml = serde_yaml::to_string(&plain).unwrap();
+        assert!(
+            !yaml.lines().any(|line| line.starts_with("kind:")),
+            "{yaml}"
+        );
+    }
+
+    #[test]
+    fn kind_flag_parsing_accepts_hyphen_and_underscore() {
+        assert_eq!(ProviderKind::parse("model"), Some(ProviderKind::Model));
+        assert_eq!(
+            ProviderKind::parse("non-model"),
+            Some(ProviderKind::NonModel)
+        );
+        assert_eq!(
+            ProviderKind::parse("non_model"),
+            Some(ProviderKind::NonModel)
+        );
+        assert_eq!(ProviderKind::parse("service"), None);
     }
 
     #[test]

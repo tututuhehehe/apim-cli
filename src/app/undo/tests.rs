@@ -1,7 +1,7 @@
 use super::*;
 use crate::app::{Focus, Modal, tests::test_app};
 use crate::form::{Field, Form};
-use crate::recipe::ScriptSpec;
+use crate::recipe::{ProviderKind, ScriptSpec};
 use std::collections::HashMap;
 use std::path::Path;
 
@@ -21,13 +21,13 @@ fn key_form(alias: &str, token: &str) -> Form {
 }
 
 fn provider_form(id: &str, name: &str, base: &str, script: &str) -> Form {
-    let mut form = crate::form::provider_add();
+    let mut form = crate::form::provider_add(ProviderKind::Model);
     form.fields[0] = Field::text("ID", id);
     form.fields[1] = Field::text("名称", name);
     form.fields[2] = Field::text("Base URL", base);
     form.fields[3] = Field::text("主页 URL", "");
-    form.fields[4] = Field::text("探活路径", "");
-    form.fields[5] = Field::text("脚本路径", script);
+    form.fields[5] = Field::text("探活路径", "");
+    form.fields[6] = Field::text("脚本路径", script);
     form
 }
 
@@ -103,7 +103,7 @@ fn undo_provider_add_removes_user_yaml() {
     app.undo();
     assert!(!yaml.exists(), "用户 YAML 要删掉");
     assert!(!app.recipes.contains_key("relay"));
-    assert!(!app.provider_ids.contains(&"relay".to_string()));
+    assert!(!app.provider_ids().contains(&"relay".to_string()));
 }
 
 #[test]
@@ -168,7 +168,7 @@ fn undo_provider_copy_removes_yaml_and_script_copy() {
         timeout_secs: None,
     });
     app.recipes.insert("p".into(), recipe);
-    app.selected_provider = 0;
+    app.tab_view_mut().selected = 0;
 
     app.duplicate_selected_provider();
     let new_yaml = app.config_dir.join("recipes/p-copy.yaml");
@@ -209,6 +209,7 @@ fn labels_read_naturally() {
     let deleted = Recipe {
         id: "relay".into(),
         name: "中转".into(),
+        kind: ProviderKind::Model,
         base_url: "https://r".into(),
         homepage: None,
         models_url: None,
@@ -367,7 +368,7 @@ fn undo_walks_back_copy_then_edit_in_order() {
     assert!(!copied_yaml.exists(), "复制出的 YAML 要删掉");
     assert!(!app.recipes.contains_key("p-copy"));
     assert!(app.undo_stack.is_empty());
-    assert!(!app.provider_ids.contains(&"p-copy".to_string()));
+    assert!(!app.provider_ids().contains(&"p-copy".to_string()));
 }
 
 /// 外部已把文件删了：撤销要幂等成功（不能报错卡住）。
