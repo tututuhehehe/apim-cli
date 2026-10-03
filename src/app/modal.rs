@@ -132,8 +132,7 @@ impl App {
         };
         let strip = |url: &str| url.strip_prefix("{base_url}").unwrap_or(url).to_string();
         let health_path = recipe
-            .health
-            .as_ref()
+            .health_call()
             .map(|h| strip(&h.url))
             .unwrap_or_default();
         self.modal = Modal::Form {

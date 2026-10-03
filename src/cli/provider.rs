@@ -6,6 +6,7 @@ use anyhow::{Result, bail};
 use serde_json::json;
 
 use super::{Args, Ctx};
+use crate::config::KeyEntry;
 use crate::recipe::{HttpCall, ProviderKind, Recipe, ScriptSpec};
 
 pub(crate) async fn run(ctx: &Ctx, argv: &[String]) -> Result<()> {
@@ -29,20 +30,7 @@ fn ls(ctx: &Ctx, args: &Args) -> Result<()> {
     if args.has("json") {
         let out: Vec<_> = ids
             .iter()
-            .map(|id| {
-                let r = &recipes[id];
-                json!({
-                    "id": r.id,
-                    "name": r.name,
-                    "kind": r.kind.as_str(),
-                    "base_url": r.base_url,
-                    "homepage": r.homepage,
-                    "health": r.health.as_ref().map(|h| h.url.clone()),
-                    "balance": balance_json(r.balance.as_ref()),
-                    "origin": r.origin.as_ref().map(|p| p.display().to_string()),
-                    "keys": keys.iter().filter(|k| &k.provider == id).map(|k| k.id()).collect::<Vec<_>>(),
-                })
-            })
+            .map(|id| provider_json(&recipes[id], &keys))
             .collect();
         println!("{}", serde_json::to_string_pretty(&out)?);
         return Ok(());
@@ -69,6 +57,22 @@ fn ls(ctx: &Ctx, args: &Args) -> Result<()> {
         );
     }
     Ok(())
+}
+
+/// 单个厂商的 JSON（`provider ls --json` 每项）。抽成函数是为了能直接单测：
+/// 非模型的 `health` 必须是 null —— 与探活/UI 同一口径（见 `Recipe::health_call`）。
+pub(crate) fn provider_json(r: &Recipe, keys: &[KeyEntry]) -> serde_json::Value {
+    json!({
+        "id": r.id,
+        "name": r.name,
+        "kind": r.kind.as_str(),
+        "base_url": r.base_url,
+        "homepage": r.homepage,
+        "health": r.health_call().map(|h| h.url.clone()),
+        "balance": balance_json(r.balance.as_ref()),
+        "origin": r.origin.as_ref().map(|p| p.display().to_string()),
+        "keys": keys.iter().filter(|k| k.provider == r.id).map(|k| k.id()).collect::<Vec<_>>(),
+    })
 }
 
 fn balance_json(balance: Option<&ScriptSpec>) -> serde_json::Value {

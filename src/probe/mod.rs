@@ -48,7 +48,8 @@ pub fn client() -> Result<Client> {
 
 pub async fn probe(client: &Client, recipe: &Recipe, key: &KeyEntry) -> ProbeResult {
     let health_fut = async {
-        match &recipe.health {
+        // 非模型厂商没有 HTTP 探活：手写 YAML 里留着 health 也不发请求（口径见 health_call）
+        match recipe.health_call() {
             Some(call) => match hit_health(client, recipe, call, &key.token).await {
                 Ok((status, ms)) if status.is_success() => Health::Live { ms },
                 Ok((status, ms)) => Health::Down {
@@ -243,8 +244,40 @@ fn compact_error(err: &anyhow::Error) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::recipe::{ProviderKind, Recipe};
+    use crate::recipe::{HttpCall, ProviderKind, Recipe};
     use std::collections::HashMap;
+
+    /// 非模型厂商一个探活请求都不发，哪怕它的 YAML 里手写着 `health:`
+    /// （`kind` 改成 non_model 是「换类型」的现实做法）。
+    /// 对照组很重要：同一个 health 放到模型厂商上真的会发请求（拿到失败也算发了），
+    /// 否则上面那条断言抓不到回归。
+    #[tokio::test]
+    async fn non_model_provider_is_never_probed() {
+        let client = client().unwrap();
+        let key = KeyEntry {
+            provider: "p".into(),
+            alias: "main".into(),
+            group: None,
+            token: "sk-test-placeholder".into(),
+        };
+        // 127.0.0.1:1 必然连接被拒：真发了请求就会得到 Down，没发就是 Unknown
+        let mut recipe = candidates_recipe(None, Some("http://127.0.0.1:1/models"));
+        recipe.kind = ProviderKind::NonModel;
+        let result = probe(&client, &recipe, &key).await;
+        assert!(
+            matches!(result.health, Health::Unknown),
+            "非模型厂商不该发探活请求，却得到 {:?}",
+            result.health
+        );
+
+        recipe.kind = ProviderKind::Model;
+        let result = probe(&client, &recipe, &key).await;
+        assert!(
+            matches!(result.health, Health::Down { .. }),
+            "模型厂商应当真去探，却得到 {:?}",
+            result.health
+        );
+    }
 
     fn candidates_recipe(models_url: Option<&str>, health_url: Option<&str>) -> Recipe {
         Recipe {

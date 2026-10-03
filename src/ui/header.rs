@@ -45,14 +45,14 @@ pub(crate) fn draw_footer(frame: &mut Frame, app: &App, area: Rect) {
     let keys = match (app.focus, app.tab.is_model()) {
         // Tab 切分页（模型/非模型），h/l 与 ←/→ 切左右栏焦点
         (Focus::Providers, _) => {
-            " j/k 移动  Tab 分页  hl 切换  ⏎ 主页  c 复制URL  y 复制厂商  i 详情  a 添加  e 编辑  d 删除  r 刷新  ^Z 撤销  q 退出 "
+            " j/k 移动  Tab 分页  hl 切换  ⏎ 主页  c URL  y 复制  i 详情  a 添加  e 编辑  d 删除  r 刷新  ^Z 撤销  q 退出 "
         }
         (Focus::Keys, true) => {
-            " j/k 移动  Tab 分页  hl 切换  m 模型  x 导入  c 复制密钥  i 详情  a 添加  e 编辑  d 删除  r 刷新  ^Z 撤销  q 退出 "
+            " j/k 移动  Tab 分页  hl 切换  m 模型  x 导入  c 密钥  i 详情  a 添加  e 编辑  d 删除  r 刷新  ^Z 撤销  q 退出 "
         }
         // 非模型厂商没有模型列表与导入（m/x 也不在提示里）
         (Focus::Keys, false) => {
-            " j/k 移动  Tab 分页  hl 切换  c 复制密钥  i 详情  a 添加  e 编辑  d 删除  r 刷新  ^Z 撤销  q 退出 "
+            " j/k 移动  Tab 分页  hl 切换  c 密钥  i 详情  a 添加  e 编辑  d 删除  r 刷新  ^Z 撤销  q 退出 "
         }
     };
     let mut spans = Vec::new();

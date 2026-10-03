@@ -65,6 +65,19 @@ impl Recipe {
         self.kind.is_model()
     }
 
+    /// 真正会用的探活配置：非模型厂商没有 HTTP 探活。
+    ///
+    /// 手写 YAML 完全可以把 `kind` 改成 `non_model` 而留着原来的 `health:`（UI/CLI 都不让改类型，
+    /// 手改文件是「换类型」的自然做法），那时这一行就不该再拿密钥去发请求。
+    /// 所有要探测/要展示探活的地方都从这取，不要直接读 `health` 字段。
+    pub fn health_call(&self) -> Option<&HttpCall> {
+        if self.is_model() {
+            self.health.as_ref()
+        } else {
+            None
+        }
+    }
+
     pub fn normalize(&mut self) {
         while self.base_url.ends_with('/') {
             self.base_url.pop();
@@ -341,6 +354,21 @@ mod tests {
             Some(ProviderKind::NonModel)
         );
         assert_eq!(ProviderKind::parse("service"), None);
+    }
+
+    #[test]
+    fn health_call_is_ignored_for_non_model() {
+        // 手写 YAML 是「换类型」的自然做法（UI/CLI 都不让改）：`kind: non_model`
+        // 之后留着原来的 health，就是不该再发请求
+        let mut recipe: Recipe = serde_yaml::from_str(
+            "id: p\nname: P\nkind: non_model\nbase_url: 'https://p.example'\nhealth: {url: '{base_url}/models'}\n",
+        )
+        .unwrap();
+        assert!(recipe.health.is_some(), "YAML 里的字段照旧保留");
+        assert!(recipe.health_call().is_none(), "但不生效");
+
+        recipe.kind = ProviderKind::Model;
+        assert!(recipe.health_call().is_some(), "模型厂商照旧探活");
     }
 
     #[test]

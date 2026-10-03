@@ -278,6 +278,45 @@ async fn non_model_provider_kind_rules() -> Result<()> {
     Ok(())
 }
 
+/// 手写 YAML 把类型改成 `non_model` 但留着原来的 `health:`（UI/CLI 都不让改类型，
+/// 手改文件就是现实中的「换类型」）：apim 不该再拿密钥去发探活请求，
+/// `provider ls --json` 也不该报出探活（机器接口不能说谎）。
+#[tokio::test]
+async fn hand_written_non_model_recipe_ignores_its_health_block() -> Result<()> {
+    let ctx = temp_ctx("non-model-hygiene");
+    fs::write(
+        ctx.recipes_dir.join("legacy.yaml"),
+        "id: legacy\nname: 旧中转\nkind: non_model\nbase_url: 'http://127.0.0.1:1'\nhealth: {url: '{base_url}/models'}\n",
+    )
+    .unwrap();
+    let recipes = ctx.load_recipes()?;
+    let legacy = &recipes["legacy"];
+    assert!(legacy.health.is_some(), "YAML 里的字段原样保留");
+    assert!(legacy.health_call().is_none(), "但不生效");
+
+    // JSON：非模型的 health 是 null，模型厂商照旧给值
+    let json = provider::provider_json(legacy, &[]);
+    assert_eq!(json["kind"], "non_model");
+    assert!(json["health"].is_null(), "{json}");
+    let mut as_model = legacy.clone();
+    as_model.kind = crate::recipe::ProviderKind::Model;
+    assert_eq!(
+        provider::provider_json(&as_model, &[])["health"],
+        "{base_url}/models"
+    );
+
+    // 真实跑一遍：status 对非模型只看额度脚本，不发探活（发的话这里会等超时/报错）
+    keys::add(
+        &ctx,
+        &Args::parse(&argv(&["add", "legacy", "main"]))?,
+        "sk-legacy",
+    )
+    .unwrap();
+    query::status(&ctx, &argv(&["legacy"])).await?;
+    query::status(&ctx, &argv(&["legacy", "--json"])).await?;
+    Ok(())
+}
+
 #[tokio::test]
 async fn provider_add_set_reject_empty_name() {
     let ctx = temp_ctx("empty-name");

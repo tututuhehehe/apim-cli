@@ -87,8 +87,7 @@ pub(crate) fn provider_rows(
         rows.push(InspectRow::new(
             "探活",
             recipe
-                .health
-                .as_ref()
+                .health_call()
                 .map(|h| {
                     let method = if h.method.is_empty() {
                         "GET"

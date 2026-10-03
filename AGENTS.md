@@ -166,7 +166,7 @@ recipes/              内置 recipe ×4（deepseek/openai/moonshot/openrouter，
     - **分页状态在 App 里**：`tab: ProviderKind` + `tabs: [TabView; 2]`（每个分页自己的 `provider_ids` / `selected` / `filter`，下标 = `ProviderKind::ALL` 顺序）；取值一律走 `provider_ids()` / `provider_ids_filtered()` / `selected_provider()` / `provider_filter()`，**不要**再引入第三个「全局选中项」。`rebuild_provider_list` 两个分页各建一份（有密钥的在前，其余按 id 排序）；保存 / 复制厂商后必须 `focus_provider(id)`（分页跟着厂商类型跳，否则新建的厂商落在看不见的那一页）。
     - **快捷键**：`Tab` = 切分页（两栏焦点都生效），`h`/`l` 与 ←/→ = 切左右栏焦点。改按键提示时三个分支都要过一遍（厂商焦点 / 模型页密钥焦点 / 非模型页密钥焦点，非模型页不出现 `m`/`x`）。
     - **状态口径**：非模型厂商没有探活，密钥表状态列与左栏厂商摘要都用**额度脚本的成败**（`ui::script_status`，一处写、两个地方用；CLI `status` 同一口径）。
-    - `health` / `models_url` 对非模型照旧保留在 YAML 里（加载期不拒收，只是没人用）；`auth` 已可省略（`#[serde(default)]`）——非模型厂商没有 HTTP 请求。
+    - `health` / `models_url` 对非模型照旧保留在 YAML 里（加载期不拒收），但**不生效**：探活/模型列表的消费点一律走 `Recipe::health_call()`（非模型恒为 None）与 `is_model()` 门，手改 `kind:` 也不会拿旧 `health` 去发请求；`auth` 可省略（`#[serde(default)]`）——非模型厂商没有 HTTP 请求。
 
 ## 验证命令速查
 
@@ -175,7 +175,7 @@ cargo run                              # 进 TUI（跑当前代码）
 cargo run -- --snapshot                # 真实接口拉数据渲染成文本（不进 TUI）
 APIM_SNAPSHOT_TAB=non-model cargo run -- --snapshot          # 非模型分页的主界面快照
 APIM_SNAPSHOT_KIND=non-model cargo run -- --snapshot-provider-form   # 添加表单：勾上「非模型」的样子
-APIM_SNAPSHOT_PROVIDER=<id> cargo run -- --snapshot-provider-form   # 编辑表单（类型只读；非模型那行探活也是只读）
+APIM_SNAPSHOT_PROVIDER=<id> cargo run -- --snapshot-provider-form   # 编辑表单（ID 与类型只读；非模型没有探活那一行）
 cargo run -- --snapshot-inspector      # 详情弹窗快照：假状态不拉接口；=provider 出厂商详情
 cargo run -- --snapshot-import         # 一键导入面板快照：第一步选客户端
 cargo run -- --snapshot-import-models  # 一键导入面板快照：第二步勾选模型
