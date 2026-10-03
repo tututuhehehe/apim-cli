@@ -3,6 +3,34 @@
 本项目遵循 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.1.0/) 与
 [语义化版本](https://semver.org/lang/zh-CN/)。
 
+## [0.1.6] - 2026-10-03
+
+### 新增
+
+- **非模型厂商（翻译 / 搜索这类 API 也能进 apim 了）**：添加厂商时勾上「非模型」，或者在 CLI 用
+  `apim provider add --kind non-model`。非模型厂商没有模型列表（`m`）、不能一键导入客户端（`x`）、
+  也不探活；密钥、别名 / 分组、主页 `⏎`、`c` 复制、`y` 整份复制、`^Z`、额度脚本、`provider ls`、
+  `apim status` 全都一样。类型写进 recipe（`kind: model|non_model`，缺省模型），
+  **只能在创建时定**：编辑表单里它只读、`provider set --kind` 被拒绝，要换类型就 `provider copy` 或删了重建。
+  这类厂商的接入点是**额度脚本**（env 注入 `APIM_TOKEN` / `APIM_BASE_URL` / `APIM_ALIAS` / `APIM_VAR_*`，
+  stdout 逐行上面板）——调哪个端点、key 怎么传，全在脚本里
+- **左栏分页：`Tab` 切「模型 / 非模型」两页**：两页各自记住选中厂商与过滤词，切页不串味；
+  `Tab` 不再是「切左右栏焦点」（那是 `h`/`l` 与 `←`/`→` 的活）。非模型厂商的
+  「状态」口径是额度脚本的成败（密钥表、左栏摘要、`apim status` 共用一处）
+
+### 变更
+
+- **非模型下不出现只对模型 API 有意义的行**：添加表单勾上「非模型」时「探活路径」整行消失
+  （不是灰掉：表单引擎新增「勾选框隐藏某一行」——不渲染、不占弹窗高度、Tab 跳过、也写不进去；
+  取消勾选那一行回来、填过的值不丢），编辑表单与 `i` 详情弹窗里也没有这一行。
+  详情弹窗同时去掉「类型」那种背景行，非模型也不再列「鉴权」（与探活一样只服务 HTTP 请求）
+- `auth` 在 recipe 里可以省略（它只服务 HTTP 请求，非模型一个请求也不发）；**手改 `kind: non_model` 后残留的 `health:` 也不会再发探活请求**
+  （UI/CLI 都不让改类型，手改文件就是现实中的「换类型」，所以这条必须真的成立）：
+  探活与模型列表的消费点一律走 `Recipe::health_call()`，`provider ls --json` / `apim status --json`
+  对非模型报 `null`；`provider ls` 的人类输出与 `--json` 带类型，`apim status --json` 也带 `kind`
+- AI 代写额度脚本的提示词（`docs/quota-script-prompt.md`）新增 §1.5：非模型厂商怎么写 recipe、
+  怎么注册（不写 `health`、不传 `--health`），以及「脚本的成败就是这类厂商的状态」
+
 ## [0.1.5] - 2026-10-02
 
 ### 修复
@@ -142,7 +170,8 @@
 - `apim --version` 版本输出（供安装脚本与更新检测使用）
 - MIT 开源协议
 
-[Unreleased]: https://github.com/tututuhehehe/apim-cli/compare/v0.1.5...HEAD
+[Unreleased]: https://github.com/tututuhehehe/apim-cli/compare/v0.1.6...HEAD
+[0.1.6]: https://github.com/tututuhehehe/apim-cli/releases/tag/v0.1.6
 [0.1.5]: https://github.com/tututuhehehe/apim-cli/releases/tag/v0.1.5
 [0.1.4]: https://github.com/tututuhehehe/apim-cli/releases/tag/v0.1.4
 [0.1.3]: https://github.com/tututuhehehe/apim-cli/releases/tag/v0.1.3
