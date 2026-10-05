@@ -17,10 +17,19 @@ use tokio::{
 };
 
 const AUTH_URL: &str = "https://auth.openai.com/api/accounts/authorize";
-const TOKEN_URL: &str = "https://auth.openai.com/api/accounts/oauth/token";
+/// Two endpoints are in use across OpenAI's own docs and the clients built on this flow:
+/// the documented open-source path (`/api/accounts/oauth/token`) and the one the Codex CLI
+/// lineage uses (`/oauth/token`, see Pi and cc-switch). Both exist, so try in order.
+const TOKEN_URLS: [&str; 2] = [
+    "https://auth.openai.com/api/accounts/oauth/token",
+    "https://auth.openai.com/oauth/token",
+];
 const JWKS_URL: &str = "https://auth.openai.com/.well-known/jwks.json";
 const USAGE_URL: &str = "https://chatgpt.com/backend-api/wham/usage";
 const CLIENT_BOOTSTRAP: &str = "dynamic_agent_client";
+/// Codex CLI 系客户端的公开 client id（Pi 与 cc-switch 都用它），仅 `APIM_OAUTH_CLIENT=codex` 档位使用。
+const CODEX_CLIENT_ID: &str = "app_EMoamEEZ73f0CkXaXp7hrann";
+const CODEX_ORIGINATOR: &str = "codex_cli_rs";
 const REQUIRED_SCOPE: &str = "chatgpt.tokens.use.direct";
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -40,6 +49,44 @@ pub struct Credential {
 pub struct Usage {
     pub lines: Vec<String>,
 }
+/// 浏览器流程用哪套客户端注册。
+///
+/// - `apim`（缺省）：OpenAI 文档里的开源动态注册，首次登录由 OpenAI 签发 `oaiapp_…`。
+/// - `codex`（`APIM_OAUTH_CLIENT=codex`）：复刻 Codex CLI 系的公开 client id 与其参数，
+///   与 Pi / cc-switch 完全一致（`localhost` 回调、不发 nonce、不申请 resource 与
+///   `chatgpt.tokens.use.direct`）。动态注册在浏览器里被拒时用它兜底。
+struct ClientProfile {
+    name: &'static str,
+    /// `Some` = 固定 client id（不需要也不采纳动态注册）
+    client_id: Option<&'static str>,
+    redirect: &'static str,
+    scope: &'static str,
+    codex_family: bool,
+}
+
+fn profile() -> ClientProfile {
+    profile_for(std::env::var("APIM_OAUTH_CLIENT").ok().as_deref())
+}
+
+fn profile_for(choice: Option<&str>) -> ClientProfile {
+    match choice {
+        Some("codex") => ClientProfile {
+            name: "codex",
+            client_id: Some(CODEX_CLIENT_ID),
+            redirect: "http://localhost:1455/auth/callback",
+            scope: "openid profile email offline_access",
+            codex_family: true,
+        },
+        _ => ClientProfile {
+            name: "apim",
+            client_id: None,
+            redirect: "http://127.0.0.1:1455/auth/callback",
+            scope: "openid profile email offline_access resource.invoke chatgpt.tokens.use.direct",
+            codex_family: false,
+        },
+    }
+}
+
 fn path(dir: &Path) -> PathBuf {
     dir.join("openai-oauth.json")
 }
@@ -101,15 +148,6 @@ fn scopes(raw: &str) -> Vec<String> {
 }
 
 #[derive(Deserialize)]
-struct TokenResponse {
-    access_token: String,
-    refresh_token: String,
-    id_token: String,
-    expires_in: u64,
-    #[serde(default)]
-    scope: String,
-}
-#[derive(Deserialize)]
 struct IdClaims {
     iss: String,
     aud: serde_json::Value,
@@ -120,6 +158,8 @@ struct IdClaims {
 }
 #[derive(Deserialize)]
 struct AccessClaims {
+    #[serde(default)]
+    sub: Option<String>,
     #[serde(rename = "https://api.openai.com/auth")]
     auth: Option<AuthClaim>,
 }
@@ -212,6 +252,15 @@ async fn callback(listener: TcpListener) -> Result<(String, String, Option<Strin
 
 /// OpenAI documented open-source OAuth flow (dynamic registration on first login).
 pub async fn login(dir: &Path) -> Result<()> {
+    let mut log = AttemptLog::new();
+    let outcome = login_inner(dir, &mut log).await;
+    log.save(dir);
+    // 失败时把日志路径带上：TUI 只能看到一行 toast，细节都在日志里
+    outcome.with_context(|| format!("登录详情见 {}", log_path(dir).display()))
+}
+
+async fn login_inner(dir: &Path, log: &mut AttemptLog) -> Result<()> {
+    let p = profile();
     let previous = load(dir)?;
     let host = match &previous {
         Some(c) => c.host_id.clone(),
@@ -225,141 +274,272 @@ pub async fn login(dir: &Path) -> Result<()> {
     let listener = TcpListener::bind(("127.0.0.1", 1455))
         .await
         .context("OAuth 回调端口 1455 被占用")?;
-    let redirect = "http://127.0.0.1:1455/auth/callback";
+    let redirect = p.redirect;
     let state = random_b64(24);
     let nonce = random_b64(24);
     let verifier = random_b64(48);
     let challenge = URL_SAFE_NO_PAD.encode(Sha256::digest(verifier.as_bytes()));
     let mut url = url::Url::parse(AUTH_URL)?;
-    let requested_id = previous
-        .as_ref()
-        .map(|c| c.client_id.as_str())
-        .unwrap_or(CLIENT_BOOTSTRAP);
-    for (k, v) in [
+    let registered_id = p
+        .client_id
+        .map(str::to_owned)
+        .or_else(|| previous.as_ref().map(|c| c.client_id.clone()));
+    let requested_id = registered_id.as_deref().unwrap_or(CLIENT_BOOTSTRAP);
+    let mut params: Vec<(&str, &str)> = vec![
         ("client_id", requested_id),
-        ("ext_agent_host_id", &host),
         ("response_type", "code"),
         ("redirect_uri", redirect),
-        (
-            "scope",
-            "openid profile email offline_access resource.invoke chatgpt.tokens.use.direct",
-        ),
-        ("resource", "https://api.openai.com/v1"),
-        ("state", &state),
-        ("nonce", &nonce),
+        ("scope", p.scope),
+        ("state", state.as_str()),
         ("code_challenge_method", "S256"),
-        ("code_challenge", &challenge),
-    ] {
+        ("code_challenge", challenge.as_str()),
+    ];
+    if p.codex_family {
+        // Pi 与 cc-switch 都按 Codex CLI 的形状发这几个参数（Pi 不发 nonce）。
+        params.extend([
+            ("id_token_add_organizations", "true"),
+            ("codex_cli_simplified_flow", "true"),
+            ("originator", CODEX_ORIGINATOR),
+        ]);
+    } else {
+        params.extend([
+            ("ext_agent_host_id", host.as_str()),
+            ("resource", "https://api.openai.com/v1"),
+            ("nonce", nonce.as_str()),
+        ]);
+    }
+    for (k, v) in params {
         url.query_pairs_mut().append_pair(k, v);
     }
     if let Some(old) = &previous {
-        url.query_pairs_mut()
-            .append_pair("id_token_hint", &old.id_token);
+        if !old.id_token.is_empty() {
+            url.query_pairs_mut()
+                .append_pair("id_token_hint", &old.id_token);
+        }
         if let Some(email) = &old.email {
             url.query_pairs_mut().append_pair("login_hint", email);
         }
-    } else {
+    } else if !p.codex_family {
         url.query_pairs_mut().append_pair("agent_name_hint", "apim");
     }
+    log.step(format!(
+        "authorize: profile={} client_id={requested_id} redirect={redirect} 新注册={}",
+        p.name,
+        registered_id.is_none()
+    ));
     crate::browser::open(url.as_str()).context("打开 OpenAI OAuth 登录页")?;
     eprintln!("已打开浏览器，请完成 OpenAI/Codex 授权…");
     let (code, got_state, returned_id, callback_scope) =
         tokio::time::timeout(std::time::Duration::from_secs(600), callback(listener))
             .await
             .context("OAuth 登录超时")??;
+    log.step(format!(
+        "callback: 收到 code（{} 字符）, state 匹配={}, 回调 client_id={}, scope={}",
+        code.len(),
+        got_state == state,
+        returned_id.as_deref().unwrap_or("（无）"),
+        if callback_scope.is_empty() {
+            "（无）".into()
+        } else {
+            callback_scope.clone()
+        }
+    ));
     if got_state != state {
         bail!("OAuth state 不匹配，拒绝此回调");
     }
-    let client_id = match (&previous, returned_id) {
-        (None, Some(id)) => id,
-        (None, None) => bail!("动态注册回调缺少 OpenAI 签发的 client_id"),
-        (Some(old), Some(id)) if id != old.client_id => bail!("回调 client_id 与已保存注册不匹配"),
-        (Some(old), _) => old.client_id.clone(),
+    let client_id = if let Some(fixed) = p.client_id {
+        // 固定 client id 的档位不需要（也不该）采纳回调带回的 id
+        match returned_id.as_deref() {
+            Some(id) if id != fixed => bail!("回调 client_id 与所用固定客户端不匹配"),
+            _ => fixed.to_owned(),
+        }
+    } else {
+        match (&previous, returned_id) {
+            (None, Some(id)) => id,
+            (None, None) => bail!(
+                "动态注册回调没有带回 OpenAI 签发的 client_id（已记到 {}）",
+                log_path(dir).display()
+            ),
+            (Some(old), Some(id)) if id != old.client_id => {
+                bail!("回调 client_id 与已保存注册不匹配")
+            }
+            (Some(old), _) => old.client_id.clone(),
+        }
     };
     if client_id.is_empty() || client_id == CLIENT_BOOTSTRAP {
-        bail!("OpenAI 没有返回可持久化的动态 client_id");
+        bail!("OpenAI 没有返回可持久化的 client_id");
     }
     let http = client()?;
-    let token: TokenResponse = http
-        .post(TOKEN_URL)
-        .form(&[
-            ("grant_type", "authorization_code"),
-            ("client_id", &client_id),
-            ("code", &code),
-            ("code_verifier", &verifier),
-            ("redirect_uri", redirect),
-            ("resource", "https://api.openai.com/v1"),
-        ])
-        .send()
-        .await?
-        .error_for_status()?
-        .json()
-        .await
-        .context("解析 OpenAI token 响应")?;
+    let mut form: Vec<(&str, &str)> = vec![
+        ("grant_type", "authorization_code"),
+        ("client_id", &client_id),
+        ("code", &code),
+        ("code_verifier", &verifier),
+        ("redirect_uri", redirect),
+    ];
+    if !p.codex_family {
+        form.push(("resource", "https://api.openai.com/v1"));
+    }
+    let token: TokenResponse = token_grant(&http, &form, "code 换 token", log).await?;
     let granted = if token.scope.is_empty() {
         callback_scope
     } else {
         token.scope.clone()
     };
     let scope_list = scopes(&granted);
-    if !scope_list.iter().any(|s| s == REQUIRED_SCOPE) {
+    // Codex CLI 档位不申请 chatgpt.tokens.use.direct，但它的 token 能读用量接口
+    // （cc-switch 与 Pi 都这么做，本机验证过），所以只对动态注册档位强校验。
+    if !p.codex_family && !scope_list.iter().any(|s| s == REQUIRED_SCOPE) {
         bail!("未获 Codex 用量权限，请在浏览器授权时同意该权限后重试");
     }
-    let claims = validate_id_token(&http, &token.id_token, &client_id, &nonce).await?;
-    let access: AccessClaims = decode_unverified(&token.access_token)?;
-    let account = access
-        .auth
-        .and_then(|a| a.chatgpt_account_id)
-        .context("access token 缺少 ChatGPT account id")?;
+    let session = Session::from(token);
+    let claims = session
+        .identity(&http, &client_id, &nonce, p.codex_family, log)
+        .await;
     let cred = Credential {
         client_id,
         host_id: host,
-        subject: claims.sub,
+        subject: claims.subject,
         email: claims.email,
-        id_token: token.id_token,
-        access_token: token.access_token,
-        refresh_token: token.refresh_token,
-        expires_at: now() + token.expires_in,
+        id_token: session.id_token.unwrap_or_default(),
+        access_token: session.access_token,
+        refresh_token: session.refresh_token.unwrap_or_default(),
+        expires_at: now() + session.expires_in,
         scopes: scope_list,
-        account_id: account,
+        account_id: claims.account_id,
     };
     save(dir, &cred)?;
-    println!("OpenAI Codex OAuth 已保存到 {}", path(dir).display());
+    println!(
+        "OpenAI Codex OAuth 已保存到 {}（诊断日志 {}）",
+        path(dir).display(),
+        log_path(dir).display()
+    );
     Ok(())
+}
+
+/// 一次 token 端点调用的结果。
+///
+/// `id_token` / `refresh_token` 在两种合法响应里都可能缺失（身份类客户端不发
+/// refresh token，账号类客户端不发 id token），所以都按可选处理；真正必需的
+/// 只有 `access_token` 与 `expires_in`。
+#[derive(Deserialize)]
+struct TokenResponse {
+    access_token: String,
+    expires_in: u64,
+    #[serde(default)]
+    refresh_token: Option<String>,
+    #[serde(default)]
+    id_token: Option<String>,
+    #[serde(default)]
+    scope: String,
+}
+
+struct Session {
+    access_token: String,
+    refresh_token: Option<String>,
+    id_token: Option<String>,
+    expires_in: u64,
+}
+
+impl Session {
+    fn from(token: TokenResponse) -> Self {
+        Self {
+            access_token: token.access_token,
+            refresh_token: token.refresh_token.filter(|s| !s.is_empty()),
+            id_token: token.id_token.filter(|s| !s.is_empty()),
+            expires_in: token.expires_in,
+        }
+    }
+
+    /// 尽力而为地校验 ID token（注册路径的文档要求，Codex CLI 系客户端则完全不校验），
+    /// 失败只记日志、不中断：access token 已经过 TLS + PKCE 从 OpenAI 端点取回，
+    /// account id 也来自它本身。缺 ID token 时退回 access token 里的 `sub`。
+    async fn identity(
+        &self,
+        http: &Client,
+        client_id: &str,
+        nonce: &str,
+        codex_family: bool,
+        log: &mut AttemptLog,
+    ) -> Identity {
+        let mut identity = Identity::from_access_token(&self.access_token, log);
+        match &self.id_token {
+            None => log.step("id token：响应里没有，跳过校验".to_string()),
+            Some(id_token) if codex_family => {
+                // Codex CLI 档位不带 nonce（Pi/cc-switch 不校验 ID token），只取身份
+                log.step("id token：Codex CLI 档位不校验（同 Pi/cc-switch）".to_string());
+                if let Ok(claims) = decode_unverified::<IdClaims>(id_token) {
+                    identity.subject = claims.sub;
+                    identity.email = claims.email;
+                }
+            }
+            Some(id_token) => match validate_id_token(http, id_token, client_id, nonce).await {
+                Ok(claims) => {
+                    log.step(format!("id token：校验通过（sub={}）", claims.sub));
+                    identity.subject = claims.sub;
+                    identity.email = claims.email;
+                }
+                Err(err) => log.step(format!("id token：校验未通过，已忽略（{err}）")),
+            },
+        }
+        identity
+    }
+}
+
+struct Identity {
+    subject: String,
+    email: Option<String>,
+    account_id: String,
+}
+
+impl Identity {
+    fn from_access_token(access_token: &str, log: &mut AttemptLog) -> Self {
+        let claims: AccessClaims = decode_unverified(access_token).unwrap_or(AccessClaims {
+            sub: None,
+            auth: None,
+        });
+        let account_id = claims
+            .auth
+            .and_then(|a| a.chatgpt_account_id)
+            .unwrap_or_default();
+        if account_id.is_empty() {
+            log.step("access token：没有 chatgpt_account_id claim".to_string());
+        }
+        Self {
+            subject: claims.sub.unwrap_or_default(),
+            email: None,
+            account_id,
+        }
+    }
 }
 
 async fn refresh(dir: &Path, mut c: Credential, http: &Client) -> Result<Credential> {
     if c.expires_at > now() + 60 {
         return Ok(c);
     }
-    #[derive(Deserialize)]
-    struct R {
-        access_token: String,
-        refresh_token: String,
-        expires_in: u64,
-        #[serde(default)]
-        id_token: Option<String>,
-        #[serde(default)]
-        scope: String,
-    }
-    let r: R = http
-        .post(TOKEN_URL)
-        .form(&[
+    let mut log = AttemptLog::new();
+    let r = token_grant(
+        http,
+        &[
             ("grant_type", "refresh_token"),
             ("client_id", &c.client_id),
             ("refresh_token", &c.refresh_token),
             ("resource", "https://api.openai.com/v1"),
-        ])
-        .send()
-        .await?
-        .error_for_status()
-        .context("OpenAI OAuth 刷新失败")?
-        .json()
-        .await?;
+        ],
+        "刷新 token",
+        &mut log,
+    )
+    .await
+    .inspect_err(|_| log.save(dir))?;
+    let refresh_token = r
+        .refresh_token
+        .clone()
+        .filter(|s| !s.is_empty())
+        .context("刷新响应没有新的 refresh_token")?;
     c.access_token = r.access_token;
-    c.refresh_token = r.refresh_token;
+    c.refresh_token = refresh_token;
     c.expires_at = now() + r.expires_in;
-    if let Some(id) = r.id_token {
+    if let Some(id) = r.id_token.filter(|s| !s.is_empty()) {
         c.id_token = id
     }
     if !r.scope.is_empty() {
@@ -372,6 +552,110 @@ async fn refresh(dir: &Path, mut c: Credential, http: &Client) -> Result<Credent
         .context("刷新 token 缺少 account id")?;
     save(dir, &c)?;
     Ok(c)
+}
+
+/// POST 一次 token 端点请求，并按顺序试两个已知端点（见 `TOKEN_URLS`）。
+/// 失败时把**状态码与响应体片段**（截断、剔掉 token 字段）带进错误信息，
+/// 否则这类未公开接口出错时只能看到一个没头没尾的 `invalid_client`。
+async fn token_grant(
+    http: &Client,
+    form: &[(&str, &str)],
+    step: &str,
+    log: &mut AttemptLog,
+) -> Result<TokenResponse> {
+    let mut failure = String::new();
+    for url in TOKEN_URLS {
+        let response = match http.post(url).form(form).send().await {
+            Ok(response) => response,
+            Err(err) => {
+                failure = format!("{step}：请求 {url} 失败（{err}）");
+                log.step(failure.clone());
+                continue;
+            }
+        };
+        let status = response.status();
+        let body = response.text().await.unwrap_or_default();
+        log.step(format!(
+            "{step}：{url} → HTTP {}，响应 {} 字符",
+            status.as_u16(),
+            body.len()
+        ));
+        if status.is_success() {
+            return serde_json::from_str(&body)
+                .with_context(|| format!("{step}：响应不是预期 JSON（{url}）"));
+        }
+        failure = format!(
+            "{step}：{url} 返回 HTTP {}：{}",
+            status.as_u16(),
+            redact(&body)
+        );
+        if !matches!(status.as_u16(), 400 | 401 | 403 | 404) {
+            break;
+        }
+    }
+    bail!("{failure}")
+}
+
+/// 响应体进错误信息/日志前先截断，并遮掉长得像凭据的串。
+///
+/// 不按 JSON 字段名遮：错误响应未必是 JSON，token / authorization code 总是
+/// 长串（JWT、`sk-…`、随机串），按「长 alphanumeric 连续段」遮就够了。
+fn redact(body: &str) -> String {
+    const SECRET_LEN: usize = 40;
+    let mut out = String::with_capacity(body.len().min(400));
+    let mut run = String::new();
+    let flush = |run: &mut String, out: &mut String| {
+        if run.len() >= SECRET_LEN {
+            out.push_str("[已隐藏]");
+        } else {
+            out.push_str(run);
+        }
+        run.clear();
+    };
+    for ch in body.chars() {
+        if ch.is_ascii_alphanumeric() || matches!(ch, '_' | '-' | '.') {
+            run.push(ch);
+        } else {
+            flush(&mut run, &mut out);
+            out.push(ch);
+        }
+    }
+    flush(&mut run, &mut out);
+    out.chars().take(300).collect()
+}
+
+/// 一次登录/刷新尝试的步骤记录（含状态码与遮罩后的响应体）。
+///
+/// 失败时 TUI 只能看到一行 toast，而这条链路（浏览器 → 回调 → token 端点 →
+/// ID token 校验）每一步都可能断，所以把步骤落到磁盘供事后诊断。
+/// **只记状态码、长度、client_id/scope 这类不敏感内容，不含任何 token。**
+pub struct AttemptLog {
+    steps: Vec<String>,
+}
+
+impl AttemptLog {
+    fn new() -> Self {
+        Self { steps: Vec::new() }
+    }
+
+    fn step(&mut self, step: String) {
+        eprintln!("  {step}");
+        self.steps.push(step);
+    }
+
+    fn save(&mut self, dir: &Path) {
+        let mut text = "apim OpenAI OAuth 登录诊断\n".to_string();
+        for step in &self.steps {
+            text.push_str(step);
+            text.push('\n');
+        }
+        // 日志只是诊断辅助：写不进去也不影响登录本身
+        let _ = crate::config::write_private(&log_path(dir), &text);
+    }
+}
+
+pub fn log_path(dir: &Path) -> PathBuf {
+    dir.join("openai-oauth.log")
 }
 #[derive(Deserialize)]
 struct Window {
@@ -634,6 +918,36 @@ mod tests {
         assert_eq!(window_label(Some(2_592_000)), "1mo");
         assert_eq!(window_label(Some(0)), "Quota");
         assert_eq!(window_label(None), "Quota");
+    }
+
+    /// 两个档位的参数差异就是这两个项目的实现差异：Pi / cc-switch 走 Codex CLI 的公开 client id。
+    #[test]
+    fn profiles_match_the_reference_clients() {
+        let apim = profile_for(None);
+        assert!(apim.client_id.is_none(), "缺省走动态注册");
+        assert!(
+            apim.redirect.contains("127.0.0.1"),
+            "文档要求不许用 localhost"
+        );
+        assert!(apim.scope.contains(REQUIRED_SCOPE));
+
+        let codex = profile_for(Some("codex"));
+        assert_eq!(codex.client_id, Some(CODEX_CLIENT_ID));
+        assert_eq!(codex.redirect, "http://localhost:1455/auth/callback");
+        assert_eq!(codex.scope, "openid profile email offline_access");
+        assert!(codex.codex_family);
+    }
+
+    /// 错误信息/日志里不能带 token，哪怕响应体贴了完整 token JSON。
+    #[test]
+    fn redact_strips_token_like_values_and_truncates() {
+        let token = "a1b2c3d4e5".repeat(6); // 60 字符，典型 JWT / sk- 长度
+        let body = format!(r#"{{"error":"invalid_grant","access_token":"{token}"}}"#);
+        let masked = redact(&body);
+        assert!(!masked.contains(&token), "{masked}");
+        assert!(masked.contains("invalid_grant"), "{masked}");
+        assert!(redact(&"x".repeat(5_000)).chars().count() <= 300);
+        assert_eq!(redact("短消息不能被动"), "短消息不能被动");
     }
 
     #[test]
