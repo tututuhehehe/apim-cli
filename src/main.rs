@@ -5,6 +5,7 @@ mod clients;
 mod clipboard;
 mod config;
 mod form;
+mod openai_auth;
 mod probe;
 mod recipe;
 mod tui;

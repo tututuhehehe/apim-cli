@@ -26,6 +26,10 @@ pkg-fmt = "zip"
 [dependencies]
 anyhow = "1"
 arboard = "3"
+base64 = "0.22"
+jsonwebtoken = "9"
+rand = "0.8"
+sha2 = "0.10"
 crossterm = { version = "0.28", features = ["event-stream"] }
 futures = "0.3"
 ratatui = "0.29"
@@ -35,11 +39,12 @@ serde = { version = "1", features = ["derive"] }
 # （同 codex 那边用 toml_edit 保注释保顺序的理由；indexmap 本来就在依赖树里）
 serde_json = { version = "1", features = ["preserve_order"] }
 serde_yaml = "0.9"
-tokio = { version = "1", features = ["macros", "process", "rt-multi-thread", "sync", "time"] }
+tokio = { version = "1", features = ["macros", "net", "process", "rt-multi-thread", "sync", "time"] }
 toml = "0.8"
 # codex 的 config.toml 要保注释保顺序地改写，toml 做不到（序列化会丢注释）
 toml_edit = "0.22"
 unicode-width = "0.2"
+url = "2"
 
 [lints.rust]
 unsafe_code = "forbid"

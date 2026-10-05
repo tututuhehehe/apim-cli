@@ -1,6 +1,7 @@
 //! CLI 子命令：给 AI / 脚本用的机器接口。TUI 管人，CLI 管机器，
 //! 共用底层（recipe 加载、config 原子写盘、probe 探活）。
 
+pub(crate) mod auth;
 pub(crate) mod keys;
 pub(crate) mod provider;
 pub(crate) mod query;
@@ -101,6 +102,7 @@ pub(crate) async fn run(argv: &[String]) -> Result<()> {
     let ctx = Ctx::real();
     let rest = &argv[1..];
     match argv.first().map(String::as_str) {
+        Some("auth") => auth::run(&ctx, rest).await,
         Some("provider") => provider::run(&ctx, rest).await,
         Some("key") | Some("keys") => keys::run(&ctx, rest).await,
         Some("status") => query::status(&ctx, rest).await,
@@ -120,6 +122,8 @@ pub(crate) fn print_help() {
     println!(
         "apim — 终端 API 密钥管理器（无参数进 TUI）\n\
          \n\
+         OAuth：\n\
+         \x20 apim auth openai login|status|logout\n\
          厂商：\n\
          \x20 apim provider ls [--json]\n\
          \x20 apim provider add <id> --name <名> --base-url <URL> [--homepage <URL>|none] [--kind model|non-model] [--health <路径>|none] [--script <脚本路径>|none]\n\

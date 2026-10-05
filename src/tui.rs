@@ -80,6 +80,8 @@ async fn loop_tui(
                     match msg {
                         TaskMsg::Models(key_id, seq, result) => app.apply_models(key_id, seq, result),
                         TaskMsg::Import(outcome) => app.import_result(*outcome),
+                        TaskMsg::OAuthBalance(seq, result) => app.apply_oauth_balance(seq, result),
+                        TaskMsg::OAuthLogin(result) => app.apply_oauth_login(result),
                     }
                 }
             }
@@ -189,6 +191,11 @@ fn handle_key(app: &mut App, key: KeyEvent) {
             }
             KeyCode::Char('i') => app.open_inspector(),
             // x：把当前密钥 + 厂商 + 勾选的模型一键导入到 Codex
+            KeyCode::Char('o')
+                if app.focus == Focus::Keys && app.current_provider_id() == Some("openai") =>
+            {
+                app.start_openai_oauth_login()
+            }
             KeyCode::Char('x') => app.open_import(),
             KeyCode::Char('d') => app.open_delete(),
             KeyCode::Char('j') | KeyCode::Down => app.move_down(),

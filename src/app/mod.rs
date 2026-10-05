@@ -70,6 +70,8 @@ pub enum TaskMsg {
     Models(String, u64, std::result::Result<Vec<String>, String>),
     /// 一键导入到客户端的结果
     Import(Box<ImportOutcome>),
+    OAuthBalance(u64, std::result::Result<Vec<String>, String>),
+    OAuthLogin(std::result::Result<(), String>),
 }
 
 /// 探活/额度结果：带上**探针代际**。配置变更后旧代际的结果会被丢弃，
@@ -102,6 +104,11 @@ pub struct App {
     pub(crate) client: reqwest::Client,
     /// 下一次自动全量刷新的时间点。
     pub(crate) next_auto_refresh: Instant,
+    /// OpenAI Codex OAuth quota (separate from per-API-key script results).
+    pub oauth_balance: Option<Result<Vec<String>, String>>,
+    pub oauth_checking: bool,
+    pub oauth_login_running: bool,
+    pub oauth_seq: u64,
     /// 配置根目录（`~/.config/apim` 或 `APIM_CONFIG_DIR`）。落盘都经它，
     /// 测试注入临时目录，不碰真实配置。
     pub(crate) config_dir: PathBuf,
@@ -150,6 +157,10 @@ impl App {
             tx_task,
             client: probe::client()?,
             next_auto_refresh: Instant::now() + AUTO_REFRESH_INTERVAL,
+            oauth_balance: None,
+            oauth_checking: false,
+            oauth_login_running: false,
+            oauth_seq: 0,
             config_dir,
             active_keys,
             agent_homes,
@@ -549,6 +560,7 @@ impl App {
         for idx in 0..self.keys.len() {
             self.spawn_probe(idx);
         }
+        self.spawn_oauth_probe();
         self.next_auto_refresh = Instant::now() + AUTO_REFRESH_INTERVAL;
     }
 
@@ -559,6 +571,9 @@ impl App {
         for idx in idxs {
             self.spawn_probe(idx);
         }
+        if self.current_provider_id() == Some("openai") {
+            self.spawn_oauth_probe();
+        }
     }
 
     /// 按**厂商 id** 刷新（配置变更后用新配置重探）。
@@ -568,6 +583,60 @@ impl App {
             if self.keys[idx].provider == provider {
                 self.spawn_probe(idx);
             }
+        }
+    }
+
+    fn spawn_oauth_probe(&mut self) {
+        if self.oauth_checking {
+            return;
+        }
+        self.oauth_checking = true;
+        self.oauth_seq += 1;
+        let seq = self.oauth_seq;
+        let dir = self.config_dir.clone();
+        let tx = self.tx_task.clone();
+        tokio::spawn(async move {
+            let result = crate::openai_auth::fetch_usage(&dir)
+                .await
+                .map(|usage| usage.map(|u| u.lines).unwrap_or_default())
+                .map_err(|e| e.to_string());
+            let _ = tx.send(TaskMsg::OAuthBalance(seq, result));
+        });
+    }
+
+    pub fn apply_oauth_balance(&mut self, seq: u64, result: Result<Vec<String>, String>) {
+        if seq != self.oauth_seq {
+            return;
+        }
+        self.oauth_checking = false;
+        self.oauth_balance = Some(result);
+    }
+
+    pub fn start_openai_oauth_login(&mut self) {
+        if self.oauth_login_running {
+            return;
+        }
+        self.oauth_login_running = true;
+        let dir = self.config_dir.clone();
+        let tx = self.tx_task.clone();
+        tokio::spawn(async move {
+            let result = crate::openai_auth::login(&dir)
+                .await
+                .map_err(|e| e.to_string());
+            let _ = tx.send(TaskMsg::OAuthLogin(result));
+        });
+    }
+
+    pub fn apply_oauth_login(&mut self, result: Result<(), String>) {
+        self.oauth_login_running = false;
+        match result {
+            Ok(()) => {
+                self.toast = Some(("OpenAI Codex OAuth 已连接".into(), Instant::now()));
+                self.oauth_balance = None;
+                self.oauth_checking = false;
+                self.spawn_oauth_probe();
+            }
+            Err(error) => self.toast = Some((format!("OAuth 登录失败: {error}"), Instant::now())),
         }
     }
 
@@ -717,6 +786,10 @@ pub(crate) mod tests {
                 (Agent::Pi, test_agent_home()),
             ]),
             restart_codex_daemon: false,
+            oauth_balance: None,
+            oauth_checking: false,
+            oauth_login_running: false,
+            oauth_seq: 0,
             next_import_seq: 0,
             import_runner: None,
             undo_stack: VecDeque::new(),

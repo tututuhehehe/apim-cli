@@ -90,6 +90,9 @@ rm ~/.pi/agent/models.json.apim.bak          # 5. 改写前的备份，里面也
 apim            # 无参数：进 TUI
 apim help       # CLI 用法
 apim --version  # 版本
+apim auth openai login   # 连接 ChatGPT/Codex OAuth 查询用量
+apim auth openai status
+apim auth openai logout
 ```
 
 ## 快捷键
@@ -106,6 +109,7 @@ apim --version  # 版本
 | `i` | 厂商详情（鉴权 / 端点 / 额度脚本 / 来源 / vars，值不外显） | 密钥详情（`r` 显隐完整 token，`c` 复制） |
 | `Enter` | 用默认浏览器打开厂商主页（控制面板） | — |
 | `m` | — | 用**当前选中的这把 key** 拉取它的模型列表（仅模型厂商；模型可见性随 key/分组不同；弹窗内 `/` 聚焦搜索框实时过滤、`Esc` 退出搜索回到列表（过滤保留）、`j/k` 滚动、`c` 复制模型名、`Esc` 关闭弹窗） |
+| `o` | — | 在内置 OpenAI 厂商的密钥栏发起/重新授权 apim 自己的 ChatGPT/Codex OAuth；固定的 `AUTH` 行仅供查看，不是 API Key，也不是导入目标 |
 | `x` | — | 把选中密钥 + 它的厂商 + 勾选的模型**一键导入到 Codex 或 Pi**（仅模型厂商；写进对应客户端的配置）：`⏎` 下一步 → 选客户端 → 勾选模型（`空格` 勾选、`a` 全选/清空、`/` 搜索）→（仅 Codex）选默认模型（`j/k` 移动、`h` 返回上一步、`⏎` 导入；只勾一个模型时跳过这步；Pi 没有这一步）。详见下节 |
 | `j` / `k` | 上下移动 | 上下移动 |
 | `Tab` | 切换厂商分页：`模型` ⇄ `非模型`（两个分页各自记着选中项与过滤词） | 同左 |
@@ -118,6 +122,8 @@ apim --version  # 版本
 按 `/` 打开搜索框，边输入边实时过滤（大小写不敏感，两个列表各自独立）：`Enter` 应用并关闭，`Esc` 取消并恢复进入前的值。过滤生效时底栏显示「筛选: xxx (n/m)」，`j`/`k` 只在过滤后的行间移动；此时无弹窗按 `Esc` 先清除过滤而不是退出（`q` 仍直接退出）。注意：过滤生效时改名/新增的条目若不匹配当前过滤词，会暂时从视图隐身（数据没丢），`Esc` 清除过滤即可见。
 
 ## 增删改查
+
+**OpenAI Codex OAuth**：在内置 OpenAI 厂商的密钥栏按 `o`（或运行 `apim auth openai login`），会打开浏览器让你授权 apim。首次登录使用 OpenAI [官方开源动态注册流程](https://developers.openai.com/siwc/token-sharing-open-source/sign-in)，之后复用 OpenAI 签发的 client ID。凭据单独保存于 `~/.config/apim/openai-oauth.json`，权限为 `600`；host ID 也保存在同一配置目录。`apim auth openai status|logout` 可查看或移除凭据。固定 `AUTH` 行不是普通密钥，不能复制、编辑、删除或用 `x` 导入。OpenAI 额度面板始终并列显示 Codex OAuth 用量和当前 API Key 的独立 API 额度；OAuth 用量依赖 OpenAI 未公开的 ChatGPT 接口，接口变更时可能需要维护。
 
 **添加密钥（右侧按 `a`）**：填别名、分组（可空）、密钥，厂商用 `←`/`→` 切换。密钥可以直接 `⌘V` 粘贴。`Enter` 保存，立即写盘并自动检测。
 
@@ -305,10 +311,11 @@ apim status glm --json
 
 ## 数据存哪
 
-都在 `~/.config/apim/`，TUI 的增删改直接写这两个文件（权限 600），也可以手动改：
+都在 `~/.config/apim/`：TUI 的增删改直接写 API Key 文件（权限 600），Codex OAuth 凭据则单独保存在同目录的私有 JSON：
 
 - `config.toml`：别名、分组（不含 token）
-- `secrets.toml`：真正的 token，键名是 `"厂商.别名"`
+- `secrets.toml`：API token，键名是 `"厂商.别名"`
+- `openai-oauth.json`：apim 的 OpenAI Codex OAuth 注册信息与 token（权限 600）；`openai-oauth-host-id` 保存动态注册复用的稳定 host ID
 
 导入目标在别处：`~/.codex/config.toml` + `~/.codex/apim-models.json`（Codex，备份为 `config.toml.apim.bak`）与 `~/.pi/agent/models.json`（Pi，备份为 `models.json.apim.bak`；`PI_CODING_AGENT_DIR` 可改整个目录）。Pi 的 `settings.json` 一个字都不写；apim 只**读** `auth.json`（也不写它）来判断哪把 key 在用。
 
@@ -337,7 +344,7 @@ chmod 600 ~/.config/apim/config.toml ~/.config/apim/secrets.toml
 
 ## 加一个新厂商
 
-内置厂商开箱即用：**DeepSeek、OpenAI、Moonshot AI、OpenRouter** 已编译进二进制，不用写 recipe，在 TUI 左侧选中后按 `a` 直接加密钥即可（OpenAI 的余额接口仅部分账户有权限，无权限时额度面板报 HTTP 错误属预期）。同 id 放一份 YAML 到 `~/.config/apim/recipes/` 即可覆盖内置定义。
+内置厂商开箱即用：**DeepSeek、OpenAI、Moonshot AI、OpenRouter** 已编译进二进制，不用写 recipe，在 TUI 左侧选中后按 `a` 直接加密钥即可。OpenAI API 余额接口仅部分账户有权限；此外，运行 `apim auth openai login` 后，apim 会独立显示 Codex OAuth 用量。同 id 放一份 YAML 到 `~/.config/apim/recipes/` 即可覆盖内置定义。
 
 自定义厂商首选在 TUI 左侧按 `a`，表单保存即生成 `~/.config/apim/recipes/<id>.yaml`。非大模型的 API（翻译、搜索……）就是同一套东西勾上「非模型」——见[非模型厂商](#非模型厂商翻译搜索)。
 

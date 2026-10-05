@@ -92,6 +92,9 @@ rm ~/.pi/agent/models.json.apim.bak          # 5. the pre-import backup — it h
 apim            # no arguments: launch the TUI
 apim help       # CLI usage
 apim --version  # version
+apim auth openai login  # connect ChatGPT/Codex OAuth for usage reporting
+apim auth openai status
+apim auth openai logout
 ```
 
 ## Keybindings
@@ -108,6 +111,7 @@ apim --version  # version
 | `i` | Provider details (auth / endpoints / balance script / origin / vars — values are hidden) | Key details (`r` toggles the full token, `c` copies) |
 | `Enter` | Open the provider homepage (console) in your default browser | — |
 | `m` | — | Fetch the model list with **the selected key** (model providers only; visibility depends on the key/group; in the dialog `/` focuses the search box for live filtering, `Esc` leaves search back to the list (filter kept), `j`/`k` scroll, `c` copies a model name, `Esc` closes) |
+| `o` | — | On the built-in OpenAI provider, start or reauthorize apim's own ChatGPT/Codex OAuth; the fixed `AUTH` row is informational and is not an API key or import target |
 | `x` | — | One-click **import into Codex or Pi** (model providers only): the selected key + its provider + the models you tick, written to the client's config. Steps: `⏎` to advance → pick a client → tick models (`space` toggles, `a` toggles all, `/` searches) → (Codex only) pick the default model (`j`/`k` move, `h` goes back, `⏎` imports; a single ticked model skips this step; Pi has no such step). See below |
 | `j` / `k` | Move up/down | Move up/down |
 | `Tab` | Switch the provider page: `模型` (model providers) ⇄ `非模型` (non-model APIs). Each page remembers its own selection and filter | Same |
@@ -120,6 +124,8 @@ apim --version  # version
 Press `/` to open the search box; filtering is live and case-insensitive, and each list keeps its own filter. `Enter` applies and closes it, `Esc` cancels and restores the previous value. While a filter is active the status bar shows `筛选: xxx (n/m)` ("filter: xxx") and `j`/`k` move only within the filtered rows; with no dialog open, `Esc` clears the filter instead of quitting (`q` still quits immediately). Note: while a filter is active, an item you rename or add that does not match it is hidden from view (the data is safe) — press `Esc` to clear the filter and see it again.
 
 ## CRUD
+
+**OpenAI Codex OAuth**: on the built-in OpenAI provider, press `o` in the key pane (or run `apim auth openai login`) to authorize apim in the browser. First login uses OpenAI's [documented open-source dynamic registration flow](https://developers.openai.com/siwc/token-sharing-open-source/sign-in); later logins reuse the issued client ID. The OAuth record is stored separately at `~/.config/apim/openai-oauth.json` with mode `600`; the host ID is stored beside it. `apim auth openai status|logout` reports or removes the credential. The fixed `AUTH` row is not a normal key and cannot be copied, edited, deleted, or imported with `x`. The OpenAI balance pane always shows Codex OAuth usage alongside the selected API key's separate API balance; OAuth usage uses an undocumented ChatGPT endpoint and may need maintenance if OpenAI changes it.
 
 **Add a key (`a` in the right pane)**: fill in the alias, an optional group, and the key; switch providers with `←`/`→`. You can paste the key with `⌘V`. `Enter` saves, writes to disk immediately, and probes it.
 
@@ -306,10 +312,11 @@ Deliberate choices:
 
 ## Where the data lives
 
-Everything lives under `~/.config/apim/`. TUI edits write these two files directly (mode 600), and you can edit them by hand as well:
+Everything lives under `~/.config/apim/`. TUI edits write the API key files directly (mode 600); Codex OAuth uses its own private JSON file in the same directory:
 
 - `config.toml` — alias and group (no tokens)
-- `secrets.toml` — the actual tokens, keyed by `"provider.alias"`
+- `secrets.toml` — API tokens, keyed by `"provider.alias"`
+- `openai-oauth.json` — apim's OpenAI Codex OAuth registration and tokens (mode 600); `openai-oauth-host-id` stores the stable host ID used for dynamic registration
 
 Import targets live outside that directory: `~/.codex/config.toml` + `~/.codex/apim-models.json` (Codex, backed up as `config.toml.apim.bak`) and `~/.pi/agent/models.json` (Pi, backed up as `models.json.apim.bak`; `PI_CODING_AGENT_DIR` overrides the directory). Pi's `settings.json` is never written — apim only *reads* `auth.json` (never writes it either) to work out which key is in use.
 
@@ -340,7 +347,7 @@ Set `APIM_CONFIG_DIR` to relocate the whole config directory (used by the tests)
 
 ## Adding a provider
 
-Built-in providers work out of the box: **DeepSeek, OpenAI, Moonshot AI and OpenRouter** are compiled into the binary — no recipe needed. Select one in the left pane and press `a` to add a key. (OpenAI's balance endpoint is only available to some accounts; an HTTP error in the balance panel is expected otherwise.) Dropping a YAML with the same id into `~/.config/apim/recipes/` overrides the built-in definition.
+Built-in providers work out of the box: **DeepSeek, OpenAI, Moonshot AI and OpenRouter** are compiled into the binary — no recipe needed. Select one in the left pane and press `a` to add a key. OpenAI's API balance endpoint is only available to some accounts; separately, apim can show Codex OAuth usage after `apim auth openai login`. Dropping a YAML with the same id into `~/.config/apim/recipes/` overrides the built-in definition.
 
 For a custom provider the easiest path is `a` in the left pane; saving the form generates `~/.config/apim/recipes/<id>.yaml`. Non-LLM APIs (translation, search, …) are the same thing with the `非模型` checkbox ticked — see [Non-model providers](#non-model-providers-translation-search-).
 

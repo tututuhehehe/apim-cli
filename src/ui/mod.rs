@@ -85,9 +85,14 @@ fn draw_body(frame: &mut Frame, app: &App, area: Rect) {
 
     providers::draw_providers(frame, app, cols[0]);
 
+    let balance_height = if app.current_provider_id() == Some("openai") {
+        14
+    } else {
+        9
+    };
     let right = Layout::default()
         .direction(Direction::Vertical)
-        .constraints([Constraint::Min(6), Constraint::Length(9)])
+        .constraints([Constraint::Min(6), Constraint::Length(balance_height)])
         .split(cols[1]);
 
     keys::draw_keys(frame, app, right[0]);

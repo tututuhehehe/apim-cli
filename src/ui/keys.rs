@@ -38,7 +38,7 @@ pub(crate) fn draw_keys(frame: &mut Frame, app: &App, area: Rect) {
     let header = Row::new(["#", "别名", "分组", "密钥", "状态"])
         .style(Style::new().fg(theme::MUTED).add_modifier(Modifier::BOLD));
 
-    let rows: Vec<Row> = rows_idx
+    let mut rows: Vec<Row> = rows_idx
         .into_iter()
         .enumerate()
         .map(|(i, idx)| {
@@ -61,6 +61,33 @@ pub(crate) fn draw_keys(frame: &mut Frame, app: &App, area: Rect) {
             .style(Style::new().fg(theme::TEXT))
         })
         .collect();
+    if app.current_provider_id() == Some("openai") {
+        let status = if app.oauth_login_running {
+            "… 登录中"
+        } else if app.oauth_checking {
+            "… 查询中"
+        } else {
+            match &app.oauth_balance {
+                Some(Ok(values)) if values.is_empty() => "未配置",
+                Some(Ok(_)) => "● 已连接",
+                Some(Err(_)) => "● 失败",
+                None => "—",
+            }
+        };
+        rows.push(
+            Row::new([
+                Cell::from("—"),
+                Cell::from(Span::styled(
+                    "AUTH",
+                    Style::new().fg(theme::ACCENT).add_modifier(Modifier::BOLD),
+                )),
+                Cell::from("OAuth"),
+                Cell::from("Codex · apim 管理"),
+                Cell::from(status),
+            ])
+            .style(Style::new().fg(theme::TEXT)),
+        );
+    }
 
     let mut state = TableState::default();
     if n > 0 {
@@ -149,6 +176,32 @@ mod tests {
     use super::*;
     use crate::app::tests::test_app;
     use crate::clients::Agent;
+    use ratatui::{Terminal, backend::TestBackend};
+
+    #[test]
+    fn openai_has_a_fixed_non_key_auth_row() {
+        let (mut app, _rx, _rx_task) = test_app(&[("openai", &["api-key"])]);
+        app.focus_provider("openai");
+        app.focus = Focus::Keys;
+        let mut terminal = Terminal::new(TestBackend::new(100, 12)).unwrap();
+        terminal
+            .draw(|frame| draw_keys(frame, &app, frame.area()))
+            .unwrap();
+        let rendered = terminal
+            .backend()
+            .buffer()
+            .content()
+            .iter()
+            .map(|c| c.symbol())
+            .collect::<String>();
+        assert!(rendered.contains("AUTH"));
+        assert!(rendered.contains("Codex"));
+        assert_eq!(
+            app.selected_key_entry().unwrap().alias,
+            "api-key",
+            "AUTH 是固定信息行，不进入普通密钥选择索引"
+        );
+    }
 
     /// ★ 角标只反映「这个客户端现在真的在用这把密钥」。
     #[test]
