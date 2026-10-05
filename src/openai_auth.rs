@@ -217,6 +217,11 @@ pub async fn login(dir: &Path) -> Result<()> {
         Some(c) => c.host_id.clone(),
         None => host_id(dir)?,
     };
+    // Only a client id OpenAI actually issued may be echoed back for reauthorization.
+    // A credential that was merely copied in (or otherwise lacks an ID token hint)
+    // must start a fresh dynamic registration, or the authorize request fails with
+    // `invalid_client` / "This app is unavailable".
+    let previous = previous.filter(reusable_registration);
     let listener = TcpListener::bind(("127.0.0.1", 1455))
         .await
         .context("OAuth 回调端口 1455 被占用")?;
@@ -450,6 +455,14 @@ pub async fn fetch_usage(dir: &Path) -> Result<Option<Usage>> {
     }
     Ok(Some(Usage { lines }))
 }
+/// Whether a stored credential may be reused as the OAuth client for reauthorization.
+/// OpenAI issues `oaiapp_…` client ids during dynamic registration and returns an ID token
+/// we can send back as `id_token_hint`; neither exists for a credential that was only
+/// copied in for usage display.
+fn reusable_registration(c: &Credential) -> bool {
+    c.client_id.starts_with("oaiapp_") && !c.id_token.is_empty()
+}
+
 fn reset_countdown(seconds: u64) -> String {
     if seconds == 0 {
         return "即将".into();
@@ -528,6 +541,23 @@ mod tests {
         assert!(fetch_usage(&p).await.unwrap().is_none());
         let _ = fs::remove_dir_all(p);
     }
+    /// 复制进来的凭据只能查用量：按 `o` 必须重新走动态注册，
+    /// 否则会把未知 client_id 发给 OpenAI，报 `invalid_client`。
+    #[test]
+    fn only_a_real_openai_registration_is_reused_for_sign_in() {
+        let mut c = credential();
+        c.client_id = "oaiapp_real".into();
+        assert!(reusable_registration(&c));
+        c.client_id = "pi-imported-temporary".into();
+        assert!(!reusable_registration(&c));
+        c.client_id = "oaiapp_real".into();
+        c.id_token.clear();
+        assert!(
+            !reusable_registration(&c),
+            "没有 ID token 就没有可用的 id_token_hint"
+        );
+    }
+
     #[test]
     fn reset_countdown_formats_hours_and_days() {
         assert_eq!(reset_countdown(3600 + 42 * 60), "1h 42m");
