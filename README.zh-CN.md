@@ -123,7 +123,7 @@ apim auth openai logout
 
 ## 增删改查
 
-**OpenAI Codex OAuth**：在内置 OpenAI 厂商的密钥栏按 `o`（或运行 `apim auth openai login`），会打开浏览器让你授权 apim。首次登录使用 OpenAI [官方开源动态注册流程](https://developers.openai.com/siwc/token-sharing-open-source/sign-in)，之后复用 OpenAI 签发的 client ID。凭据单独保存于 `~/.config/apim/openai-oauth.json`，权限为 `600`；host ID 也保存在同一配置目录。`apim auth openai status|logout` 可查看或移除凭据。固定 `AUTH` 行不是普通密钥，不能复制、编辑、删除或用 `x` 导入。OpenAI 额度面板始终并列显示 Codex OAuth 用量（含重置倒计时）和当前 API Key 的独立 API 额度；OAuth 用量依赖 OpenAI 未公开的 ChatGPT 接口，接口变更时可能需要维护。
+**OpenAI Codex OAuth**：在内置 OpenAI 厂商的密钥栏按 `o`（或运行 `apim auth openai login`），会打开浏览器让你授权 apim。首次登录使用 OpenAI [官方开源动态注册流程](https://developers.openai.com/siwc/token-sharing-open-source/sign-in)，之后复用 OpenAI 签发的 client ID。凭据单独保存于 `~/.config/apim/openai-oauth.json`，权限为 `600`；host ID 也保存在同一配置目录。`apim auth openai status|logout` 可查看或移除凭据。固定 `AUTH` 行不是普通密钥，不能复制、编辑、删除或用 `x` 导入。OpenAI 额度面板始终并列显示 Codex OAuth 用量（接口返回的每个限额窗口都会列一行，标签按窗口真实长度算，并带重置倒计时）和当前 API Key 的独立 API 额度；具体有哪些窗口取决于套餐（`go` 账号只回一个按月窗口，`pro` 是 5h + 1w），且 OAuth 用量依赖 OpenAI 未公开的 ChatGPT 接口，接口变更时可能需要维护。
 
 **添加密钥（右侧按 `a`）**：填别名、分组（可空）、密钥，厂商用 `←`/`→` 切换。密钥可以直接 `⌘V` 粘贴。`Enter` 保存，立即写盘并自动检测。
 

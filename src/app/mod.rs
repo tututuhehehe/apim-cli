@@ -685,6 +685,14 @@ impl App {
         for msg in futures::future::join_all(futs).await {
             self.apply(msg);
         }
+        // 快照也把 AUTH 额度拉真数据，否则 `--snapshot` 面板与 TUI 不一致
+        if self.current_provider_id() == Some("openai") {
+            let result = crate::openai_auth::fetch_usage(&self.config_dir)
+                .await
+                .map(|usage| usage.map(|u| u.lines).unwrap_or_default())
+                .map_err(|e| e.to_string());
+            self.oauth_balance = Some(result);
+        }
     }
 
     pub fn toast_text(&self) -> Option<&str> {

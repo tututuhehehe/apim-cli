@@ -414,6 +414,14 @@ pub async fn fetch_usage(dir: &Path) -> Result<Option<Usage>> {
         .json()
         .await
         .context("解析 Codex 用量响应失败")?;
+    Ok(Some(Usage {
+        lines: usage_lines(j)?,
+    }))
+}
+
+/// Turn a usage response into the lines the balance pane shows.
+/// Every window the API returned gets a line; the count is whatever the plan has.
+fn usage_lines(j: UsageJson) -> Result<Vec<String>> {
     let mut windows: Vec<Window> = j
         .rate_limit
         .into_iter()
@@ -428,11 +436,7 @@ pub async fn fetch_usage(dir: &Path) -> Result<Option<Usage>> {
     let mut lines = Vec::new();
     for w in windows {
         let used = w.used_percent.unwrap_or_default().clamp(0.0, 100.0);
-        let label = match w.limit_window_seconds.unwrap_or_default() {
-            0..=21600 => "5h",
-            21601..=691200 => "1w",
-            _ => "Quota",
-        };
+        let label = window_label(w.limit_window_seconds);
         let reset = w
             .reset_at
             .map(|at| format!(" · {} 后重置", reset_countdown(at.saturating_sub(now()))))
@@ -453,8 +457,28 @@ pub async fn fetch_usage(dir: &Path) -> Result<Option<Usage>> {
     if let Some(p) = j.plan_type {
         lines.push(format!("套餐：{p}"))
     }
-    Ok(Some(Usage { lines }))
+    Ok(lines)
 }
+/// Human label for a rate-limit window, derived from the length the API actually returned.
+/// **Do not assume a 5h + 7d pair**: the endpoint returns whichever windows the plan has
+/// (a `go` account, for example, reports a single 30-day window and `secondary_window: null`),
+/// so label whatever comes back instead of inventing periods.
+fn window_label(seconds: Option<u64>) -> String {
+    let seconds = seconds.unwrap_or_default();
+    if seconds == 0 {
+        return "Quota".into();
+    }
+    if seconds <= 6 * 3_600 {
+        "5h".into()
+    } else if seconds <= 8 * 86_400 {
+        "1w".into()
+    } else if seconds <= 35 * 86_400 {
+        "1mo".into()
+    } else {
+        format!("{}d", (seconds as f64 / 86_400.0).round() as u64)
+    }
+}
+
 /// Whether a stored credential may be reused as the OAuth client for reauthorization.
 /// OpenAI issues `oaiapp_…` client ids during dynamic registration and returns an ID token
 /// we can send back as `id_token_hint`; neither exists for a credential that was only
@@ -556,6 +580,60 @@ mod tests {
             !reusable_registration(&c),
             "没有 ID token 就没有可用的 id_token_hint"
         );
+    }
+
+    /// 真实响应形状：`go` 账号只回一个 30 天窗口、`secondary_window: null`，
+    /// 这时面板就该只显示一条 `1mo`，而不是硬凑出 5h/7d。
+    #[test]
+    fn single_monthly_window_renders_one_labelled_line() {
+        let j: UsageJson = serde_json::from_str(
+            r#"{
+                "plan_type": "go",
+                "rate_limit": {
+                    "primary_window": {"used_percent": 27, "limit_window_seconds": 2592000, "reset_at": 1793784696},
+                    "secondary_window": null
+                },
+                "credits": {"has_credits": false, "unlimited": false, "balance": null}
+            }"#,
+        )
+        .unwrap();
+        let lines = usage_lines(j).unwrap();
+        assert_eq!(lines.len(), 2, "一个窗口 + 套餐行：{lines:?}");
+        assert!(
+            lines[0].starts_with("Codex 1mo：已用 27% · 剩余 73%"),
+            "{}",
+            lines[0]
+        );
+        assert!(lines[0].contains("后重置"), "{}", lines[0]);
+        assert_eq!(lines[1], "套餐：go");
+    }
+
+    /// 返回两个窗口时两条都显示（pro 这类账号的 5h + 1w）。
+    #[test]
+    fn two_windows_are_labelled_five_hours_and_one_week() {
+        let j: UsageJson = serde_json::from_str(
+            r#"{
+                "plan_type": "pro",
+                "rate_limit": {
+                    "primary_window": {"used_percent": 15, "limit_window_seconds": 18000, "reset_at": 1793784696},
+                    "secondary_window": {"used_percent": 5, "limit_window_seconds": 604800, "reset_at": 1794389496}
+                }
+            }"#,
+        )
+        .unwrap();
+        let lines = usage_lines(j).unwrap();
+        assert!(lines[0].starts_with("Codex 5h："), "{}", lines[0]);
+        assert!(lines[1].starts_with("Codex 1w："), "{}", lines[1]);
+    }
+
+    /// 窗口标签按接口真正返回的长度算，不假设一定有 5h + 7d 两个窗口。
+    #[test]
+    fn window_label_follows_the_returned_length() {
+        assert_eq!(window_label(Some(18_000)), "5h");
+        assert_eq!(window_label(Some(604_800)), "1w");
+        assert_eq!(window_label(Some(2_592_000)), "1mo");
+        assert_eq!(window_label(Some(0)), "Quota");
+        assert_eq!(window_label(None), "Quota");
     }
 
     #[test]
