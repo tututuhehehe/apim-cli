@@ -44,6 +44,10 @@ pub struct Credential {
     pub expires_at: u64,
     pub scopes: Vec<String>,
     pub account_id: String,
+    /// 该凭据由哪个档位签发：`true` = Codex CLI 系（Pi / cc-switch 同款），
+    /// 只申请 `openid profile email`，但 token 带 `chatgpt_account_id` 且能读用量接口。
+    #[serde(default)]
+    pub codex_family: bool,
 }
 #[derive(Debug, Clone)]
 pub struct Usage {
@@ -70,19 +74,19 @@ fn profile() -> ClientProfile {
 
 fn profile_for(choice: Option<&str>) -> ClientProfile {
     match choice {
-        Some("codex") => ClientProfile {
-            name: "codex",
-            client_id: Some(CODEX_CLIENT_ID),
-            redirect: "http://localhost:1455/auth/callback",
-            scope: "openid profile email offline_access",
-            codex_family: true,
-        },
-        _ => ClientProfile {
+        Some("apim") | Some("dynamic") => ClientProfile {
             name: "apim",
             client_id: None,
             redirect: "http://127.0.0.1:1455/auth/callback",
             scope: "openid profile email offline_access resource.invoke chatgpt.tokens.use.direct",
             codex_family: false,
+        },
+        _ => ClientProfile {
+            name: "codex",
+            client_id: Some(CODEX_CLIENT_ID),
+            redirect: "http://localhost:1455/auth/callback",
+            scope: "openid profile email offline_access",
+            codex_family: true,
         },
     }
 }
@@ -407,6 +411,7 @@ async fn login_inner(dir: &Path, log: &mut AttemptLog) -> Result<()> {
         expires_at: now() + session.expires_in,
         scopes: scope_list,
         account_id: claims.account_id,
+        codex_family: p.codex_family,
     };
     save(dir, &cred)?;
     println!(
@@ -683,8 +688,11 @@ pub async fn fetch_usage(dir: &Path) -> Result<Option<Usage>> {
     let Some(c) = load(dir)? else { return Ok(None) };
     let http = client()?;
     let c = refresh(dir, c, &http).await?;
-    if !c.scopes.iter().any(|s| s == REQUIRED_SCOPE) {
+    if !c.codex_family && !c.scopes.iter().any(|s| s == REQUIRED_SCOPE) {
         bail!("OAuth 凭据未获 Codex 用量权限，请重新登录")
+    }
+    if c.account_id.is_empty() {
+        bail!("该凭据里没有 ChatGPT account id（动态注册档位读不了 Codex 用量），按 o 重新登录")
     }
     let j: UsageJson = http
         .get(USAGE_URL)
@@ -818,6 +826,7 @@ mod tests {
             expires_at: 1_900_000_000,
             scopes: vec![REQUIRED_SCOPE.into()],
             account_id: "acct".into(),
+            codex_family: true,
         }
     }
     #[test]
@@ -923,19 +932,20 @@ mod tests {
     /// 两个档位的参数差异就是这两个项目的实现差异：Pi / cc-switch 走 Codex CLI 的公开 client id。
     #[test]
     fn profiles_match_the_reference_clients() {
-        let apim = profile_for(None);
-        assert!(apim.client_id.is_none(), "缺省走动态注册");
+        // 缺省必须是与 Pi/cc-switch 一致的档位：只有它的 token 能读 Codex 用量
+        let codex = profile_for(None);
+        assert_eq!(codex.client_id, Some(CODEX_CLIENT_ID));
+        assert_eq!(codex.redirect, "http://localhost:1455/auth/callback");
+        assert_eq!(codex.scope, "openid profile email offline_access");
+        assert!(codex.codex_family);
+
+        let apim = profile_for(Some("apim"));
+        assert!(apim.client_id.is_none(), "动态注册档位不需要固定 client id");
         assert!(
             apim.redirect.contains("127.0.0.1"),
             "文档要求不许用 localhost"
         );
         assert!(apim.scope.contains(REQUIRED_SCOPE));
-
-        let codex = profile_for(Some("codex"));
-        assert_eq!(codex.client_id, Some(CODEX_CLIENT_ID));
-        assert_eq!(codex.redirect, "http://localhost:1455/auth/callback");
-        assert_eq!(codex.scope, "openid profile email offline_access");
-        assert!(codex.codex_family);
     }
 
     /// 错误信息/日志里不能带 token，哪怕响应体贴了完整 token JSON。
