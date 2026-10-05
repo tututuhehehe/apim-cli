@@ -250,7 +250,15 @@ async fn callback(listener: TcpListener) -> Result<(String, String, Option<Strin
     let state = q.get("state").context("OAuth 回调缺少 state")?.to_string();
     let id = q.get("client_id").map(|s| s.to_string());
     let scope = q.get("scope").map(|s| s.to_string()).unwrap_or_default();
-    stream.write_all(b"HTTP/1.1 200 OK\r\nContent-Type: text/plain; charset=utf-8\r\nConnection: close\r\n\r\nOpenAI authorization received. Return to apim.").await?;
+    // 这页是**登录成功**页，不是 OpenAI 的报错页：会被误读成“授权被拒”，
+    // 所以把“成功 / 可以关掉这个标签页”写清楚（真正的拒绝是 OpenAI 的
+    // invalid_client 页面，根本不会回到这里）。
+    let page = "授权完成 ✅\n\napim 已收到 OpenAI 的授权码，正在后台换取凭据。\n回到终端即可：OpenAI 的 AUTH 额度会在几秒内出现。\n这个标签页可以关掉了。\n";
+    let response = format!(
+        "HTTP/1.1 200 OK\r\nContent-Type: text/plain; charset=utf-8\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{page}",
+        page.len()
+    );
+    stream.write_all(response.as_bytes()).await?;
     Ok((code, state, id, scope))
 }
 
