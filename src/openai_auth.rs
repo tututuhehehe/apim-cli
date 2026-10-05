@@ -288,6 +288,9 @@ async fn login_inner(dir: &Path, log: &mut AttemptLog) -> Result<()> {
         .client_id
         .map(str::to_owned)
         .or_else(|| previous.as_ref().map(|c| c.client_id.clone()));
+    // `id_token_hint` / `login_hint` 只在同一客户端下才发：把动态注册的 id token 发给
+    // Codex CLI 档位（aud 不同）会被授权端点当成不匹配的提示。
+    let previous = previous.filter(|old| Some(old.client_id.as_str()) == registered_id.as_deref());
     let requested_id = registered_id.as_deref().unwrap_or(CLIENT_BOOTSTRAP);
     let mut params: Vec<(&str, &str)> = vec![
         ("client_id", requested_id),
@@ -327,9 +330,10 @@ async fn login_inner(dir: &Path, log: &mut AttemptLog) -> Result<()> {
         url.query_pairs_mut().append_pair("agent_name_hint", "apim");
     }
     log.step(format!(
-        "authorize: profile={} client_id={requested_id} redirect={redirect} 新注册={}",
+        "authorize: profile={} client_id={requested_id} redirect={redirect} 新注册={} 带 id_token_hint={}",
         p.name,
-        registered_id.is_none()
+        registered_id.is_none(),
+        previous.is_some()
     ));
     crate::browser::open(url.as_str()).context("打开 OpenAI OAuth 登录页")?;
     eprintln!("已打开浏览器，请完成 OpenAI/Codex 授权…");
