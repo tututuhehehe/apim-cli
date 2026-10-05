@@ -182,7 +182,11 @@ async function alreadyPublished(dir) {
 // "no prebuilt binary available for <platform>" —— v0.1.4 真机踩过。
 // 所以：先把 5 个平台子包全发出去，**一起等**它们可见（npm 的 processing 在服务端是并行的，
 // 串行等会把每包的 1~2 分钟叠加成 ~10 分钟），确认都可见后才发主包；最后整体核对一遍。
-async function waitUntilVisible(dir, timeoutMs = 180000, intervalMs = 3000) {
+//
+// 超时给得宽（600s）：processing 偶尔会远超 1~2 分钟，v0.1.7 发版时 darwin-x64 就超过了 180s，
+// 脚本按设计在发主包**之前**退出（宁可主包落后，也不能让主包先可见）——
+// 但那把 6 个包拆成两半、需要人工重跑。放宽超时比拆开发更省事，代价只是失败时多等一会儿。
+async function waitUntilVisible(dir, timeoutMs = 600000, intervalMs = 3000) {
   const { name } = JSON.parse(readFileSync(path.join(dir, 'package.json'), 'utf8'));
   const deadline = Date.now() + timeoutMs;
   for (;;) {
