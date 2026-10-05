@@ -1,4 +1,4 @@
-//! apim-owned OpenAI Codex OAuth dynamic registration, private storage and usage lookup.
+//! apim 自己管理的 OpenAI Codex OAuth：浏览器授权、私有存储、用量查询。
 use anyhow::{Context, Result, bail};
 use base64::{Engine as _, engine::general_purpose::URL_SAFE_NO_PAD};
 use jsonwebtoken::{Algorithm, DecodingKey, Validation, decode, decode_header};
@@ -27,7 +27,7 @@ const TOKEN_URLS: [&str; 2] = [
 const JWKS_URL: &str = "https://auth.openai.com/.well-known/jwks.json";
 const USAGE_URL: &str = "https://chatgpt.com/backend-api/wham/usage";
 const CLIENT_BOOTSTRAP: &str = "dynamic_agent_client";
-/// Codex CLI 系客户端的公开 client id（Pi 与 cc-switch 都用它），仅 `APIM_OAUTH_CLIENT=codex` 档位使用。
+/// Codex CLI 系客户端的公开 client id（Pi 与 cc-switch 都用它），**缺省档位**用它。
 const CODEX_CLIENT_ID: &str = "app_EMoamEEZ73f0CkXaXp7hrann";
 const CODEX_ORIGINATOR: &str = "codex_cli_rs";
 const REQUIRED_SCOPE: &str = "chatgpt.tokens.use.direct";
@@ -45,7 +45,8 @@ pub struct Credential {
     pub scopes: Vec<String>,
     pub account_id: String,
     /// 该凭据由哪个档位签发：`true` = Codex CLI 系（Pi / cc-switch 同款），
-    /// 只申请 `openid profile email`，但 token 带 `chatgpt_account_id` 且能读用量接口。
+    /// 申请 `openid profile email offline_access`（无 `resource`、无 `nonce`），
+    /// 但 token 带 `chatgpt_account_id` 且能读用量接口。
     #[serde(default)]
     pub codex_family: bool,
 }
@@ -55,10 +56,13 @@ pub struct Usage {
 }
 /// 浏览器流程用哪套客户端注册。
 ///
-/// - `apim`（缺省）：OpenAI 文档里的开源动态注册，首次登录由 OpenAI 签发 `oaiapp_…`。
-/// - `codex`（`APIM_OAUTH_CLIENT=codex`）：复刻 Codex CLI 系的公开 client id 与其参数，
+/// - `codex`（**缺省**，取值 `codex` 或未设）：复刻 Codex CLI 系的公开 client id 与其参数，
 ///   与 Pi / cc-switch 完全一致（`localhost` 回调、不发 nonce、不申请 resource 与
-///   `chatgpt.tokens.use.direct`）。动态注册在浏览器里被拒时用它兜底。
+///   `chatgpt.tokens.use.direct`）。**只有这条路的 token 带 `chatgpt_account_id`，
+///   也才能读 Codex 用量接口**，所以它是缺省。
+/// - `apim`（`APIM_OAUTH_CLIENT=apim|dynamic`）：OpenAI 文档里的开源动态注册，首次登录由
+///   OpenAI 签发 `oaiapp_…`。它的 token 能登录、能调 API，但读不了 Codex 用量
+///   （见 AGENTS.md 约定 11）。
 struct ClientProfile {
     name: &'static str,
     /// `Some` = 固定 client id（不需要也不采纳动态注册）
@@ -66,10 +70,6 @@ struct ClientProfile {
     redirect: &'static str,
     scope: &'static str,
     codex_family: bool,
-}
-
-fn profile() -> ClientProfile {
-    profile_for(std::env::var("APIM_OAUTH_CLIENT").ok().as_deref())
 }
 
 fn profile_for(choice: Option<&str>) -> ClientProfile {
@@ -81,13 +81,24 @@ fn profile_for(choice: Option<&str>) -> ClientProfile {
             scope: "openid profile email offline_access resource.invoke chatgpt.tokens.use.direct",
             codex_family: false,
         },
-        _ => ClientProfile {
+        // 缺省与无法识别的取值都走 Codex CLI 档位；无法识别的那个由
+        // `unknown_profile_choice` 挑出来写进诊断日志，不静默。
+        Some("codex") | None | Some(_) => ClientProfile {
             name: "codex",
             client_id: Some(CODEX_CLIENT_ID),
             redirect: "http://localhost:1455/auth/callback",
             scope: "openid profile email offline_access",
             codex_family: true,
         },
+    }
+}
+
+/// `APIM_OAUTH_CLIENT` 里写错的那个值（`None` = 取值合法或缺省）。
+/// 档位影响能不能读用量，写错字（大小写、拼错）必须看得见，不能静默退回缺省。
+fn unknown_profile_choice(choice: Option<&str>) -> Option<&str> {
+    match choice {
+        None | Some("codex") | Some("apim") | Some("dynamic") => None,
+        Some(other) => Some(other),
     }
 }
 
@@ -118,7 +129,22 @@ pub fn load(dir: &Path) -> Result<Option<Credential>> {
 }
 fn save(dir: &Path, cred: &Credential) -> Result<()> {
     fs::create_dir_all(dir)?;
-    crate::config::write_private(&path(dir), &serde_json::to_string_pretty(cred)?)
+    let text = serde_json::to_string_pretty(cred)?;
+    let _guard = write_lock();
+    crate::config::write_private(&path(dir), &text)
+}
+
+/// 凭据/诊断日志的**进程内**写锁。
+///
+/// `config::write_private` 的 tmp 名只带进程号（跨进程唯一），所以同一进程里的两个写者
+/// 会共用同一个 tmp 路径。这个功能引入了第二个写者（登录任务与探测/刷新任务都会写
+/// `openai-oauth.json`），不加锁就可能交错写入、rename 出半截 JSON。
+/// 锁**只包住写盘本身，绝不跨越 await**。
+static WRITE_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
+
+fn write_lock() -> std::sync::MutexGuard<'static, ()> {
+    // 写盘失败已经会让调用方报错；锁被毒化时再 panic 只会把错误变成崩溃
+    WRITE_LOCK.lock().unwrap_or_else(|err| err.into_inner())
 }
 fn random_b64(n: usize) -> String {
     let mut b = vec![0; n];
@@ -158,6 +184,18 @@ struct IdClaims {
     sub: String,
     exp: usize,
     nonce: String,
+    email: Option<String>,
+}
+/// Codex CLI 档位的 ID token 身份。
+///
+/// 它的授权请求**不发 nonce**（Pi / cc-switch 同），所以 token 里没有 `nonce` claim，
+/// 用上面的 `IdClaims` 解它永远失败 —— 那会把 `sub`/`email` 静默丢掉，
+/// 于 `apim auth openai status` 永远只能显示“账户已验证”、重新登录也发不出 `login_hint`。
+/// 这里只取身份、不校验（该档位本来就同 Pi/cc-switch 不校验 ID token）。
+#[derive(Deserialize)]
+struct IdTokenIdentity {
+    sub: String,
+    #[serde(default)]
     email: Option<String>,
 }
 #[derive(Deserialize)]
@@ -225,6 +263,14 @@ async fn validate_id_token(
     Ok(c)
 }
 
+/// 绑定回调端口。被占是登录最常见的失败，单独成函数是为了统一错误文案
+/// （也是唯一一处把“端口 1455”写进用户可见文案的地方）。
+async fn bind_callback_port() -> Result<TcpListener> {
+    TcpListener::bind(("127.0.0.1", 1455))
+        .await
+        .context("OAuth 回调端口 1455 被占用")
+}
+
 async fn callback(listener: TcpListener) -> Result<(String, String, Option<String>, String)> {
     let (mut stream, _) = listener.accept().await?;
     let mut b = vec![0; 16384];
@@ -262,17 +308,48 @@ async fn callback(listener: TcpListener) -> Result<(String, String, Option<Strin
     Ok((code, state, id, scope))
 }
 
-/// OpenAI documented open-source OAuth flow (dynamic registration on first login).
+/// 浏览器授权流程。成功后把凭据写进配置目录。
+///
+/// 失败时返回**原始错误链**（不带日志路径），由调用方决定怎么展示：
+/// TUI 把它拼成一行 toast、CLI 打多行。每一步的细节（状态码、遮罩后的响应体）
+/// 另外落在 `log_path()` 指的诊断日志里。
 pub async fn login(dir: &Path) -> Result<()> {
     let mut log = AttemptLog::new();
     let outcome = login_inner(dir, &mut log).await;
+    if let Err(err) = &outcome {
+        log.fail(err);
+    }
     log.save(dir);
-    // 失败时把日志路径带上：TUI 只能看到一行 toast，细节都在日志里
-    outcome.with_context(|| format!("登录详情见 {}", log_path(dir).display()))
+    outcome
+}
+
+/// 记下一步失败再原样返回。
+///
+/// 登录链路（开端口 → 开浏览器 → 回调 → 换 token）每一段都可能断，
+/// 而 TUI 只能给一行 toast，所以每一段都要在诊断日志里留下痕迹。
+fn logging<T>(log: &mut AttemptLog, result: Result<T>) -> Result<T> {
+    if let Err(err) = &result {
+        log.fail(err);
+    }
+    result
 }
 
 async fn login_inner(dir: &Path, log: &mut AttemptLog) -> Result<()> {
-    let p = profile();
+    // 先落一步再开端口：端口被占是最常见的失败，而它在
+    // 任何后续 step 之前就返回，日志不能只剩一行标题。
+    let choice = std::env::var("APIM_OAUTH_CLIENT").ok();
+    let p = profile_for(choice.as_deref());
+    log.step(format!(
+        "开始登录：profile={} 配置目录 {}",
+        p.name,
+        dir.display()
+    ));
+    if let Some(unknown) = unknown_profile_choice(choice.as_deref()) {
+        log.step(format!(
+            "APIM_OAUTH_CLIENT={unknown} 无法识别，按缺省 {name} 档位登录（可选 apim）",
+            name = p.name
+        ));
+    }
     let previous = load(dir)?;
     let host = match &previous {
         Some(c) => c.host_id.clone(),
@@ -283,9 +360,7 @@ async fn login_inner(dir: &Path, log: &mut AttemptLog) -> Result<()> {
     // must start a fresh dynamic registration, or the authorize request fails with
     // `invalid_client` / "This app is unavailable".
     let previous = previous.filter(reusable_registration);
-    let listener = TcpListener::bind(("127.0.0.1", 1455))
-        .await
-        .context("OAuth 回调端口 1455 被占用")?;
+    let listener = logging(log, bind_callback_port().await)?;
     let redirect = p.redirect;
     let state = random_b64(24);
     let nonce = random_b64(24);
@@ -343,12 +418,17 @@ async fn login_inner(dir: &Path, log: &mut AttemptLog) -> Result<()> {
         registered_id.is_none(),
         previous.is_some()
     ));
-    crate::browser::open(url.as_str()).context("打开 OpenAI OAuth 登录页")?;
-    eprintln!("已打开浏览器，请完成 OpenAI/Codex 授权…");
-    let (code, got_state, returned_id, callback_scope) =
+    logging(
+        log,
+        crate::browser::open(url.as_str()).context("打开 OpenAI OAuth 登录页"),
+    )?;
+    let received = logging(
+        log,
         tokio::time::timeout(std::time::Duration::from_secs(600), callback(listener))
             .await
-            .context("OAuth 登录超时")??;
+            .map_err(|_| anyhow::anyhow!("OAuth 登录超时（10 分钟内没有回到回调）")),
+    )?;
+    let (code, got_state, returned_id, callback_scope) = logging(log, received)?;
     log.step(format!(
         "callback: 收到 code（{} 字符）, state 匹配={}, 回调 client_id={}, scope={}",
         code.len(),
@@ -426,11 +506,6 @@ async fn login_inner(dir: &Path, log: &mut AttemptLog) -> Result<()> {
         codex_family: p.codex_family,
     };
     save(dir, &cred)?;
-    println!(
-        "OpenAI Codex OAuth 已保存到 {}（诊断日志 {}）",
-        path(dir).display(),
-        log_path(dir).display()
-    );
     Ok(())
 }
 
@@ -484,10 +559,16 @@ impl Session {
             None => log.step("id token：响应里没有，跳过校验".to_string()),
             Some(id_token) if codex_family => {
                 // Codex CLI 档位不带 nonce（Pi/cc-switch 不校验 ID token），只取身份
-                log.step("id token：Codex CLI 档位不校验（同 Pi/cc-switch）".to_string());
-                if let Ok(claims) = decode_unverified::<IdClaims>(id_token) {
-                    identity.subject = claims.sub;
-                    identity.email = claims.email;
+                match decode_unverified::<IdTokenIdentity>(id_token) {
+                    Ok(identity_claims) => {
+                        log.step(
+                            "id token：Codex CLI 档位不校验，只取身份（同 Pi/cc-switch）"
+                                .to_string(),
+                        );
+                        identity.subject = identity_claims.sub;
+                        identity.email = identity_claims.email;
+                    }
+                    Err(err) => log.step(format!("id token：无法解析身份，已忽略（{err}）")),
                 }
             }
             Some(id_token) => match validate_id_token(http, id_token, client_id, nonce).await {
@@ -530,44 +611,64 @@ impl Identity {
     }
 }
 
+/// 轮换规则：服务端给了新的 refresh token 就用它，没给就沿用旧的。
+///
+/// RFC 6749 §6 允许刷新时**不**轮换，`TokenResponse` 的注释也把 `refresh_token`
+/// 当可缺字段——在这里硬要求“必须给新的”会让凭据到期后直接死掉（只能重新登录）。
+fn next_refresh_token(current: &str, rotated: Option<String>) -> String {
+    rotated
+        .filter(|s| !s.is_empty())
+        .unwrap_or_else(|| current.to_owned())
+}
+
 async fn refresh(dir: &Path, mut c: Credential, http: &Client) -> Result<Credential> {
     if c.expires_at > now() + 60 {
         return Ok(c);
     }
     let mut log = AttemptLog::new();
-    let r = token_grant(
-        http,
-        &[
-            ("grant_type", "refresh_token"),
-            ("client_id", &c.client_id),
-            ("refresh_token", &c.refresh_token),
-            ("resource", "https://api.openai.com/v1"),
-        ],
-        "刷新 token",
-        &mut log,
-    )
-    .await
-    .inspect_err(|_| log.save(dir))?;
-    let refresh_token = r
-        .refresh_token
-        .clone()
-        .filter(|s| !s.is_empty())
-        .context("刷新响应没有新的 refresh_token")?;
+    // 与登录同一口径：只有动态注册档位带 `resource`（见 login_inner 的 token form）。
+    // Pi 只发 grant_type/refresh_token/client_id，cc-switch 再带一个 scope，都不带 resource。
+    let (client_id, token) = (c.client_id.clone(), c.refresh_token.clone());
+    let mut form: Vec<(&str, &str)> = vec![
+        ("grant_type", "refresh_token"),
+        ("client_id", client_id.as_str()),
+        ("refresh_token", token.as_str()),
+    ];
+    if !c.codex_family {
+        form.push(("resource", "https://api.openai.com/v1"));
+    }
+    let r = token_grant(http, &form, "刷新 token", &mut log)
+        .await
+        .inspect_err(|_| log.save(dir))?;
     c.access_token = r.access_token;
-    c.refresh_token = refresh_token;
     c.expires_at = now() + r.expires_in;
+    let rotated = r.refresh_token.filter(|s| !s.is_empty());
+    if rotated.is_none() {
+        log.step("刷新响应没有新的 refresh_token，沿用旧的".to_string());
+    }
+    c.refresh_token = next_refresh_token(&c.refresh_token, rotated);
     if let Some(id) = r.id_token.filter(|s| !s.is_empty()) {
         c.id_token = id
     }
     if !r.scope.is_empty() {
         c.scopes = scopes(&r.scope)
     }
-    let access: AccessClaims = decode_unverified(&c.access_token)?;
-    c.account_id = access
-        .auth
-        .and_then(|a| a.chatgpt_account_id)
-        .context("刷新 token 缺少 account id")?;
+    // 先把拿到的新 token 落盘：POST 成功后服务端可能已经旋转了 refresh token，
+    // 下面任何失败都不能让磁盘留着被顶替的那一份（否则下次刷新是 invalid_grant）。
     save(dir, &c)?;
+    match decode_unverified::<AccessClaims>(&c.access_token) {
+        Ok(access) => match access.auth.and_then(|a| a.chatgpt_account_id) {
+            Some(account) => {
+                c.account_id = account;
+                save(dir, &c)?;
+            }
+            None => log.step("刷新后的 access token 没有 chatgpt_account_id，沿用旧值".to_string()),
+        },
+        Err(err) => log.step(format!(
+            "刷新后的 access token 无法解析（{err}），沿用旧 account id"
+        )),
+    }
+    log.save(dir);
     Ok(c)
 }
 
@@ -592,20 +693,23 @@ async fn token_grant(
         };
         let status = response.status();
         let body = response.text().await.unwrap_or_default();
-        log.step(format!(
-            "{step}：{url} → HTTP {}，响应 {} 字符",
-            status.as_u16(),
-            body.len()
-        ));
         if status.is_success() {
+            log.step(format!(
+                "{step}：{url} → HTTP {}，响应 {} 字符",
+                status.as_u16(),
+                body.len()
+            ));
             return serde_json::from_str(&body)
                 .with_context(|| format!("{step}：响应不是预期 JSON（{url}）"));
         }
+        // 失败的那条要把遮罩后的响应体也写进日志：文档（AGENTS.md / README）承诺的
+        // 就是“状态码 + 遮罩后的响应体”，只写个状态码在排障时等于没说。
         failure = format!(
             "{step}：{url} 返回 HTTP {}：{}",
             status.as_u16(),
             redact(&body)
         );
+        log.step(failure.clone());
         if !matches!(status.as_u16(), 400 | 401 | 403 | 404) {
             break;
         }
@@ -641,38 +745,66 @@ fn redact(body: &str) -> String {
     out.chars().take(300).collect()
 }
 
-/// 一次登录/刷新尝试的步骤记录（含状态码与遮罩后的响应体）。
+/// 一次登录/刷新尝试的步骤记录（状态码 + 遮罩后的响应体）。
 ///
-/// 失败时 TUI 只能看到一行 toast，而这条链路（浏览器 → 回调 → token 端点 →
+/// 失败时 TUI 只能给一行 toast，而这条链路（开端口 → 浏览器 → 回调 → token 端点 →
 /// ID token 校验）每一步都可能断，所以把步骤落到磁盘供事后诊断。
-/// **只记状态码、长度、client_id/scope 这类不敏感内容，不含任何 token。**
+/// **不含任何 token**：响应体统一过 `redact`（长串遮成 `[已隐藏]`），
+/// 授权码只记长度。
 pub struct AttemptLog {
     steps: Vec<String>,
+    /// 已经记过失败了（避免站点与收尾处各写一遍）。
+    failed: bool,
 }
 
 impl AttemptLog {
     fn new() -> Self {
-        Self { steps: Vec::new() }
+        Self {
+            steps: Vec::new(),
+            failed: false,
+        }
     }
 
+    /// 只收集，不往终端写：这个方法会在 TUI 的 tokio 任务里被调用，
+    /// 而那时 ratatui 正占着备用屏（往 stderr 写会乱屏或被 diff 掉）。
     fn step(&mut self, step: String) {
-        eprintln!("  {step}");
         self.steps.push(step);
     }
 
+    /// 记一条失败（带完整错误链），每个尝试只记第一条。
+    fn fail(&mut self, err: &anyhow::Error) {
+        if self.failed {
+            return;
+        }
+        self.failed = true;
+        self.step(format!("失败：{err:#}"));
+    }
+
     fn save(&mut self, dir: &Path) {
+        let text = self.render();
+        let _guard = write_lock();
+        // 日志只是诊断辅助：写不进去也不影响登录本身
+        let _ = crate::config::write_private(&log_path(dir), &text);
+    }
+
+    /// 日志正文（独立成函数：测试不用真去碰磁盘）。
+    fn render(&self) -> String {
         let mut text = "apim OpenAI OAuth 登录诊断\n".to_string();
         for step in &self.steps {
             text.push_str(step);
             text.push('\n');
         }
-        // 日志只是诊断辅助：写不进去也不影响登录本身
-        let _ = crate::config::write_private(&log_path(dir), &text);
+        text
     }
 }
 
 pub fn log_path(dir: &Path) -> PathBuf {
     dir.join("openai-oauth.log")
+}
+
+/// 凭据文件路径（CLI 的成功提示用，避免再次手写文件名）。
+pub fn credential_path(dir: &Path) -> PathBuf {
+    path(dir)
 }
 #[derive(Deserialize)]
 struct Window {
@@ -696,7 +828,20 @@ struct UsageJson {
     rate_limit: Option<Rate>,
     credits: Option<Credits>,
 }
+/// 进程内序列化整个用量查询（含可能发生的 token 刷新）。
+///
+/// TUI 里两个调用者（定时探测与 `--snapshot` 的阻塞刷新）会同时打同一份凭据；
+/// 若两边都落后于 60s 余量，它们会各自用同一份 refresh token 发刷新请求，
+/// 后到的那个拿到 `invalid_grant`，还在诊断日志里留下一条看起来像真故障的记录。
+/// 拿锁后再 `load`：后到的那个会读到刚刷新的凭据，直接跳过刷新。
+static USAGE_LOCK: tokio::sync::Mutex<()> = tokio::sync::Mutex::const_new(());
+
 pub async fn fetch_usage(dir: &Path) -> Result<Option<Usage>> {
+    let _guard = USAGE_LOCK.lock().await;
+    fetch_usage_locked(dir).await
+}
+
+async fn fetch_usage_locked(dir: &Path) -> Result<Option<Usage>> {
     let Some(c) = load(dir)? else { return Ok(None) };
     let http = client()?;
     let c = refresh(dir, c, &http).await?;
@@ -870,8 +1015,8 @@ mod tests {
         assert!(fetch_usage(&p).await.unwrap().is_none());
         let _ = fs::remove_dir_all(p);
     }
-    /// 复制进来的凭据只能查用量：按 `o` 必须重新走动态注册，
-    /// 否则会把未知 client_id 发给 OpenAI，报 `invalid_client`。
+    /// 复制进来的凭据只能查用量：`client_id` 不是 OpenAI 签发过的，就不能再当注册用
+    /// （按 `o` 会丢弃它重走所选档位；动态注册档位把它发出去会报 `invalid_client`）。
     #[test]
     fn only_a_real_openai_registration_is_reused_for_sign_in() {
         let mut c = credential();
@@ -958,6 +1103,15 @@ mod tests {
             "文档要求不许用 localhost"
         );
         assert!(apim.scope.contains(REQUIRED_SCOPE));
+        assert_eq!(profile_for(Some("dynamic")).client_id, None);
+        assert_eq!(profile_for(Some("codex")).client_id, Some(CODEX_CLIENT_ID));
+
+        // 写错字不能静默：仍按缺省档位走，但取值会被点名（登录时写进诊断日志）
+        assert!(unknown_profile_choice(None).is_none());
+        assert!(unknown_profile_choice(Some("codex")).is_none());
+        assert!(unknown_profile_choice(Some("apim")).is_none());
+        assert_eq!(unknown_profile_choice(Some("Codex")), Some("Codex"));
+        assert!(profile_for(Some("apar")).codex_family);
     }
 
     /// 错误信息/日志里不能带 token，哪怕响应体贴了完整 token JSON。
@@ -978,6 +1132,70 @@ mod tests {
         assert_eq!(reset_countdown(3 * 86400 + 8 * 3600), "3d 8h");
         assert_eq!(reset_countdown(0), "即将");
     }
+
+    /// 刷新时的轮换规则：没给新 token 就沿用旧的（RFC 6749 §6 允许不轮换），
+    /// 不能把“响应缺 refresh_token”当成致命错误。
+    #[test]
+    fn refresh_keeps_the_old_token_when_the_server_does_not_rotate() {
+        assert_eq!(next_refresh_token("old", None), "old");
+        assert_eq!(next_refresh_token("old", Some(String::new())), "old");
+        assert_eq!(next_refresh_token("old", Some("new".into())), "new");
+    }
+
+    /// 余量内不刷新：直接返回旧凭据，不发请求也不写盘。
+    #[tokio::test]
+    async fn refresh_returns_early_for_an_unexpired_credential() {
+        let p = dir("unexpired");
+        let mut c = credential();
+        c.expires_at = now() + 3_600;
+        let http = client().unwrap();
+        let out = refresh(&p, c.clone(), &http).await.unwrap();
+        assert_eq!(out.access_token, c.access_token);
+        assert_eq!(out.refresh_token, c.refresh_token);
+        assert!(
+            load(&p).unwrap().is_none(),
+            "提前返回不应写盘（目录里本没有凭据）"
+        );
+        let _ = fs::remove_dir_all(p);
+    }
+
+    /// 登录失败要先落进诊断日志（带错误链），且只记第一条：
+    /// 用户看到的 toast 只有一行，日志是唯一能说清楚的地方。
+    #[test]
+    fn attempt_log_records_the_cause_once() {
+        let mut log = AttemptLog::new();
+        log.step("开始登录：profile=codex".to_string());
+        log.fail(&anyhow::anyhow!("OAuth 回调端口 1455 被占用"));
+        log.fail(&anyhow::anyhow!("外层又包装了一次"));
+        let text = log.render();
+        assert_eq!(
+            text.lines().filter(|l| l.starts_with("失败：")).count(),
+            1,
+            "{text}"
+        );
+        assert!(text.contains("端口 1455 被占用"), "{text}");
+        assert!(text.contains("开始登录"), "{text}");
+    }
+
+    /// Codex CLI 档位的 ID token 里没有 `nonce` claim（授权请求就没发）。
+    /// 用要求 nonce 的 `IdClaims` 解它永远失败，`sub`/`email` 会被静默丢掉 ——
+    /// `apim auth openai status` 因此永远显示“账户已验证”。
+    #[test]
+    fn codex_id_token_identity_is_read_without_a_nonce_claim() {
+        let payload = serde_json::json!({"sub": "user-1", "email": "user@example.invalid"});
+        let token = format!(
+            "h.{}.s",
+            URL_SAFE_NO_PAD.encode(serde_json::to_vec(&payload).unwrap())
+        );
+        let identity: IdTokenIdentity = decode_unverified(&token).unwrap();
+        assert_eq!(identity.sub, "user-1");
+        assert_eq!(identity.email.as_deref(), Some("user@example.invalid"));
+        assert!(
+            decode_unverified::<IdClaims>(&token).is_err(),
+            "同一份 token 用要求 nonce 的结构就解不出来：这正是之前丢字段的原因"
+        );
+    }
+
     #[test]
     fn parses_account_id_from_access_jwt() {
         let body = URL_SAFE_NO_PAD.encode(

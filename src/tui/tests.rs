@@ -104,3 +104,37 @@ fn ctrl_z_with_empty_history_is_harmless() {
     );
     assert_eq!(app.toast_text(), Some("没有可撤销的操作"));
 }
+
+// ---- `o` 键路由（OpenAI Codex OAuth）----------------------------------
+
+/// `o` 只在内置 OpenAI 的密钥栏是登录；别处必须解释自己而不是静默无效。
+/// 走真实按键路由，删掉 tui.rs 的兜底分支这条就会红。
+#[test]
+fn o_outside_openai_routes_to_the_toast() {
+    let (mut app, _rx, _rx_models) = test_app(&[("alpha", &["a1"])]);
+    app.focus = Focus::Keys;
+    assert_ne!(app.current_provider_id(), Some("openai"));
+
+    handle_key(&mut app, KeyEvent::from(KeyCode::Char('o')));
+
+    assert!(
+        app.toast_text().unwrap().contains("仅内置 OpenAI"),
+        "{:?}",
+        app.toast_text()
+    );
+}
+
+/// OpenAI 上按 `o` 走登录分支：这里让登录“已在跑”，不绑端口、不开浏览器，
+/// 只验证它没落到“仅内置 OpenAI 支持”的兜底提示上。
+#[test]
+fn o_on_openai_does_not_take_the_fallback_toast() {
+    let (mut app, _rx, _rx_models) = test_app(&[("openai", &["k"])]);
+    app.focus_provider("openai");
+    app.focus = Focus::Keys;
+    assert_eq!(app.current_provider_id(), Some("openai"));
+    app.oauth_login_running = true;
+
+    handle_key(&mut app, KeyEvent::from(KeyCode::Char('o')));
+
+    assert_eq!(app.toast_text(), None, "OpenAI 上按 o 不该出现兜底提示");
+}

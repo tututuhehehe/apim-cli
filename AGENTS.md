@@ -68,7 +68,7 @@ src/
 │   ├── form_modal.rs  表单弹窗（光标截断渲染）
 │   ├── import.rs      一键导入面板渲染
 │   └── confirm.rs     删除确认弹窗
-├── openai_auth.rs     OpenAI Codex OAuth 动态注册、PKCE、凭据刷新与用量查询
+├── openai_auth.rs     OpenAI Codex OAuth：浏览器登录（缺省 Codex CLI 档位，`APIM_OAUTH_CLIENT=apim` 走动态注册）、PKCE、凭据刷新与用量查询
 ├── util.rs            跨模块小工具（truncate、expand_tilde；只放「多处各写了一遍」的东西）
 ├── recipe/            厂商协议
 │   ├── mod.rs         Recipe/ProviderKind/Auth/HttpCall 模型、YAML 加载（builtin→manifest→user 逐级覆盖，加载期校验 id 字符集）、is_valid_id、{token}/{base_url} 模板替换
@@ -101,8 +101,8 @@ recipes/              内置 recipe ×4（deepseek/openai/moonshot/openrouter，
 
 - `~/.config/apim/config.toml` — 密钥清单（provider/alias/group，无 token）
 - `~/.config/apim/secrets.toml` — API token，键名 `"厂商.别名"`，600 权限
-- `~/.config/apim/openai-oauth.json` — apim 自己的 OpenAI Codex OAuth 凭据（access/refresh/id token），600 权限；`openai-oauth-host-id` 是稳定 host ID；`openai-oauth.log` 是最近一次登录的逐步诊断（只有状态码与遮罩后的响应体，不含 token）；与 Pi 的 `auth.json` 无关
-- 浏览器登录缺省复刻 Codex CLI 客户端（Pi / cc-switch 同款：固定公开 client id `app_EMoamEEZ73f0CkXaXp7hrann`、`localhost` 回调、不发 nonce、不申请 `resource`）。**不要改回缺省走动态注册**：实测动态注册签发的 token 里 `https://api.openai.com/auth` 只有 `per_user_salt` + `encrypted_auth_metadata`（无 `chatgpt_account_id`），请求 `backend-api/wham/usage` 一律 401；`APIM_OAUTH_CLIENT=apim` 是显式切回的口子。token 端点按 `/api/accounts/oauth/token` → `/oauth/token` 依次尝试
+- `~/.config/apim/openai-oauth.json` — apim 自己的 OpenAI Codex OAuth 凭据（access/refresh/id token），600 权限；`openai-oauth-host-id` 是稳定 host ID；`openai-oauth.log` 是最近一次登录/刷新的逐步诊断（状态码与遮罩后的响应体，不含 token），登录失败时也会把完整错误链写进去；与 Pi 的 `auth.json` 无关
+- 浏览器登录缺省复刻 Codex CLI 客户端（Pi / cc-switch 同款：固定公开 client id `app_EMoamEEZ73f0CkXaXp7hrann`、`localhost` 回调、不发 nonce、不申请 `resource`）。**不要改回缺省走动态注册**：实测动态注册签发的 token 里 `https://api.openai.com/auth` 只有 `per_user_salt` + `encrypted_auth_metadata`（无 `chatgpt_account_id`），请求 `backend-api/wham/usage` 一律 401；`APIM_OAUTH_CLIENT=apim` 是显式切回的口子（写错的值会被点名写进诊断日志，不静默）。token 端点按 `/api/accounts/oauth/token` → `/oauth/token` 依次尝试；刷新 token 与登录同口径（Codex CLI 档位不带 `resource`），且服务端不轮换 refresh token 时沿用旧的
 - `~/.config/apim/recipes/*.yaml` — 用户厂商 recipe，同 id 覆盖内置；非模型厂商靠 `kind: non_model` 标识（缺省即模型）
 - `~/.codex/config.toml`、`~/.codex/apim-models.json` — 一键导入到 Codex（`x` 键）写的，前者每次改写前备份成 `config.toml.apim.bak`
 - `~/.pi/agent/models.json` — 一键导入到 Pi（`x` 键）写的，备份成 `models.json.apim.bak`；`PI_CODING_AGENT_DIR` 可改整个目录。`settings.json` / `auth.json` **都不写**（前者完全不碰，后者只读来判断哪把 key 在用）

@@ -14,6 +14,7 @@ pub(crate) fn draw_balance(frame: &mut Frame, app: &App, area: Rect) {
     let key = app.selected_key_entry();
     let alias = key.map(|k| k.alias.as_str()).unwrap_or("—");
     let is_openai = app.current_provider_id() == Some("openai");
+    let oauth_state = super::oauth_state(app);
     let block = pane_block(
         if is_openai {
             format!(" 额度 · {alias} + AUTH ")
@@ -31,22 +32,26 @@ pub(crate) fn draw_balance(frame: &mut Frame, app: &App, area: Rect) {
             "AUTH · OpenAI Codex",
             Style::new().fg(theme::ACCENT).add_modifier(Modifier::BOLD),
         )));
-        if app.oauth_checking && app.oauth_balance.is_none() {
-            lines.push(Line::from(Span::styled(
+        // 状态口径与密钥表那一行共用（`super::oauth_state`），两边不会各说一句话
+        match oauth_state {
+            Some(super::OAuthState::LoggingIn) => lines.push(Line::from(Span::styled(
+                "  正在登录 · 请在浏览器里完成授权",
+                Style::new().fg(theme::MUTED),
+            ))),
+            Some(super::OAuthState::Checking) => lines.push(Line::from(Span::styled(
                 "  正在查询 OAuth 额度…",
                 Style::new().fg(theme::MUTED),
-            )));
-        } else {
-            match &app.oauth_balance {
-                None => lines.push(Line::from(Span::styled(
-                    "  尚未查询",
-                    Style::new().fg(theme::MUTED),
-                ))),
-                Some(Ok(values)) if values.is_empty() => lines.push(Line::from(Span::styled(
-                    "  未配置 · 运行 apim auth openai login",
-                    Style::new().fg(theme::MUTED),
-                ))),
-                Some(Ok(values)) => {
+            ))),
+            Some(super::OAuthState::NotQueried) => lines.push(Line::from(Span::styled(
+                "  尚未查询",
+                Style::new().fg(theme::MUTED),
+            ))),
+            Some(super::OAuthState::NotConfigured) => lines.push(Line::from(Span::styled(
+                "  未配置 · 运行 apim auth openai login",
+                Style::new().fg(theme::MUTED),
+            ))),
+            Some(super::OAuthState::Ready) => {
+                if let Some(Ok(values)) = &app.oauth_balance {
                     for value in values {
                         lines.push(Line::from(Span::styled(
                             format!("  {value}"),
@@ -54,11 +59,16 @@ pub(crate) fn draw_balance(frame: &mut Frame, app: &App, area: Rect) {
                         )));
                     }
                 }
-                Some(Err(error)) => lines.push(Line::from(Span::styled(
-                    format!("  {error}"),
-                    Style::new().fg(theme::ERR),
-                ))),
             }
+            Some(super::OAuthState::Failed) => {
+                if let Some(Err(error)) = &app.oauth_balance {
+                    lines.push(Line::from(Span::styled(
+                        format!("  {error}"),
+                        Style::new().fg(theme::ERR),
+                    )));
+                }
+            }
+            None => {}
         }
         lines.push(Line::from(""));
     }

@@ -395,6 +395,16 @@ async fn status_unknown_provider_bails() {
 }
 
 #[tokio::test]
+async fn auth_openai_rejects_an_unknown_subcommand() {
+    let ctx = temp_ctx("auth-unknown-subcommand");
+    // 拼错的子命令要非零退出（clap 式机器接口），不能只打一行用法就 Ok
+    assert!(auth::run(&ctx, &argv(&["openai", "loginn"])).await.is_err());
+    assert!(auth::run(&ctx, &argv(&["openai"])).await.is_err());
+    // status/logout 是纯本地读写，不联网：没凭据时 status 仍然成功
+    assert!(auth::run(&ctx, &argv(&["openai", "status"])).await.is_ok());
+}
+
+#[tokio::test]
 async fn provider_rm_protections() {
     let ctx = temp_ctx("rm-protect");
     // 内置不可删

@@ -61,19 +61,7 @@ pub(crate) fn draw_keys(frame: &mut Frame, app: &App, area: Rect) {
             .style(Style::new().fg(theme::TEXT))
         })
         .collect();
-    if app.current_provider_id() == Some("openai") {
-        let status = if app.oauth_login_running {
-            "… 登录中"
-        } else if app.oauth_checking {
-            "… 查询中"
-        } else {
-            match &app.oauth_balance {
-                Some(Ok(values)) if values.is_empty() => "未配置",
-                Some(Ok(_)) => "● 已连接",
-                Some(Err(_)) => "● 失败",
-                None => "—",
-            }
-        };
+    if let Some((style, label)) = super::oauth_row_status(app) {
         rows.push(
             Row::new([
                 Cell::from("—"),
@@ -83,7 +71,7 @@ pub(crate) fn draw_keys(frame: &mut Frame, app: &App, area: Rect) {
                 )),
                 Cell::from("OAuth"),
                 Cell::from("Codex · apim 管理"),
-                Cell::from(status),
+                Cell::from(Span::styled(label, style)),
             ])
             .style(Style::new().fg(theme::TEXT)),
         );

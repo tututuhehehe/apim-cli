@@ -622,9 +622,18 @@ impl App {
         tokio::spawn(async move {
             let result = crate::openai_auth::login(&dir)
                 .await
-                .map_err(|e| e.to_string());
+                .map_err(|e| format!("{e:#}"));
             let _ = tx.send(TaskMsg::OAuthLogin(result));
         });
+    }
+
+    /// 右下额度面板里的 `o` 提示：它只在内置 OpenAI 厂商的密钥栏有效。
+    /// 无效位置不能静默（m/x/c/d/e/i 都会解释自己）。
+    pub fn note_oauth_unavailable(&mut self) {
+        self.toast = Some((
+            "o：仅内置 OpenAI 厂商的密钥栏支持 Codex OAuth 登录".into(),
+            Instant::now(),
+        ));
     }
 
     pub fn apply_oauth_login(&mut self, result: Result<(), String>) {
@@ -636,7 +645,14 @@ impl App {
                 self.oauth_checking = false;
                 self.spawn_oauth_probe();
             }
-            Err(error) => self.toast = Some((format!("OAuth 登录失败: {error}"), Instant::now())),
+            Err(error) => {
+                // 错误链在前、日志路径在后：底栏很窄，真正有用的原因不能被路径挤掉
+                let log = crate::openai_auth::log_path(&self.config_dir);
+                self.toast = Some((
+                    format!("OAuth 登录失败: {error}（详情见 {}）", log.display()),
+                    Instant::now(),
+                ));
+            }
         }
     }
 
@@ -1101,6 +1117,34 @@ pub(crate) mod tests {
         app.select_provider(0);
         app.move_down();
         assert_eq!(app.selected_provider(), 0, "过滤后只有一项，不应移动");
+    }
+
+    /// 登录失败的 toast 必须**先说原因**（错误链），日志路径只能跟在后头：
+    /// 底栏很窄，路径把原因挤出去等于什么都没说。
+    #[test]
+    fn failed_login_toast_leads_with_the_cause() {
+        let (mut app, _rx, _rx_models) = test_app(&[("openai", &["k"])]);
+        app.oauth_login_running = true;
+        app.apply_oauth_login(Err("OAuth 回调端口 1455 被占用".into()));
+        let toast = app.toast_text().expect("失败必须有提示").to_string();
+        assert!(
+            toast.starts_with("OAuth 登录失败: OAuth 回调端口 1455 被占用"),
+            "{toast}"
+        );
+        assert!(toast.ends_with('）'), "日志路径应在最后：{toast}");
+        assert!(!app.oauth_login_running, "失败也要把登录中状态清掉");
+    }
+
+    /// 不可用位置的提示文案（路由分支本身在 src/tui/tests.rs 里走真实按键验证）。
+    #[test]
+    fn oauth_unavailable_toast_explains_itself() {
+        let (mut app, _rx, _rx_models) = test_app(&[("alpha", &["a1"])]);
+        app.note_oauth_unavailable();
+        assert!(
+            app.toast_text().unwrap().contains("仅内置 OpenAI"),
+            "{:?}",
+            app.toast_text()
+        );
     }
 
     /// 切厂商（`j`/`k`）时顺手重算 ★ 现场：用户在别的窗口手改了客户端配置，

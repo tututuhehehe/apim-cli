@@ -117,6 +117,57 @@ pub(crate) fn script_status(
     })
 }
 
+/// AUTH（OpenAI Codex OAuth）的当前状态。
+///
+/// 密钥表的状态列与右下额度面板共用这一处口径：两边各算一份会出现
+/// 「表里写着正在登录、面板还摇头显示旧额度」这种自相矛盾的画面。
+pub(crate) enum OAuthState {
+    /// 正在跑登录（浏览器授权，最多 10 分钟）
+    LoggingIn,
+    /// 正在查额度，且还没有旧读数
+    Checking,
+    /// 还没查过
+    NotQueried,
+    /// 没有凭据
+    NotConfigured,
+    /// 有读数
+    Ready,
+    /// 查询或凭据出错
+    Failed,
+}
+
+/// 当前厂商是内置 OpenAI 时的 AUTH 状态；其它厂商 → `None`。
+pub(crate) fn oauth_state(app: &App) -> Option<OAuthState> {
+    if app.current_provider_id() != Some("openai") {
+        return None;
+    }
+    Some(if app.oauth_login_running {
+        OAuthState::LoggingIn
+    } else if app.oauth_checking && app.oauth_balance.is_none() {
+        OAuthState::Checking
+    } else {
+        match &app.oauth_balance {
+            None => OAuthState::NotQueried,
+            Some(Ok(values)) if values.is_empty() => OAuthState::NotConfigured,
+            Some(Ok(_)) => OAuthState::Ready,
+            Some(Err(_)) => OAuthState::Failed,
+        }
+    })
+}
+
+/// 密钥表「AUTH」行的状态标签（口径见 `oauth_state`）。
+/// `None` = 当前不是内置 OpenAI，不画这一行。
+pub(crate) fn oauth_row_status(app: &App) -> Option<(Style, &'static str)> {
+    Some(match oauth_state(app)? {
+        OAuthState::LoggingIn => (Style::new().fg(theme::MUTED), "… 登录中"),
+        OAuthState::Checking => (Style::new().fg(theme::MUTED), "… 查询中"),
+        OAuthState::NotQueried => (Style::new().fg(theme::MUTED), "—"),
+        OAuthState::NotConfigured => (Style::new().fg(theme::MUTED), "未配置"),
+        OAuthState::Ready => (Style::new().fg(theme::OK), "● 已连接"),
+        OAuthState::Failed => (Style::new().fg(theme::ERR), "● 失败"),
+    })
+}
+
 pub(crate) fn pane_block<'a>(
     title: impl Into<ratatui::text::Line<'a>>,
     focused: bool,
@@ -179,4 +230,46 @@ pub(crate) fn centered(width: u16, height: u16, area: Rect) -> Rect {
         ])
         .split(v[1]);
     h[1]
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::app::tests::test_app;
+
+    /// AUTH 的状态口径只有这一处：密钥表那一行与额度面板都必须从这里取，
+    /// 两个面板不许各算一份（否则会出现「表里写着正在登录、面板还显示旧额度」）。
+    #[test]
+    fn oauth_state_is_one_shared_source() {
+        let (mut app, _rx, _rx_task) = test_app(&[("openai", &["api-key"]), ("alpha", &["a1"])]);
+
+        // 非内置 OpenAI：两边都不该画 AUTH
+        app.focus_provider("alpha");
+        assert!(oauth_state(&app).is_none());
+        assert!(oauth_row_status(&app).is_none());
+
+        // 内置 OpenAI，且还没查过
+        app.focus_provider("openai");
+        assert!(matches!(oauth_state(&app), Some(OAuthState::NotQueried)));
+        assert_eq!(oauth_row_status(&app).unwrap().1, "—");
+
+        // 登录进行中：密钥表与额度面板看到的是同一个状态（不是“查询中”，也不是旧读数）
+        app.oauth_login_running = true;
+        assert!(matches!(oauth_state(&app), Some(OAuthState::LoggingIn)));
+        assert_eq!(oauth_row_status(&app).unwrap().1, "… 登录中");
+
+        // 没有凭据
+        app.oauth_login_running = false;
+        app.oauth_balance = Some(Ok(Vec::new()));
+        assert!(matches!(oauth_state(&app), Some(OAuthState::NotConfigured)));
+        assert_eq!(oauth_row_status(&app).unwrap().1, "未配置");
+
+        // 有读数 / 出错
+        app.oauth_balance = Some(Ok(vec!["Codex 1mo：已用 27%".into()]));
+        assert!(matches!(oauth_state(&app), Some(OAuthState::Ready)));
+        assert_eq!(oauth_row_status(&app).unwrap().1, "● 已连接");
+        app.oauth_balance = Some(Err("Codex 用量请求失败".into()));
+        assert!(matches!(oauth_state(&app), Some(OAuthState::Failed)));
+        assert_eq!(oauth_row_status(&app).unwrap().1, "● 失败");
+    }
 }

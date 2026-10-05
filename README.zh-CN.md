@@ -123,7 +123,7 @@ apim auth openai logout
 
 ## 增删改查
 
-**OpenAI Codex OAuth**：在内置 OpenAI 厂商的密钥栏按 `o`（或运行 `apim auth openai login`），会打开浏览器让你授权 apim。首次登录使用 OpenAI [官方开源动态注册流程](https://developers.openai.com/siwc/token-sharing-open-source/sign-in)，之后复用 OpenAI 签发的 client ID。凭据单独保存于 `~/.config/apim/openai-oauth.json`，权限为 `600`；host ID 也保存在同一配置目录。`apim auth openai status|logout` 可查看或移除凭据。固定 `AUTH` 行不是普通密钥，不能复制、编辑、删除或用 `x` 导入。登录失败时 apim 会把每一步（状态码 + 已遮罩的响应体，绝不含 token）写进 `~/.config/apim/openai-oauth.log`。登录用与 Pi / cc-switch 相同的 Codex CLI 客户端配置：OpenAI 的开源动态注册签发的 token 里，`https://api.openai.com/auth` 不带 `chatgpt_account_id`，Codex 用量接口对它一律 401（`APIM_OAUTH_CLIENT=apim` 可切回那个档位）。OpenAI 额度面板始终并列显示 Codex OAuth 用量（接口返回的每个限额窗口都会列一行，标签按窗口真实长度算，并带重置倒计时）和当前 API Key 的独立 API 额度；具体有哪些窗口取决于套餐（`go` 账号只回一个按月窗口，`pro` 是 5h + 1w），且 OAuth 用量依赖 OpenAI 未公开的 ChatGPT 接口，接口变更时可能需要维护。
+**OpenAI Codex OAuth**：在内置 OpenAI 厂商的密钥栏按 `o`（或运行 `apim auth openai login`），会打开浏览器让你授权 apim。登录用与 Pi / cc-switch 相同的 Codex CLI 客户端配置：OpenAI [官方开源动态注册流程](https://developers.openai.com/siwc/token-sharing-open-source/sign-in)签发的 token 里，`https://api.openai.com/auth` 不带 `chatgpt_account_id`，Codex 用量接口对它一律 401（`APIM_OAUTH_CLIENT=apim` 可改用那个档位）。凭据单独保存于 `~/.config/apim/openai-oauth.json`，权限为 `600`；host ID 也保存在同一配置目录。`apim auth openai status|logout` 可查看或移除凭据。固定 `AUTH` 行不是普通密钥，不能复制、编辑、删除或用 `x` 导入。登录失败时 apim 会把每一步（状态码 + 已遮罩的响应体，绝不含 token）写进 `~/.config/apim/openai-oauth.log`，底栏 toast 会先显示失败原因、后面才跟这个路径。OpenAI 额度面板始终并列显示 Codex OAuth 用量（接口返回的每个限额窗口都会列一行，标签按窗口真实长度算，并带重置倒计时）和当前 API Key 的独立 API 额度；具体有哪些窗口取决于套餐（`go` 账号只回一个按月窗口，`pro` 是 5h + 1w），且 OAuth 用量依赖 OpenAI 未公开的 ChatGPT 接口，接口变更时可能需要维护。
 
 **添加密钥（右侧按 `a`）**：填别名、分组（可空）、密钥，厂商用 `←`/`→` 切换。密钥可以直接 `⌘V` 粘贴。`Enter` 保存，立即写盘并自动检测。
 
@@ -315,7 +315,7 @@ apim status glm --json
 
 - `config.toml`：别名、分组（不含 token）
 - `secrets.toml`：API token，键名是 `"厂商.别名"`
-- `openai-oauth.json`：apim 的 OpenAI Codex OAuth 凭据（权限 600）；`openai-oauth-host-id` 保存稳定 host ID，`openai-oauth.log` 记录最近一次登录尝试（只有状态码，不含 token）
+- `openai-oauth.json`：apim 的 OpenAI Codex OAuth 凭据（权限 600）；`openai-oauth-host-id` 保存稳定 host ID，`openai-oauth.log` 记录最近一次登录或刷新尝试（状态码 + 已遮罩的响应体，不含 token）
 
 导入目标在别处：`~/.codex/config.toml` + `~/.codex/apim-models.json`（Codex，备份为 `config.toml.apim.bak`）与 `~/.pi/agent/models.json`（Pi，备份为 `models.json.apim.bak`；`PI_CODING_AGENT_DIR` 可改整个目录）。Pi 的 `settings.json` 一个字都不写；apim 只**读** `auth.json`（也不写它）来判断哪把 key 在用。
 

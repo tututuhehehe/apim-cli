@@ -190,12 +190,14 @@ fn handle_key(app: &mut App, key: KeyEvent) {
                 app.duplicate_selected_provider()
             }
             KeyCode::Char('i') => app.open_inspector(),
-            // x：把当前密钥 + 厂商 + 勾选的模型一键导入到 Codex
             KeyCode::Char('o')
                 if app.focus == Focus::Keys && app.current_provider_id() == Some("openai") =>
             {
                 app.start_openai_oauth_login()
             }
+            // o 在别处不是静默无效键；也不提供取消/重试（那是另一件事）
+            KeyCode::Char('o') => app.note_oauth_unavailable(),
+            // x：把当前密钥 + 厂商 + 勾选的模型一键导入到 Codex
             KeyCode::Char('x') => app.open_import(),
             KeyCode::Char('d') => app.open_delete(),
             KeyCode::Char('j') | KeyCode::Down => app.move_down(),
