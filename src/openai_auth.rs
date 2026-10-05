@@ -401,6 +401,7 @@ pub async fn fetch_usage(dir: &Path) -> Result<Option<Usage>> {
         .get(USAGE_URL)
         .bearer_auth(&c.access_token)
         .header("ChatGPT-Account-Id", &c.account_id)
+        .header(reqwest::header::USER_AGENT, "codex-cli")
         .send()
         .await?
         .error_for_status()
@@ -427,8 +428,12 @@ pub async fn fetch_usage(dir: &Path) -> Result<Option<Usage>> {
             21601..=691200 => "1w",
             _ => "Quota",
         };
+        let reset = w
+            .reset_at
+            .map(|at| format!(" · {} 后重置", reset_countdown(at.saturating_sub(now()))))
+            .unwrap_or_default();
         lines.push(format!(
-            "Codex {label}：已用 {:.0}% · 剩余 {:.0}%",
+            "Codex {label}：已用 {:.0}% · 剩余 {:.0}%{reset}",
             used,
             100.0 - used
         ));
@@ -445,6 +450,22 @@ pub async fn fetch_usage(dir: &Path) -> Result<Option<Usage>> {
     }
     Ok(Some(Usage { lines }))
 }
+fn reset_countdown(seconds: u64) -> String {
+    if seconds == 0 {
+        return "即将".into();
+    }
+    let days = seconds / 86_400;
+    let hours = (seconds % 86_400) / 3_600;
+    let minutes = (seconds % 3_600).div_ceil(60);
+    if days > 0 {
+        format!("{days}d {hours}h")
+    } else if hours > 0 {
+        format!("{hours}h {minutes}m")
+    } else {
+        format!("{minutes}m")
+    }
+}
+
 pub fn remove(dir: &Path) -> Result<()> {
     let p = path(dir);
     if p.exists() {
@@ -506,6 +527,12 @@ mod tests {
         let p = dir("missing");
         assert!(fetch_usage(&p).await.unwrap().is_none());
         let _ = fs::remove_dir_all(p);
+    }
+    #[test]
+    fn reset_countdown_formats_hours_and_days() {
+        assert_eq!(reset_countdown(3600 + 42 * 60), "1h 42m");
+        assert_eq!(reset_countdown(3 * 86400 + 8 * 3600), "3d 8h");
+        assert_eq!(reset_countdown(0), "即将");
     }
     #[test]
     fn parses_account_id_from_access_jwt() {
