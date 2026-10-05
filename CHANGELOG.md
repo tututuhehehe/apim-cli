@@ -3,6 +3,39 @@
 本项目遵循 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.1.0/) 与
 [语义化版本](https://semver.org/lang/zh-CN/)。
 
+## [0.1.7] - 2026-10-05
+
+### 新增
+
+- **OpenAI Codex OAuth 用量**：内置 OpenAI 厂商的密钥栏按 `o`（或 `apim auth openai login`）在浏览器里
+  授权，额度面板就会在 API Key 额度之外**并列**显示 ChatGPT/Codex 的订阅用量：接口返回的每个限额窗口
+  各占一行、标签按窗口真实长度算（5h / 1w / 1mo）、带重置倒计时，另有套餐与 credits。密钥表里多一条固定的
+  `AUTH` 行显示状态（未配置 / 查询中 / 已连接 / 失败）；它**不是**普通密钥，不能复制、编辑、删除，`x` 也不导入。
+  CLI：`apim auth openai login|status|logout`。
+- 凭据由 apim 自己保管：`~/.config/apim/openai-oauth.json`（600 权限），与 Pi 的 `auth.json` 再无关系；
+  登录走 Codex CLI 客户端配置（与 Pi / cc-switch 同款，`localhost` 回调），
+  `APIM_OAUTH_CLIENT=apim` 可切到 OpenAI 的开源动态注册档位。
+- 登录失败可诊断：每一步（含 token 端点状态码与已遮罩的响应体，绝不含 token）写进
+  `~/.config/apim/openai-oauth.log`，底栏 toast 先说原因、后跟日志路径。
+
+### 变更
+
+- 额度窗口标签不再假设「一定有 5h + 7d」：按接口返回的窗口长度算（`go` 套餐只有一个按月窗口就只显示一条）。
+
+### 修复
+
+- `jsonwebtoken` 升到 10.4.0（9.x 的 CVE-2026-25537：`nbf`/`exp` 类型混淆可能绕过时间校验）。
+  apim 的用法本不受影响（没开 `validate_nbf`、`exp` 仍在默认必检集合里，且自己再查一遍），
+  仍一并升级；`default-features = false` 保持不变，不引入 `pem` / `simple_asn1` / `time`。
+- 刷新 token 时不再给 Codex CLI 档位多带 `resource`（与登录表单同口径）；服务端已轮换的 refresh token
+  一定先落盘，不会再被后续校验失败丢掉。
+- 刷新响应没有新 refresh token 时沿用旧的（RFC 6749 §6 允许不轮换），不再让凭据到期即死。
+- `apim auth openai <未知子命令>` 改为非零退出；`o` 在非内置 OpenAI 处给出提示而不是静默无效。
+
+### 内部
+
+- AUTH 状态收敛到 `ui::oauth_state` 单一来源，密钥表与额度面板不会再各说各话；凭据与诊断日志写入串行化。
+
 ## [0.1.6] - 2026-10-03
 
 ### 新增
@@ -170,7 +203,8 @@
 - `apim --version` 版本输出（供安装脚本与更新检测使用）
 - MIT 开源协议
 
-[Unreleased]: https://github.com/tututuhehehe/apim-cli/compare/v0.1.6...HEAD
+[Unreleased]: https://github.com/tututuhehehe/apim-cli/compare/v0.1.7...HEAD
+[0.1.7]: https://github.com/tututuhehehe/apim-cli/releases/tag/v0.1.7
 [0.1.6]: https://github.com/tututuhehehe/apim-cli/releases/tag/v0.1.6
 [0.1.5]: https://github.com/tututuhehehe/apim-cli/releases/tag/v0.1.5
 [0.1.4]: https://github.com/tututuhehehe/apim-cli/releases/tag/v0.1.4
