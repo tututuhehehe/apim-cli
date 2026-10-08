@@ -1694,4 +1694,17 @@ pub(crate) mod tests {
             crate::clients::codex::CodexRoute::OfficialOauth
         );
     }
+
+    /// 内置 `openai` 不能复制（副本登不上它的 OAuth，也没 AUTH 行）：`y` 给明确提示，不落文件。
+    #[test]
+    fn duplicating_the_builtin_openai_is_refused() {
+        let (mut app, _rx, _rx_models) = test_app(&[("openai", &["api-key"])]);
+        app.config_dir = test_config_dir("dup-openai");
+        app.focus = Focus::Providers;
+        app.duplicate_selected_provider();
+        let toast = app.toast_text().unwrap_or_default();
+        assert!(toast.contains("复制失败"), "{toast}");
+        assert!(toast.contains("不能复制"), "{toast}");
+        assert!(!app.recipes.contains_key("openai-copy"));
+    }
 }

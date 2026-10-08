@@ -416,6 +416,25 @@ async fn auth_openai_import_codex_needs_a_credential_first() {
     assert!(err.contains("auth openai login"), "{err}");
 }
 
+/// 内置 `openai` 不可复制：它的 OAuth 凭据是全局一份，副本永远登录不上（见 `docs/TODO.md`）。
+#[tokio::test]
+async fn provider_copy_refuses_the_builtin_openai() {
+    let ctx = temp_ctx("copy-openai");
+    let err = provider::run(&ctx, &argv(&["copy", "openai"]))
+        .await
+        .unwrap_err()
+        .to_string();
+    assert!(err.contains("不能复制"), "{err}");
+    assert!(!ctx.recipes_dir.join("openai-copy.yaml").exists());
+    assert!(ctx.load_recipes().unwrap().contains_key("openai"));
+
+    // 别的内置厂商照旧可复制（规则只针对保留 id，不是「内置都不行」）
+    provider::run(&ctx, &argv(&["copy", "deepseek", "deepseek2"]))
+        .await
+        .unwrap();
+    assert!(ctx.load_recipes().unwrap().contains_key("deepseek2"));
+}
+
 #[tokio::test]
 async fn provider_rm_protections() {
     let ctx = temp_ctx("rm-protect");

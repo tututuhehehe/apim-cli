@@ -10,10 +10,31 @@ use anyhow::{Context, Result, bail};
 use super::Recipe;
 use super::store::save_user_recipe_to;
 
+/// 不能复制的厂商 id：内置 `openai`。
+///
+/// 它的 OAuth 凭据是**全局一份**（`~/.config/apim/openai-oauth.json`）：`o` 登录、密钥表的
+/// AUTH 行、`x` 导入 Codex 官方路都只认 id 正好是 `openai` 的那个厂商。复制出来的
+/// `openai-copy` 于是成了一个「看着像 OpenAI、却永远登录不上、也没有 AUTH 行」的厂商——
+/// 与其让用户踩坑，不如直接拒绝（想加第二个 OpenAI 兼容厂商就用 `provider add` 建新 id，
+/// 它本来就不带 OAuth）。「凭据按厂商 id 存」是另一件事，见 `docs/TODO.md`。
+pub const UNCOPYABLE_PROVIDER_IDS: &[&str] = &["openai"];
+
+/// 复制前的硬闸：TUI `y` 与 CLI `provider copy` 都经 [`duplicate_recipe`]，规则只写在这里。
+pub fn ensure_copyable(src_id: &str) -> Result<()> {
+    if UNCOPYABLE_PROVIDER_IDS.contains(&src_id) {
+        bail!(
+            "{src_id} 不能复制：它的 OAuth 登录是全局凭据，副本没法单独登录。\
+             想加第二个 OpenAI 兼容厂商，用 provider add 建一个新 id 的厂商（它不带 OAuth）"
+        );
+    }
+    Ok(())
+}
+
 /// 复制厂商的结果 = (新 recipe（origin 已指向新 YAML）, 额度脚本落地的新文件)。
 /// 脚本项为 None = 没绑外部脚本 / 内联 run / 原文件已丢失（此时绑定原样带走）。
 ///
 /// 整份复制厂商：auth/vars/探活/额度全带走，另存为用户 YAML。
+/// 内置 `openai` 一律拒绝（[`ensure_copyable`]）：它的 OAuth 凭据是全局的，副本登不了。
 /// - 新 id：显式给则校验（小写字母/数字/-、不与现有冲突）；缺省自动 `<源id>-copy`，
 ///   被占则 `-copy-2`、`-copy-3`……
 /// - 新名称：缺省 `<原名> 副本`。
@@ -27,6 +48,8 @@ pub fn duplicate_recipe(
     recipes_dir: &Path,
     scripts_dir: &Path,
 ) -> Result<(Recipe, Option<PathBuf>)> {
+    // 内置 openai 不能复制（OAuth 凭据是全局的，副本登不了），TUI 与 CLI 共用这一道闸
+    ensure_copyable(&src.id)?;
     let new_id = resolve_new_id(recipes, &src.id, new_id)?;
     let name = match new_name {
         Some(n) if !n.trim().is_empty() => n.trim().to_string(),

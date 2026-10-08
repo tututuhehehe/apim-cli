@@ -310,3 +310,50 @@ fn duplicate_trims_name_and_rejects_blank() {
         "纯空白名称应报错"
     );
 }
+
+/// 内置 `openai` 不能复制：它的 OAuth 凭据是全局一份，副本永远登录不上。
+/// 闸在 `duplicate_recipe` 里，所以 TUI `y` 与 CLI `provider copy` 都拦得住。
+#[test]
+fn openai_cannot_be_duplicated() {
+    let recipes_dir = temp_dir("openai");
+    let scripts_dir = temp_dir("openai-scripts");
+    let src = base_recipe("openai");
+    let map = one_recipe_map(&src);
+
+    let err = duplicate_recipe(&map, &src, None, None, &recipes_dir, &scripts_dir)
+        .unwrap_err()
+        .to_string();
+    assert!(err.contains("不能复制"), "{err}");
+    assert!(
+        err.contains("provider add"),
+        "要告诉用户怎么建第二个：{err}"
+    );
+    // 显式 id 也拦（不能绕）
+    assert!(
+        duplicate_recipe(
+            &map,
+            &src,
+            Some("my-openai"),
+            None,
+            &recipes_dir,
+            &scripts_dir
+        )
+        .is_err()
+    );
+    // 什么都没写下去
+    assert!(!recipes_dir.join("openai-copy.yaml").exists());
+
+    // 其它厂商（包括其它内置）不受影响
+    let other = base_recipe("deepseek");
+    let map = one_recipe_map(&other);
+    assert!(duplicate_recipe(&map, &other, None, None, &recipes_dir, &scripts_dir).is_ok());
+}
+
+/// 闸是个可单独调的纯函数：UI/CLI 想在按之前就拦住也能用。
+#[test]
+fn ensure_copyable_only_blocks_the_reserved_ids() {
+    assert!(ensure_copyable("openai").is_err());
+    assert!(ensure_copyable("openai-copy").is_ok());
+    assert!(ensure_copyable("deepseek").is_ok());
+    assert!(ensure_copyable("my-relay").is_ok());
+}

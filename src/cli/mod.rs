@@ -129,7 +129,7 @@ pub(crate) fn print_help() {
          \x20 apim provider add <id> --name <名> --base-url <URL> [--homepage <URL>|none] [--kind model|non-model] [--health <路径>|none] [--script <脚本路径>|none]\n\
          \x20 apim provider set <id> [--name <名>] [--base-url <URL>] [--homepage <URL>|none] [--health <路径>|none] [--script <路径>|none]   # --kind 只能在 add 时用\n\
          \x20 apim provider rm <id> [--force]\n\
-         \x20 apim provider copy <源id> [新id] [--name 名]   # 整份复制厂商（额度脚本一并另存）\n\
+         \x20 apim provider copy <源id> [新id] [--name 名]   # 整份复制厂商（额度脚本一并另存）；内置 openai 不可复制（它的 OAuth 登录是全局凭据）\n\
          密钥（token 一律走 stdin：echo 'KEY' | apim key add ...）：\n\
          \x20 apim key ls [<provider>] [--json]\n\
          \x20 apim key add <provider> <别名> [--group <分组>]        # 已存在则更新 token\n\

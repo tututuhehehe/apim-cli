@@ -106,7 +106,7 @@ apim auth openai import-codex   # 把这份凭据写进 Codex 官方路（等于
 | `e` | 编辑厂商（名称 / Base URL / 主页 / 探活 / 额度） | 编辑密钥（别名 / 分组 / token） |
 | `d` | 删除厂商（须先删光它下面的密钥） | 删除密钥 |
 | `c` | 复制 Base URL | 复制密钥 |
-| `y` | 复制厂商：整份 recipe 另存为新厂商（id 自动 `<id>-copy`，名称加「副本」），绑定的外部额度脚本复制成独立文件，改两边的脚本互不影响；`secrets.toml` 里的密钥不跟随 | — |
+| `y` | 复制厂商：整份 recipe 另存为新厂商（id 自动 `<id>-copy`，名称加「副本」），绑定的外部额度脚本复制成独立文件，改两边的脚本互不影响；`secrets.toml` 里的密钥不跟随。内置 **OpenAI** 不可复制 —— 它的 ChatGPT 登录是全局一份凭据，副本永远登录不上（要第二个 OpenAI 兼容厂商就用 `a` 新建一个，它本来就不带 OAuth） | — |
 | `i` | 厂商详情（鉴权 / 端点 / 额度脚本 / 来源 / vars，值不外显） | 密钥详情（`r` 显隐完整 token，`c` 复制） |
 | `Enter` | 用默认浏览器打开厂商主页（控制面板） | — |
 | `m` | — | 用**当前选中的这把 key** 拉取它的模型列表（仅模型厂商；模型可见性随 key/分组不同；弹窗内 `/` 聚焦搜索框实时过滤、`Esc` 退出搜索回到列表（过滤保留）、`j/k` 滚动、`c` 复制模型名、`Esc` 关闭弹窗） |
@@ -124,7 +124,7 @@ apim auth openai import-codex   # 把这份凭据写进 Codex 官方路（等于
 
 ## 增删改查
 
-**OpenAI Codex OAuth**：在内置 OpenAI 厂商的密钥栏按 `o`（或运行 `apim auth openai login`），会打开浏览器让你授权 apim。登录用与 Pi / cc-switch 相同的 Codex CLI 客户端配置：OpenAI [官方开源动态注册流程](https://developers.openai.com/siwc/token-sharing-open-source/sign-in)签发的 token 里，`https://api.openai.com/auth` 不带 `chatgpt_account_id`，Codex 用量接口对它一律 401（`APIM_OAUTH_CLIENT=apim` 可改用那个档位）。凭据单独保存于 `~/.config/apim/openai-oauth.json`，权限为 `600`；host ID 也保存在同一配置目录。`apim auth openai status|logout` 可查看或移除凭据。`AUTH` 行不是普通密钥（不能复制、编辑、删除），但它**可以选中**：在它上面按 `x` 会把这份凭据导入 Codex 自己的[官方路](#导入到-codex-官方路chatgpt-登录)，额度面板的 AUTH 区也始终显示 Codex 现在走的是哪条路。登录失败时 apim 会把每一步（状态码 + 已遮罩的响应体，绝不含 token）写进 `~/.config/apim/openai-oauth.log`，底栏 toast 会先显示失败原因、后面才跟这个路径。OpenAI 额度面板始终并列显示 Codex OAuth 用量（接口返回的每个限额窗口都会列一行，标签按窗口真实长度算，并带重置倒计时）和当前 API Key 的独立 API 额度；具体有哪些窗口取决于套餐（`go` 账号只回一个按月窗口，`pro` 是 5h + 1w），且 OAuth 用量依赖 OpenAI 未公开的 ChatGPT 接口，接口变更时可能需要维护。
+**OpenAI Codex OAuth**：在内置 OpenAI 厂商的密钥栏按 `o`（或运行 `apim auth openai login`），会打开浏览器让你授权 apim。登录用与 Pi / cc-switch 相同的 Codex CLI 客户端配置：OpenAI [官方开源动态注册流程](https://developers.openai.com/siwc/token-sharing-open-source/sign-in)签发的 token 里，`https://api.openai.com/auth` 不带 `chatgpt_account_id`，Codex 用量接口对它一律 401（`APIM_OAUTH_CLIENT=apim` 可改用那个档位）。凭据单独保存于 `~/.config/apim/openai-oauth.json`，权限为 `600`；host ID 也保存在同一配置目录。`apim auth openai status|logout` 可查看或移除凭据。这份凭据是**全局一份**：只有内置 `openai` 厂商能登录、能出 AUTH 行、能喂 Codex 官方路 —— 也正是它不能被复制的原因（`y` / `provider copy` 都会拒绝，见 [docs/TODO.md](docs/TODO.md)）。`AUTH` 行不是普通密钥（不能复制、编辑、删除），但它**可以选中**：在它上面按 `x` 会把这份凭据导入 Codex 自己的[官方路](#导入到-codex-官方路chatgpt-登录)，额度面板的 AUTH 区也始终显示 Codex 现在走的是哪条路。登录失败时 apim 会把每一步（状态码 + 已遮罩的响应体，绝不含 token）写进 `~/.config/apim/openai-oauth.log`，底栏 toast 会先显示失败原因、后面才跟这个路径。OpenAI 额度面板始终并列显示 Codex OAuth 用量（接口返回的每个限额窗口都会列一行，标签按窗口真实长度算，并带重置倒计时）和当前 API Key 的独立 API 额度；具体有哪些窗口取决于套餐（`go` 账号只回一个按月窗口，`pro` 是 5h + 1w），且 OAuth 用量依赖 OpenAI 未公开的 ChatGPT 接口，接口变更时可能需要维护。
 
 **添加密钥（右侧按 `a`）**：填别名、分组（可空）、密钥，厂商用 `←`/`→` 切换。密钥可以直接 `⌘V` 粘贴。`Enter` 保存，立即写盘并自动检测。
 
@@ -208,7 +208,7 @@ TUI 管人，CLI 管机器：`cargo install --path .` 之后所有操作都能�
 | `apim provider add <id> --name <名> --base-url <URL> [--homepage <主页URL>\|none] [--kind model\|non-model] [--health <路径>\|none] [--script <脚本路径>\|none]` | 建厂商（`--kind` 缺省 `model`；非模型厂商给 `--health` 直接报错） |
 | `apim provider set <id> [--name <名>] [--base-url <URL>] [--homepage <主页URL>\|none] [--health <路径>\|none] [--script <脚本路径>\|none]` | 改厂商（只动传了的字段）。类型不可改——那是 `provider add` 的事 |
 | `apim provider rm <id> [--force]` | 删厂商（有密钥时拒绝，`--force` 连带删密钥；内置不可删） |
-| `apim provider copy <源id> [新id] [--name 名]` | 整份复制厂商（auth/vars/探活/额度全带走，`secrets.toml` 里的密钥不跟随）；外部额度脚本复制成独立文件（命名跟随新 id，同名已存在则顺延 `-2`）；新 id 缺省 `<源id>-copy`，被占自动顺延 |
+| `apim provider copy <源id> [新id] [--name 名]` | 整份复制厂商（auth/vars/探活/额度全带走，`secrets.toml` 里的密钥不跟随）；外部额度脚本复制成独立文件（命名跟随新 id，同名已存在则顺延 `-2`）；新 id 缺省 `<源id>-copy`，被占自动顺延。内置 `openai` 拒绝复制 —— 它的 OAuth 登录是全局一份凭据（见 [docs/TODO.md](docs/TODO.md)） |
 | `apim key ls [<provider>] [--json]` | 列密钥（token 掩码显示） |
 | `apim key add <provider> <别名> [--group <分组>]` | 加密钥；已存在则更新 token |
 | `apim key set <厂商.别名> [--alias <新别名>] [--group <分组>\|none]` | 改别名 / 分组 |
