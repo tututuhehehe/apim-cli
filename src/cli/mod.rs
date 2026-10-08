@@ -123,7 +123,7 @@ pub(crate) fn print_help() {
         "apim — 终端 API 密钥管理器（无参数进 TUI）\n\
          \n\
          OAuth：\n\
-         \x20 apim auth openai login|status|logout\n\
+         \x20 apim auth openai login|status|logout|import-codex   # import-codex：把凭据导入 Codex 官方路（TUI 里是 AUTH 行按 x）\n\
          厂商：\n\
          \x20 apim provider ls [--json]\n\
          \x20 apim provider add <id> --name <名> --base-url <URL> [--homepage <URL>|none] [--kind model|non-model] [--health <路径>|none] [--script <脚本路径>|none]\n\

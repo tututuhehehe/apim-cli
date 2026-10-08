@@ -24,6 +24,7 @@ src/
 │   ├── file_io.rs     客户端配置文件公共落盘件：跟随符号链接 + 写前备份 + 原子 600
 │   ├── codex/         Codex 适配（mod.rs 只是门面：子模块声明 + 再导出 + codex_home/config_hint）
 │   │   ├── import.rs  写入编排 + 回滚（保留名加前缀、base_url 补 /v1）
+│   │   ├── official.rs 官方路（ChatGPT 登录）：写 ~/.codex/auth.json + 摘掉 config.toml 的第三方路由（AUTH 行按 x）
 │   │   ├── restart.rs RestartReport、按进程表找 codex daemon 并重启（严格匹配 argv[2]）
 │   │   ├── config_file.rs  ~/.codex/config.toml 读改写（toml_edit 保注释保顺序）+ 备份 + 原子写
 │   │   ├── catalog.rs 模型目录：手写官方迷你条目（~1KB/模型）+ `codex debug models` 端到端校验
@@ -136,6 +137,8 @@ recipes/              内置 recipe ×4（deepseek/openai/moonshot/openrouter，
     - `model_catalog_json` 相对路径按 `CODEX_HOME` 解析；它是**整表替换**（不是合并）；条目必须带 `base_instructions`（不能缺也不能给空串）；`supports_reasoning_summaries`（codex ≥0.144.5）与 `supports_parallel_tool_calls`（0.144.5~0.148.0-alpha.15）也被部分版本当必填 —— 两个字段名都给最安全（cc-switch v3.18.0 / v3.20.2 release notes 记了这两个坑）。
     - 模型条目照官方字段**手写迷你条目**（GLM / DeepSeek 官方 Codex 文档 + cc-switch 实测模板）：`shell_type: shell_command`、`apply_patch_tool_type: freeform`、中性 `base_instructions`、`input_modalities` fail-open 给 `[text, image]`、上下文窗口用 codex 给未知模型的默认值 272000。**不要克隆 `codex debug models --bundled` 里的 GPT 条目** —— 那会带进 `code_mode_only`、`use_responses_lite`、`max_context_window: 872000` 和 62KB harness 提示词（v1 就是这么错的一版，目录 64KB/模型）。导入完用 `codex debug models` 反向校验勾选的模型都在（校验是硬前提，没装 codex 直接报错）。
     - **★ 不存 apim 侧台账**：密钥行的 ★ 是**回读客户端现场**算出来的 —— codex 读 `config.toml` 的顶层 `model_provider` → `[model_providers.<key>]`，拿 `experimental_bearer_token`（或只有 `env_key` 时用 `base_url`）与 apim 密钥对账（表名 + token 都一致才算），所以用户手改了 codex 配置 ★ 会跟着变、不会留在旧密钥上。多个客户端都用同一把时并排成角标 `★C`（字母取自 `Agent::badge()`）。重算时点：启动、切厂商（`j`/`k`，`App::select_provider`）、`r` 刷新、5 分钟自动刷新、导入成功后。
+    - **官方路（ChatGPT 登录）也要能一键导入**：`src/clients/codex/official.rs`，入口是**密钥表里 AUTH 行按 `x`**（或 CLI `apim auth openai import-codex`），不走 `x` 的密钥导入面板（官方路没有模型列表、也不要 API key）。写 `~/.codex/auth.json`（`auth_mode:"chatgpt"` + `OPENAI_API_KEY:null` + `tokens{id_token,access_token,refresh_token,account_id}` + `last_refresh`；**refresh_token 必须带** —— codex 自己拿它刷新，client id 与我们同一个 `app_EMoamEEZ73f0CkXaXp7hrann`、同样不发 `resource`）；config.toml **只摘** `model_provider` / `model` / **apim 自己写的** `model_catalog_json`（手写目录不动），其余一律保留 —— cc-switch 是整份清空，因为它有 provider 数据库兜底，apim 没有，而 `.apim.bak` 会被下一次导入覆盖，清空就是真丢用户手写的 `[projects]`/`[plugins]`/`notify`。`cli_auth_credentials_store = keyring|ephemeral` 时**直接拒绝**（codex 不读 auth.json；apim 不写钥匙串）。校验用 `codex login status`：**真机 0.161 把 `Logged in using ChatGPT` 写在 stderr、exit 0**（未登录/配置非法同样 stderr 但 exit 1），所以两个流和退出码都要看；失败用备份还原 auth.json + config.toml 两处。成功后照旧重启 daemon。额度面板 AUTH 区那行「Codex：官方 OAuth / 官方 API Key / provider x / 未登录」也是**回读 `~/.codex` 现场**（`codex_route`，与 ★ 同节奏），不存台账。
+    - **AUTH 行是一个可选中的行**（只在内置 `openai` 分页，下标 = 过滤后密钥数，排在密钥行之后；`App::auth_row_index` / `auth_row_selected`）：`x` 走官方路导入，`c/i/d/m/e` 给「只支持 x」的提示而不是假装没有密钥。`clamp_selections` / `move_down` 的密钥上限要跟着它 +1。
     - 厂商 id 撞上保留名（`openai`/`ollama`/`lmstudio`/`amazon-bedrock*`）时加 `apim-` 前缀。
 
 12. **`apim update` 只认三条渠道**（install.sh / npm / Homebrew，见 `docs/RELEASING.md` 的速查表）：`src/cli/update.rs` 按可执行文件路径认渠道（npm 看 `node_modules/apim-cli`、brew 看 `Cellar/apim`，其余当 install.sh 装的裸二进制），裸二进制那条复用官方 install.sh，但**不是 `curl | sh`**：URL 钉到本次要更新到的 tag、下载到临时文件、先做形状校验（是 shell 脚本 / 是本仓库安装器 / 含 sha256 校验）、再按 Release 发布的 `install.sh.sha256` 校验摘要（**拿不到摘要就拒绝执行**），最后用 `sh <file>` 跑；`APIM_INSTALL_DIR` 钉在当前二进制的**真实位置**（先 canonicalize，否则符号链接会被替换掉）保证原地更新。**`target/` 下的开发构建与 `~/.cargo/bin` 里的 cargo 副本一律不更新**（前者会被 Release 覆盖掉开发二进制，后者是 `cargo install` 留下的、被 PATH 遮挡的多余副本）。**npm 渠道更新前要同时核对主包与**当前平台子包**的版本**（`npm view <pkg> version`）：npm 的发布是异步的、主包会先可见，而 npm 对 optional 依赖失败是静默跳过 —— 只看主包就会装出一个跑不起来的 shim（v0.1.4 实测）。落后于 GitHub tag 时报出两个版本号并拒绝安装（`--force` 可越过）。加渠道要同时改 `Channel` 与它的识别规则、测试和 RELEASING 的表；`apim uninstall` 复用同一套 `detect_channel`，新渠道的卸载动作会被 `uninstall_program` 的穷尽 `match` 拦下（编译器逼你补），但提示语与单测仍要手工过一遍。
@@ -168,7 +171,7 @@ recipes/              内置 recipe ×4（deepseek/openai/moonshot/openrouter，
     - **不适用当前类型的表单行直接不出现**：`Field::Toggle` 用 `.hides(下标)` 声明「勾上就把这一行收起来」，勾选状态一变由 Form 自己开关（构造时先按初值对齐）；隐藏的行不渲染、不占弹窗高度、Tab 跳过、也写不进去（`Field::Text{hidden}`）。添加/编辑表单的「探活路径」都靠它养活：勾上非模型就没了这一行（不是灰掉）。
     - **详情弹窗只列真适用的**：鉴权/探活只服务 HTTP 请求（探活、模型列表），非模型厂商两行都不列；也不列「类型」那种背景信息（打开它的分页已经说明了一切）。
     - **分页状态在 App 里**：`tab: ProviderKind` + `tabs: [TabView; 2]`（每个分页自己的 `provider_ids` / `selected` / `filter`，下标 = `ProviderKind::ALL` 顺序）；取值一律走 `provider_ids()` / `provider_ids_filtered()` / `selected_provider()` / `provider_filter()`，**不要**再引入第三个「全局选中项」。`rebuild_provider_list` 两个分页各建一份（有密钥的在前，其余按 id 排序）；保存 / 复制厂商后必须 `focus_provider(id)`（分页跟着厂商类型跳，否则新建的厂商落在看不见的那一页）。
-    - **快捷键**：`Tab` = 切分页（两栏焦点都生效），`h`/`l` 与 ←/→ = 切左右栏焦点。改按键提示时三个分支都要过一遍（厂商焦点 / 模型页密钥焦点 / 非模型页密钥焦点，非模型页不出现 `m`/`x`）。
+    - **快捷键**：`Tab` = 切分页（两栏焦点都生效），`h`/`l` 与 ←/→ = 切左右栏焦点。改按键提示时四个分支都要过一遍（厂商焦点 / 模型页密钥焦点 / 模型页密钥焦点且光标在 AUTH 行 / 非模型页密钥焦点，非模型页不出现 `m`/`x`；AUTH 行那支只留 `x`/`o`/`c`/`a`/`r`，见约定 11）。
     - **状态口径**：非模型厂商没有探活，密钥表状态列与左栏厂商摘要都用**额度脚本的成败**（`ui::script_status`，一处写、两个地方用；CLI `status` 同一口径）。
     - `health` / `models_url` 对非模型照旧保留在 YAML 里（加载期不拒收），但**不生效**：探活/模型列表的消费点一律走 `Recipe::health_call()`（非模型恒为 None）与 `is_model()` 门，手改 `kind:` 也不会拿旧 `health` 去发请求；`auth` 可省略（`#[serde(default)]`）——非模型厂商没有 HTTP 请求。
 
@@ -187,6 +190,7 @@ cargo run -- --snapshot-import-default # 一键导入面板快照：第三步选
 cargo test                             # 单测（recipe/表单/CLI 沙盒/codex+pi 适配等）
 cargo +1.88 check --locked --all-targets   # 声明的 MSRV（Cargo.toml 的 rust-version）要真能编；CI 的 msrv job 跑同一条
 cargo test -- codex_real_end_to_end --ignored --nocapture   # 需本机装 codex：真机端到端（生成目录 + 让 codex 校验）
+cargo test -- codex_real_official_end_to_end --ignored --nocapture  # 需本机装 codex：官方路（合成凭据，不读真实 token；不碰真实 ~/.codex）
 cargo test -- pi_real_end_to_end --ignored --nocapture      # 需本机装 pi：真机端到端（写两份 JSON + 让 pi 列模型）
 APIM_SNAPSHOT_AGENT=pi cargo run -- --snapshot-import-models   # 换客户端出面板快照（默认第一个；「选默认模型」那屏只对 codex 存在）
 cargo run -- update --check                # 认安装渠道 + 报当前/最新（不动手）

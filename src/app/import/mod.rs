@@ -54,9 +54,16 @@ impl App {
     }
 
     /// 密钥栏按 `x`：打开面板第一步（选客户端）。
+    ///
+    /// AUTH 行（内置 OpenAI 分页里那一行）不是密钥，没有模型可勾：它走另一条路 ——
+    /// 把 apim 的 OpenAI Codex OAuth 凭据导入 Codex 的官方路（见 `import_oauth_to_codex`）。
     pub fn open_import(&mut self) {
         if self.focus != Focus::Keys {
             self.toast = Some(("先在右侧选中一把密钥再按 x".into(), Instant::now()));
+            return;
+        }
+        if self.auth_row_selected() {
+            self.import_oauth_to_codex();
             return;
         }
         let Some(key) = self.selected_key_entry().cloned() else {

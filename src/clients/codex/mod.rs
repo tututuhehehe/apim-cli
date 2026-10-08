@@ -13,7 +13,8 @@
 //! - `active`：回读 `config.toml` 现场，回答「现在在用哪把密钥」（★ 角标）
 //! - `catalog`：模型目录的生成与校验（照官方字段手写迷你条目）+ 本机 codex 可执行文件定位
 //! - `config_file`：`config.toml` 的保注释读写（toml_edit + 备份 + 原子写）
-//! - `import`：一次导入的编排（锁 → 改配置 → 写目录 → 校验 → 回滚）
+//! - `import`：一次第三方导入的编排（锁 → 改配置 → 写目录 → 校验 → 回滚）
+//! - `official`：官方路（ChatGPT 登录）：写 `auth.json` + 摘掉第三方路由，供 AUTH 行的 `x` 用
 //! - `restart`：导入后重启 codex 的 app-server 守护进程
 //!
 //! 下面只再导出**模块外真的在用的**那几条 —— `clients/mod.rs` 经 [`crate::clients::Agent`]
@@ -25,11 +26,14 @@ mod active;
 mod catalog;
 mod config_file;
 mod import;
+mod official;
 mod restart;
 
 pub(crate) use active::active_key_ids;
 pub use catalog::DEFAULT_EFFORT;
 pub use import::{import, normalize_base_url, provider_key};
+pub use official::import as import_official;
+pub use official::{CodexRoute, OfficialReport, codex_route};
 pub use restart::{RestartReport, restart_daemon};
 
 use std::path::PathBuf;

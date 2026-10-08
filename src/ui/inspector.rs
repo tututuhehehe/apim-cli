@@ -637,6 +637,7 @@ mod tests {
             oauth_checking: false,
             oauth_login_running: false,
             oauth_seq: 0,
+            codex_route: crate::clients::codex::CodexRoute::SignedOut,
             next_import_seq: 0,
             import_runner: None,
             undo_stack: std::collections::VecDeque::new(),

@@ -93,6 +93,7 @@ apim --version  # 版本
 apim auth openai login   # 连接 ChatGPT/Codex OAuth 查询用量
 apim auth openai status
 apim auth openai logout
+apim auth openai import-codex   # 把这份凭据写进 Codex 官方路（等于在 AUTH 行按 x）
 ```
 
 ## 快捷键
@@ -109,8 +110,8 @@ apim auth openai logout
 | `i` | 厂商详情（鉴权 / 端点 / 额度脚本 / 来源 / vars，值不外显） | 密钥详情（`r` 显隐完整 token，`c` 复制） |
 | `Enter` | 用默认浏览器打开厂商主页（控制面板） | — |
 | `m` | — | 用**当前选中的这把 key** 拉取它的模型列表（仅模型厂商；模型可见性随 key/分组不同；弹窗内 `/` 聚焦搜索框实时过滤、`Esc` 退出搜索回到列表（过滤保留）、`j/k` 滚动、`c` 复制模型名、`Esc` 关闭弹窗） |
-| `o` | — | 在内置 OpenAI 厂商的密钥栏发起/重新授权 apim 自己的 ChatGPT/Codex OAuth；固定的 `AUTH` 行仅供查看，不是 API Key，也不是导入目标 |
-| `x` | — | 把选中密钥 + 它的厂商 + 勾选的模型**一键导入到 Codex 或 Pi**（仅模型厂商；写进对应客户端的配置）：`⏎` 下一步 → 选客户端 → 勾选模型（`空格` 勾选、`a` 全选/清空、`/` 搜索）→（仅 Codex）选默认模型（`j/k` 移动、`h` 返回上一步、`⏎` 导入；只勾一个模型时跳过这步；Pi 没有这一步）。详见下节 |
+| `o` | — | 在内置 OpenAI 厂商的密钥栏发起/重新授权 apim 自己的 ChatGPT/Codex OAuth。密钥表下面的 `AUTH` 行不是 API Key，但它**是一个可选中的行**：选中它按 `x` 会把这份 OAuth 凭据导入 Codex 的官方路（不开密钥导入面板），而 `c`/`i`/`d`/`m`/`e` 会明说「只支持 x」而不是假装没有密钥 |
+| `x` | — | 把选中密钥 + 它的厂商 + 勾选的模型**一键导入到 Codex 或 Pi**（仅模型厂商；写进对应客户端的配置）：`⏎` 下一步 → 选客户端 → 勾选模型（`空格` 勾选、`a` 全选/清空、`/` 搜索）→（仅 Codex）选默认模型（`j/k` 移动、`h` 返回上一步、`⏎` 导入；只勾一个模型时跳过这步；Pi 没有这一步）。详见下节。在 OpenAI 厂商的 `AUTH` 行上，`x` 改成把 OAuth 凭据写进 Codex 的[官方路](#导入到-codex-官方路chatgpt-登录)——不用密钥、也不选模型 |
 | `j` / `k` | 上下移动 | 上下移动 |
 | `Tab` | 切换厂商分页：`模型` ⇄ `非模型`（两个分页各自记着选中项与过滤词） | 同左 |
 | `h` / `l` | 切换左右栏（h 左 = 厂商栏，l 右 = 密钥栏；已在边缘侧时不动） | 同左 |
@@ -123,7 +124,7 @@ apim auth openai logout
 
 ## 增删改查
 
-**OpenAI Codex OAuth**：在内置 OpenAI 厂商的密钥栏按 `o`（或运行 `apim auth openai login`），会打开浏览器让你授权 apim。登录用与 Pi / cc-switch 相同的 Codex CLI 客户端配置：OpenAI [官方开源动态注册流程](https://developers.openai.com/siwc/token-sharing-open-source/sign-in)签发的 token 里，`https://api.openai.com/auth` 不带 `chatgpt_account_id`，Codex 用量接口对它一律 401（`APIM_OAUTH_CLIENT=apim` 可改用那个档位）。凭据单独保存于 `~/.config/apim/openai-oauth.json`，权限为 `600`；host ID 也保存在同一配置目录。`apim auth openai status|logout` 可查看或移除凭据。固定 `AUTH` 行不是普通密钥，不能复制、编辑、删除或用 `x` 导入。登录失败时 apim 会把每一步（状态码 + 已遮罩的响应体，绝不含 token）写进 `~/.config/apim/openai-oauth.log`，底栏 toast 会先显示失败原因、后面才跟这个路径。OpenAI 额度面板始终并列显示 Codex OAuth 用量（接口返回的每个限额窗口都会列一行，标签按窗口真实长度算，并带重置倒计时）和当前 API Key 的独立 API 额度；具体有哪些窗口取决于套餐（`go` 账号只回一个按月窗口，`pro` 是 5h + 1w），且 OAuth 用量依赖 OpenAI 未公开的 ChatGPT 接口，接口变更时可能需要维护。
+**OpenAI Codex OAuth**：在内置 OpenAI 厂商的密钥栏按 `o`（或运行 `apim auth openai login`），会打开浏览器让你授权 apim。登录用与 Pi / cc-switch 相同的 Codex CLI 客户端配置：OpenAI [官方开源动态注册流程](https://developers.openai.com/siwc/token-sharing-open-source/sign-in)签发的 token 里，`https://api.openai.com/auth` 不带 `chatgpt_account_id`，Codex 用量接口对它一律 401（`APIM_OAUTH_CLIENT=apim` 可改用那个档位）。凭据单独保存于 `~/.config/apim/openai-oauth.json`，权限为 `600`；host ID 也保存在同一配置目录。`apim auth openai status|logout` 可查看或移除凭据。`AUTH` 行不是普通密钥（不能复制、编辑、删除），但它**可以选中**：在它上面按 `x` 会把这份凭据导入 Codex 自己的[官方路](#导入到-codex-官方路chatgpt-登录)，额度面板的 AUTH 区也始终显示 Codex 现在走的是哪条路。登录失败时 apim 会把每一步（状态码 + 已遮罩的响应体，绝不含 token）写进 `~/.config/apim/openai-oauth.log`，底栏 toast 会先显示失败原因、后面才跟这个路径。OpenAI 额度面板始终并列显示 Codex OAuth 用量（接口返回的每个限额窗口都会列一行，标签按窗口真实长度算，并带重置倒计时）和当前 API Key 的独立 API 额度；具体有哪些窗口取决于套餐（`go` 账号只回一个按月窗口，`pro` 是 5h + 1w），且 OAuth 用量依赖 OpenAI 未公开的 ChatGPT 接口，接口变更时可能需要维护。
 
 **添加密钥（右侧按 `a`）**：填别名、分组（可空）、密钥，厂商用 `←`/`→` 切换。密钥可以直接 `⌘V` 粘贴。`Enter` 保存，立即写盘并自动检测。
 
@@ -201,6 +202,8 @@ TUI 管人，CLI 管机器：`cargo install --path .` 之后所有操作都能�
 
 | 命令 | 作用 |
 |---|---|
+| `apim auth openai login\|status\|logout` | 登录 / 查看 / 移除 apim 自己的 ChatGPT/Codex OAuth 凭据（详见[增删改查](#增删改查)） |
+| `apim auth openai import-codex` | 把这份凭据写进 Codex 自己的官方路：写 `~/.codex/auth.json` + 摘掉 `config.toml` 里的第三方路由。等同于在 `AUTH` 行按 `x` |
 | `apim provider ls [--json]` | 列厂商（含类型、额度绑定方式、密钥数；非模型厂商带 `[非模型]` 标记） |
 | `apim provider add <id> --name <名> --base-url <URL> [--homepage <主页URL>\|none] [--kind model\|non-model] [--health <路径>\|none] [--script <脚本路径>\|none]` | 建厂商（`--kind` 缺省 `model`；非模型厂商给 `--health` 直接报错） |
 | `apim provider set <id> [--name <名>] [--base-url <URL>] [--homepage <主页URL>\|none] [--health <路径>\|none] [--script <脚本路径>\|none]` | 改厂商（只动传了的字段）。类型不可改——那是 `provider add` 的事 |
@@ -284,6 +287,26 @@ apim status glm --json
 
 > 需要本机装好 `codex`（用它生成并校验模型目录）；apim 从 `PATH` 找它，也可以用 `APIM_CODEX_BIN` 指定路径。
 
+### 导入到 Codex 官方路（ChatGPT 登录）
+
+在内置 OpenAI 厂商的密钥表里选中 `AUTH` 行按 `x`（或运行 `apim auth openai import-codex`），让 **Codex 自己**用你的 ChatGPT 订阅，而不是走中转站 —— 这就是 cc-switch「OpenAI Official」那张卡干的事，也是切换的另一半：在密钥行上按 `x` 就能把中转站切回来。这条路既不需要 API Key 也没有模型列表，所以**不会开导入面板**。
+
+| 位置 | 内容 |
+|---|---|
+| `~/.codex/auth.json` | Codex 原生的 ChatGPT 登录：`auth_mode = "chatgpt"`、`OPENAI_API_KEY = null`、`tokens`（`id_token` / `access_token` / `refresh_token` / `account_id`）与 `last_refresh` |
+| `~/.codex/config.toml` | **摘掉**：顶层 `model_provider`、`model`，以及 apim 自己写的 `model_catalog_json` 指针。其余一律不动（含注释与顺序）：`[model_providers.*]` 块、`notify`、`[projects.*]`、`[tui]`、`[plugins.*]` … |
+
+几个有意为之的取舍：
+
+- **token 由 Codex 自己续。** apim 登录用的公开 client id 与 Codex CLI 是同一个（`app_EMoamEEZ73f0CkXaXp7hrann`），刷新端点与参数也一致，所以 `auth.json` 里这份凭据是自维持的 —— 这就是 `refresh_token` 必须写进去的原因。代价：codex 刷新后新 token 只在 `auth.json` 里；如果 OpenAI 轮换了 refresh token，apim 自己那份 `openai-oauth.json` 会失效，需要按 `o` 重新授权（apim 不回写同步）。
+- **只摘 apim 自己写的键。** cc-switch 是整份清空 `config.toml`（它有 provider 数据库兜底）；apim 没有，而且 `.apim.bak` 备份会被下一次导入覆盖，清空等于把你的 `[projects.*]` / `[plugins.*]` / `notify` 真的删掉。你自己手写的 `model_catalog_json` 也会保留。
+- **`model` 也一起摘掉**，让 Codex 回到自己的默认模型：apim 写进去的 `model` 是第三方模型名（比如 `deepseek-flash`），官方端点没有它。`[model_providers.*]` 块一个都没动，所以切回中转站只差在密钥行上再按一次 `x`。
+- **Codex 看不见的凭据不写**：`cli_auth_credentials_store = "keyring"` 或 `"ephemeral"` 时 codex 根本不读 `auth.json`，导入会直接拒绝并说清原因，而不是写一份没用的文件（apim 不碰系统钥匙串）。
+- **让 codex 自己校验**：写完 apim 会带着刚写的目录跑 `codex login status`，要求它报出已登录的 ChatGPT 会话。真机 0.161 把 `Logged in using ChatGPT` 写在 **stderr** 且 exit 0（`Not logged in` / 配置非法同样是 stderr 但 exit 1），所以两个流和退出码都要看。校验不过就用 `.apim.bak` 把两处都还原。
+- **照旧重启守护进程**（与第三方导入同一口径：codex 只在 daemon 启动时读一次配置）；`APIM_NO_RESTART_CODEX=1` 可关。
+- **`~/.codex/auth.json` 是 Codex 自己的登录文件**，不是 apim 的旁挂文件：`codex login` / `codex logout` 管它，所以 `apim uninstall` 不把它当成 apim 残留列出来。
+- **额度面板会告诉你 Codex 现在走哪条路**（`Codex：OpenAI 官方 OAuth` / `OpenAI 官方 API Key` / `provider deepseek` / `未登录`），与 ★ 角标同一个节奏从 `~/.codex` 现场读，不存 apim 侧台账。
+
 ### 一键导入到 Pi
 
 同一个 `x` 面板也能导到 **Pi**（第一步选 `Pi`；Pi 只有两步，选默认模型是 Codex 专属的一步，对 Pi 会跳过）。Pi 加第三方 provider 是纯数据的事（`models.json`），所以 apim **只写一处**：
@@ -317,7 +340,7 @@ apim status glm --json
 - `secrets.toml`：API token，键名是 `"厂商.别名"`
 - `openai-oauth.json`：apim 的 OpenAI Codex OAuth 凭据（权限 600）；`openai-oauth-host-id` 保存稳定 host ID，`openai-oauth.log` 记录最近一次登录或刷新尝试（状态码 + 已遮罩的响应体，不含 token）
 
-导入目标在别处：`~/.codex/config.toml` + `~/.codex/apim-models.json`（Codex，备份为 `config.toml.apim.bak`）与 `~/.pi/agent/models.json`（Pi，备份为 `models.json.apim.bak`；`PI_CODING_AGENT_DIR` 可改整个目录）。Pi 的 `settings.json` 一个字都不写；apim 只**读** `auth.json`（也不写它）来判断哪把 key 在用。
+导入目标在别处：`~/.codex/config.toml` + `~/.codex/apim-models.json`（Codex，备份为 `config.toml.apim.bak`）、`~/.codex/auth.json`（Codex 自己的 ChatGPT 登录，由[官方路导入](#导入到-codex-官方路chatgpt-登录)写入，备份为 `auth.json.apim.bak`）与 `~/.pi/agent/models.json`（Pi，备份为 `models.json.apim.bak`；`PI_CODING_AGENT_DIR` 可改整个目录）。Pi 的 `settings.json` 一个字都不写；apim 只**读** `auth.json`（也不写它）来判断哪把 key 在用。
 
 apim 侧**不存**导入记录：密钥行上的 ★ 是按客户端自己的配置现场算出来的（见上文）。
 

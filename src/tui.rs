@@ -82,6 +82,9 @@ async fn loop_tui(
                         TaskMsg::Import(outcome) => app.import_result(*outcome),
                         TaskMsg::OAuthBalance(seq, result) => app.apply_oauth_balance(seq, result),
                         TaskMsg::OAuthLogin(result) => app.apply_oauth_login(result),
+                        TaskMsg::OAuthCodex(report, restart) => {
+                            app.apply_oauth_codex(*report, restart)
+                        }
                     }
                 }
             }
@@ -197,7 +200,8 @@ fn handle_key(app: &mut App, key: KeyEvent) {
             }
             // o 在别处不是静默无效键；也不提供取消/重试（那是另一件事）
             KeyCode::Char('o') => app.note_oauth_unavailable(),
-            // x：把当前密钥 + 厂商 + 勾选的模型一键导入到 Codex
+            // x：把当前密钥 + 厂商 + 勾选的模型一键导入到 Codex；
+            // 在 AUTH 行上则是把 apim 的 OpenAI Codex OAuth 凭据导入 Codex 的官方路
             KeyCode::Char('x') => app.open_import(),
             KeyCode::Char('d') => app.open_delete(),
             KeyCode::Char('j') | KeyCode::Down => app.move_down(),

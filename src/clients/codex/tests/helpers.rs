@@ -8,7 +8,8 @@ use crate::clients::codex::catalog::CATALOG_FILE;
 use crate::clients::codex::config_file;
 
 /// 本次测试专用的临时目录（`target/` 下，名字带测试名 + pid，每次重建）。
-pub(super) fn temp_dir(name: &str) -> PathBuf {
+/// `pub(crate)`：`official.rs` 的测试也用它（它不在 `tests` 模块树里）。
+pub(crate) fn temp_dir(name: &str) -> PathBuf {
     let dir = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
         .join("target")
         .join(format!("apim-codex-{name}-{}", std::process::id()));

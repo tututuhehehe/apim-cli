@@ -70,6 +70,16 @@ pub(crate) fn draw_balance(frame: &mut Frame, app: &App, area: Rect) {
             }
             None => {}
         }
+        // Codex 现在走哪条路：回读 ~/.codex 现场算的（导入官方 OAuth 后这里立刻变）
+        let imported = app.codex_route == crate::clients::codex::CodexRoute::OfficialOauth;
+        lines.push(Line::from(Span::styled(
+            format!("  {}", app.codex_route.label()),
+            if imported {
+                Style::new().fg(theme::GOLD).add_modifier(Modifier::BOLD)
+            } else {
+                Style::new().fg(theme::MUTED)
+            },
+        )));
         lines.push(Line::from(""));
     }
 

@@ -17,7 +17,7 @@ use std::time::{Duration, Instant};
 use anyhow::Result;
 use tokio::sync::mpsc::{self, UnboundedReceiver, UnboundedSender};
 
-use crate::clients::Agent;
+use crate::clients::{Agent, RestartReport};
 use crate::clipboard;
 use crate::config::{self, KeyEntry};
 use crate::probe::{self, BalanceSnapshot, Health, ProbeResult};
@@ -72,6 +72,11 @@ pub enum TaskMsg {
     Import(Box<ImportOutcome>),
     OAuthBalance(u64, std::result::Result<Vec<String>, String>),
     OAuthLogin(std::result::Result<(), String>),
+    /// AUTH 行的 `x`：把 apim 的 OpenAI Codex OAuth 凭据导入 Codex 官方路的结果 + 重载结果。
+    OAuthCodex(
+        Box<std::result::Result<crate::clients::codex::OfficialReport, String>>,
+        crate::clients::RestartReport,
+    ),
 }
 
 /// 探活/额度结果：带上**探针代际**。配置变更后旧代际的结果会被丢弃，
@@ -109,6 +114,9 @@ pub struct App {
     pub oauth_checking: bool,
     pub oauth_login_running: bool,
     pub oauth_seq: u64,
+    /// Codex 现在走哪条路（官方 OAuth / 官方 API Key / 某个 provider / 未登录）。
+    /// 与 ★ 角标同思路：**回读 `~/.codex` 现场**算出来的，不记台账，额度面板 AUTH 区显示。
+    pub codex_route: crate::clients::codex::CodexRoute,
     /// 配置根目录（`~/.config/apim` 或 `APIM_CONFIG_DIR`）。落盘都经它，
     /// 测试注入临时目录，不碰真实配置。
     pub(crate) config_dir: PathBuf,
@@ -161,6 +169,7 @@ impl App {
             oauth_checking: false,
             oauth_login_running: false,
             oauth_seq: 0,
+            codex_route: crate::clients::codex::CodexRoute::SignedOut,
             config_dir,
             active_keys,
             agent_homes,
@@ -360,6 +369,31 @@ impl App {
         keys.get(self.selected_key).copied().map(|i| &self.keys[i])
     }
 
+    /// 密钥表里 AUTH 行的选择位：只有内置 `openai` 分页才有（与 `ui::oauth_row_status` 同一个门），
+    /// 排在过滤后密钥行的**后面**（下标 = 过滤后密钥数）。`Some(n)` 时 n 就是那一行的下标。
+    pub fn auth_row_index(&self) -> Option<usize> {
+        (self.current_provider_id() == Some("openai"))
+            .then(|| self.keys_in_provider_filtered().len())
+    }
+
+    /// 光标是不是停在 AUTH 行上（`x` 与底栏提示按它分流）。
+    pub fn auth_row_selected(&self) -> bool {
+        self.auth_row_index() == Some(self.selected_key)
+    }
+
+    /// 密钥级按键（c/i/d/m/e）落在 AUTH 行上时的统一提示：那一行只有 `x` 有含义。
+    /// 返回 true = 已处理，调用方直接返回。
+    fn note_auth_row_only_imports(&mut self) -> bool {
+        if !self.auth_row_selected() {
+            return false;
+        }
+        self.toast = Some((
+            "AUTH 行是 Codex OAuth：只支持 x（导入到 Codex）".into(),
+            Instant::now(),
+        ));
+        true
+    }
+
     pub fn state_for(&self, key: &KeyEntry) -> KeyState {
         self.states.get(&key.id()).cloned().unwrap_or_default()
     }
@@ -379,8 +413,20 @@ impl App {
 
     /// 重读各客户端配置，刷新「哪把密钥现在正被谁用」（★ 角标）。
     /// 客户端配置可能被用户手改，所以导入成功后、刷新时都要重算，而不是信 apim 自己的记忆。
+    ///
+    /// 顺手回读 codex 现在走哪条路（官方 OAuth / 官方 API Key / 某个 provider / 未登录）：
+    /// 与 ★ 同一个节奏，用户在别的窗口里改了 `~/.codex` 也能立刻看到。
     pub(crate) fn refresh_active_keys(&mut self) {
         self.active_keys = Agent::detect_active_keys(&self.keys, &self.recipes, &self.agent_homes);
+        self.codex_route = crate::clients::codex::codex_route(Some(&self.codex_home()));
+    }
+
+    /// codex 的配置目录（`CODEX_HOME` / `~/.codex`；测试经 `agent_homes` 注入）。
+    pub(crate) fn codex_home(&self) -> PathBuf {
+        self.agent_homes
+            .get(&Agent::Codex)
+            .cloned()
+            .unwrap_or_else(crate::clients::codex::codex_home)
     }
 
     /// 重建两个分页各自的厂商列表：有密钥的厂商排在前面（顺序同密钥清单），
@@ -417,10 +463,12 @@ impl App {
             self.tabs[i].selected = if n == 0 { 0 } else { selected.min(n - 1) };
         }
         let nk = self.keys_in_provider_filtered().len();
-        if nk == 0 {
+        // AUTH 行也算一个可选位置（openai 分页）：上限 = 密钥数 + 1
+        let limit = self.auth_row_index().map(|i| i + 1).unwrap_or(nk);
+        if limit == 0 {
             self.selected_key = 0;
-        } else if self.selected_key >= nk {
-            self.selected_key = nk - 1;
+        } else if self.selected_key >= limit {
+            self.selected_key = limit - 1;
         }
     }
 
@@ -476,7 +524,9 @@ impl App {
             }
             Focus::Keys => {
                 let n = self.keys_in_provider_filtered().len();
-                if n > 0 && self.selected_key + 1 < n {
+                // AUTH 行（openai 分页）也是可选中的一行，排在密钥行之后
+                let limit = self.auth_row_index().map(|i| i + 1).unwrap_or(n);
+                if limit > 0 && self.selected_key + 1 < limit {
                     self.selected_key += 1;
                 }
             }
@@ -517,6 +567,9 @@ impl App {
                 }
             }
             Focus::Keys => {
+                if self.note_auth_row_only_imports() {
+                    return;
+                }
                 let Some(key) = self.selected_key_entry() else {
                     self.toast = Some(("没有可复制的密钥".into(), Instant::now()));
                     return;
@@ -652,6 +705,99 @@ impl App {
                     format!("OAuth 登录失败: {error}（详情见 {}）", log.display()),
                     Instant::now(),
                 ));
+            }
+        }
+    }
+
+    /// AUTH 行按 `x`：把 apim 的 OpenAI Codex OAuth 凭据导入 Codex 的**官方路**
+    /// （写 `auth.json` + 摘掉 config.toml 的第三方路由），校验通过后重启 codex 守护进程。
+    ///
+    /// 与第三方导入（`x` 面板）分开：官方路没有「选模型」这回事（模型表由 ChatGPT 后端给），
+    /// 也不需要 apim 的密钥行。
+    pub fn import_oauth_to_codex(&mut self) {
+        if self.oauth_login_running {
+            self.toast = Some(("OAuth 登录还在进行，等它结束再导入".into(), Instant::now()));
+            return;
+        }
+        let cred = match crate::openai_auth::load(&self.config_dir) {
+            Ok(Some(cred)) => cred,
+            Ok(None) => {
+                self.toast = Some((
+                    "还没有 OAuth 凭据：先按 o 完成 OpenAI Codex 授权".into(),
+                    Instant::now(),
+                ));
+                return;
+            }
+            Err(err) => {
+                self.toast = Some((format!("读取 OAuth 凭据失败：{err:#}"), Instant::now()));
+                return;
+            }
+        };
+        let home = self.codex_home();
+        let restart_daemon = self.restart_codex_daemon;
+        let tx = self.tx_task.clone();
+        tokio::spawn(async move {
+            let (result, restart) = tokio::task::spawn_blocking(move || {
+                let result = crate::clients::codex::import_official(&home, &cred);
+                // 写成功才重启：codex 的 daemon 只在启动时读一次配置
+                let restart = if result.is_ok() && restart_daemon {
+                    crate::clients::codex::restart_daemon().unwrap_or_default()
+                } else {
+                    RestartReport::default()
+                };
+                (result, restart)
+            })
+            .await
+            .unwrap_or_else(|err| {
+                (
+                    Err(format!("导入任务异常终止：{err}")),
+                    RestartReport::default(),
+                )
+            });
+            let _ = tx.send(TaskMsg::OAuthCodex(Box::new(result), restart));
+        });
+    }
+
+    /// 官方路导入结果落地：成功就把「改了哪些键 / 备份在哪 / 要不要重启」说清楚。
+    pub fn apply_oauth_codex(
+        &mut self,
+        result: Result<crate::clients::codex::OfficialReport, String>,
+        restart: RestartReport,
+    ) {
+        match result {
+            Ok(report) => {
+                // 配置变了：★ 与「codex 走哪条路」都要按新现场重算（第三方密钥的 ★ 会消失）
+                self.refresh_active_keys();
+                let mut note = "已把 OpenAI Codex OAuth 导入 Codex（官方路）".to_string();
+                if !report.removed.is_empty() {
+                    note.push_str(&format!(" · 摘掉 {}", report.removed.join("/")));
+                }
+                if !report.backups.is_empty() {
+                    let names: Vec<String> = report
+                        .backups
+                        .iter()
+                        .filter_map(|path| path.file_name().and_then(|n| n.to_str()))
+                        .map(str::to_string)
+                        .collect();
+                    note.push_str(&format!(" · 旧配置备份为 {}", names.join(" / ")));
+                }
+                if restart.killed > 0 {
+                    note.push_str(&format!(
+                        " · 已重启 Codex 守护进程({} 个)，重开它即可用官方账号",
+                        restart.killed
+                    ));
+                } else if restart.ambiguous > 0 {
+                    note.push_str(&format!(
+                        " · 没找到标准形态的 Codex 守护进程（有 {} 个类似进程没敢动），若它正开着请手动重启",
+                        restart.ambiguous
+                    ));
+                } else {
+                    note.push_str(" · 重开 Codex 生效");
+                }
+                self.toast = Some((note, Instant::now()));
+            }
+            Err(message) => {
+                self.toast = Some((format!("导入 Codex 官方路失败：{message}"), Instant::now()))
             }
         }
     }
@@ -814,6 +960,7 @@ pub(crate) mod tests {
             oauth_checking: false,
             oauth_login_running: false,
             oauth_seq: 0,
+            codex_route: crate::clients::codex::CodexRoute::SignedOut,
             next_import_seq: 0,
             import_runner: None,
             undo_stack: VecDeque::new(),
@@ -1426,6 +1573,125 @@ pub(crate) mod tests {
         assert_eq!(
             app.toast_text(),
             Some("deepl 假厂商 是非模型厂商，没有模型列表")
+        );
+    }
+
+    /// AUTH 行（内置 openai 分页）是可选中的**最后一行**：j/k 能走上去，
+    /// clamp 不会把它吃掉；别的厂商不多出这个位置。
+    #[test]
+    fn auth_row_is_the_last_selectable_row_on_openai() {
+        let (mut app, _rx, _rx_models) = test_app(&[("openai", &["api-key"])]);
+        app.focus = Focus::Keys;
+        app.selected_key = 0;
+        assert_eq!(app.auth_row_index(), Some(1));
+        assert!(!app.auth_row_selected());
+        assert!(app.selected_key_entry().is_some());
+
+        app.move_down();
+        assert_eq!(app.selected_key, 1);
+        assert!(app.auth_row_selected(), "密钥行下面那一行就是 AUTH");
+        assert!(app.selected_key_entry().is_none(), "AUTH 不是密钥");
+        app.move_down(); // 已经到底
+        assert_eq!(app.selected_key, 1);
+        app.move_up();
+        assert_eq!(app.selected_key, 0);
+
+        // 别的厂商没有 AUTH 行，也就没有多出来的那一个位置
+        let (mut app, _rx, _rx_models) = test_app(&[("alpha", &["a1"])]);
+        app.focus = Focus::Keys;
+        assert_eq!(app.auth_row_index(), None);
+        app.move_down();
+        assert_eq!(app.selected_key, 0);
+        assert!(!app.auth_row_selected());
+    }
+
+    /// openai 面板没有密钥时，AUTH 行就是唯一那一行，也是默认光标位。
+    #[test]
+    fn auth_row_is_the_only_row_when_openai_has_no_keys() {
+        let (mut app, _rx, _rx_models) = test_app(&[("openai", &[])]);
+        app.focus = Focus::Keys;
+        assert_eq!(app.auth_row_index(), Some(0));
+        assert!(app.auth_row_selected());
+        assert!(app.selected_key_entry().is_none());
+    }
+
+    /// AUTH 行按 `x` 不是「导入密钥」：走 Codex 官方路那条。没有凭据时给的是登录提示，
+    /// 而不是开一个要拉模型列表的面板。
+    #[test]
+    fn x_on_the_auth_row_imports_the_oauth_credential_instead_of_a_key() {
+        let (mut app, _rx, _rx_models) = test_app(&[("openai", &["api-key"])]);
+        app.config_dir = test_config_dir("auth-row-x");
+        app.focus = Focus::Keys;
+        app.selected_key = 1; // AUTH 行
+        app.open_import();
+        assert!(matches!(app.modal, Modal::None), "官方路不需要模型面板");
+        assert_eq!(
+            app.toast_text(),
+            Some("还没有 OAuth 凭据：先按 o 完成 OpenAI Codex 授权")
+        );
+
+        // 密钥行照旧开面板（AUTH 的旁路不能把原来的导入改掉）
+        app.selected_key = 0;
+        app.open_import();
+        assert!(matches!(app.modal, Modal::Import(_)));
+    }
+
+    /// AUTH 行上 c/i/d/m/e 不该装作「没有密钥」：给一句明确的提示（那一行只有 x 有含义）。
+    #[test]
+    fn key_actions_on_the_auth_row_say_what_is_supported() {
+        let (mut app, _rx, _rx_models) = test_app(&[("openai", &["api-key"])]);
+        app.focus = Focus::Keys;
+        app.selected_key = 1;
+        let actions: [fn(&mut App); 5] = [
+            App::copy_selected,
+            App::open_inspector,
+            App::open_delete,
+            App::open_edit,
+            App::open_models,
+        ];
+        for action in actions {
+            app.toast = None;
+            action(&mut app);
+            assert_eq!(
+                app.toast_text(),
+                Some("AUTH 行是 Codex OAuth：只支持 x（导入到 Codex）")
+            );
+            assert!(matches!(app.modal, Modal::None));
+        }
+    }
+
+    /// 「codex 现在走哪条路」是回读现场算的：`refresh_active_keys` 后跟着 `~/.codex` 变。
+    #[test]
+    fn codex_route_is_read_back_from_the_client_config() {
+        let (mut app, _rx, _rx_models) = test_app(&[("openai", &["api-key"])]);
+        let home = app.codex_home();
+        app.refresh_active_keys();
+        assert_eq!(
+            app.codex_route,
+            crate::clients::codex::CodexRoute::SignedOut
+        );
+
+        std::fs::write(
+            home.join("config.toml"),
+            "model_provider = \"deepseek\"\n[model_providers.deepseek]\nbase_url = \"https://x.invalid/v1\"\n",
+        )
+        .unwrap();
+        app.refresh_active_keys();
+        assert_eq!(
+            app.codex_route,
+            crate::clients::codex::CodexRoute::Provider("deepseek".into())
+        );
+
+        std::fs::write(home.join("config.toml"), "model = \"gpt-6\"\n").unwrap();
+        std::fs::write(
+            home.join("auth.json"),
+            r#"{"auth_mode":"chatgpt","tokens":{"access_token":"a.b.c"}}"#,
+        )
+        .unwrap();
+        app.refresh_active_keys();
+        assert_eq!(
+            app.codex_route,
+            crate::clients::codex::CodexRoute::OfficialOauth
         );
     }
 }

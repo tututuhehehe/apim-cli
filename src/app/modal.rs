@@ -143,6 +143,9 @@ impl App {
     }
 
     fn open_edit_key(&mut self) {
+        if self.note_auth_row_only_imports() {
+            return;
+        }
         let Some(key) = self.selected_key_entry().cloned() else {
             self.toast = Some(("没有可编辑的密钥".into(), Instant::now()));
             return;
@@ -196,6 +199,9 @@ impl App {
                 }
             }
             Focus::Keys => {
+                if self.note_auth_row_only_imports() {
+                    return;
+                }
                 let Some(key) = self.selected_key_entry() else {
                     self.toast = Some(("没有可删除的密钥".into(), Instant::now()));
                     return;
@@ -330,6 +336,9 @@ impl App {
                 };
             }
             Focus::Keys => {
+                if self.note_auth_row_only_imports() {
+                    return;
+                }
                 let Some(key) = self.selected_key_entry() else {
                     self.toast = Some(("没有可查看的密钥".into(), Instant::now()));
                     return;
@@ -386,6 +395,9 @@ impl App {
     /// 密钥栏按 `m`：用当前选中的这把 key 拉取它的模型列表。
     /// 模型可见性随 key（分组）不同而不同，所以按 key 而不是按厂商取第一把。
     pub fn open_models(&mut self) {
+        if self.note_auth_row_only_imports() {
+            return;
+        }
         let Some(key) = self.selected_key_entry().cloned() else {
             // 与 c/e/i/d 同款：没得选就提示，别让按键无声无息
             self.toast = Some(("没有可查询的密钥".into(), Instant::now()));
@@ -613,6 +625,7 @@ mod tests {
             oauth_checking: false,
             oauth_login_running: false,
             oauth_seq: 0,
+            codex_route: crate::clients::codex::CodexRoute::SignedOut,
             next_import_seq: 0,
             import_runner: None,
             undo_stack: std::collections::VecDeque::new(),

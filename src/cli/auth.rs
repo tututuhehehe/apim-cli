@@ -48,8 +48,39 @@ pub(crate) async fn run(ctx: &Ctx, argv: &[String]) -> Result<()> {
                     Ok(())
                 }
             },
-            _ => bail!("未知子命令。用法：apim auth openai <login|status|logout>"),
+            // 把这份 OAuth 凭据导入 Codex 的**官方路**（写 auth.json + 摘掉 config.toml
+            // 的第三方路由），TUI 里是 AUTH 行按 `x`；细节见 clients::codex::official
+            Some("import-codex") => {
+                let cred = openai_auth::load(&ctx.config_dir)?.ok_or_else(|| {
+                    anyhow::anyhow!("还没有 OAuth 凭据，先运行 apim auth openai login")
+                })?;
+                let home = crate::clients::codex::codex_home();
+                let report = crate::clients::codex::import_official(&home, &cred)
+                    .map_err(anyhow::Error::msg)?;
+                // 与 TUI 同一口径：写成功才重启（codex 的 daemon 只在启动时读一次配置）
+                let restart = crate::clients::codex::restart_daemon().unwrap_or_default();
+                println!(
+                    "已把 OpenAI Codex OAuth 导入 Codex 官方路（{}）",
+                    home.display()
+                );
+                if !report.removed.is_empty() {
+                    println!("  已从 config.toml 摘掉 {}", report.removed.join(" / "));
+                }
+                for backup in &report.backups {
+                    println!("  旧配置备份为 {}", backup.display());
+                }
+                if restart.killed > 0 {
+                    println!(
+                        "  已重启 Codex 守护进程 {} 个，重开它即可用官方账号",
+                        restart.killed
+                    );
+                } else {
+                    println!("  重开 Codex 生效");
+                }
+                Ok(())
+            }
+            _ => bail!("未知子命令。用法：apim auth openai <login|status|logout|import-codex>"),
         },
-        _ => bail!("用法：apim auth openai <login|status|logout>"),
+        _ => bail!("用法：apim auth openai <login|status|logout|import-codex>"),
     }
 }

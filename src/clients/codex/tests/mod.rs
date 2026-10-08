@@ -2,12 +2,13 @@
 //! 以及「回读现场认出正在用的密钥」（★）。
 //!
 //! 全部在 `target/` 下的临时目录里跑，且用假 codex 脚本，不碰真实 `~/.codex`。
-//! 共享夹具在 [`helpers`]；按被测的源文件分子模块。
+//! 共享夹具在 [`helpers`]；按被测的源文件分子模块（`official.rs` 的单测也来取 [`helpers`]）。
 
 mod active;
 mod catalog;
 mod config;
-mod helpers;
+// `pub(super)`：`official.rs` 的测试也要用 `temp_dir` 这类夹具
+pub(super) mod helpers;
 mod import;
 mod real_codex;
 mod restart;

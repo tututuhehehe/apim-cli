@@ -142,7 +142,9 @@ fn rollback(
 }
 
 /// 删文件；本来就不存在也算成功。
-fn remove_if_exists(path: &Path) -> bool {
+///
+/// `pub(super)`：官方路导入（`official.rs`）回滚时也要删掉「导入前没有」的那份文件。
+pub(super) fn remove_if_exists(path: &Path) -> bool {
     match std::fs::remove_file(path) {
         Ok(()) => true,
         Err(err) => err.kind() == std::io::ErrorKind::NotFound,

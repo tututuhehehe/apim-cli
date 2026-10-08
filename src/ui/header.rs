@@ -47,6 +47,11 @@ pub(crate) fn draw_footer(frame: &mut Frame, app: &App, area: Rect) {
         (Focus::Providers, _) => {
             " j/k 移动  Tab 分页  hl 切换  ⏎ 主页  c URL  y 复制  i 详情  a 添加  e 编辑  d 删除  r 刷新  ^Z 撤销  q 退出 "
         }
+        (Focus::Keys, true)
+            if app.current_provider_id() == Some("openai") && app.auth_row_selected() =>
+        {
+            " j/k 移动  Tab 分页  hl 切换  x 导入 Codex（官方 OAuth）  o OAuth登录  c 复制  a 添加  r 刷新  ^Z 撤销  q 退出 "
+        }
         (Focus::Keys, true) if app.current_provider_id() == Some("openai") => {
             " j/k 移动  Tab 分页  hl 切换  m 模型  x 导入  o OAuth登录  c 密钥  i 详情  a 添加  e 编辑  d 删除  r 刷新  ^Z 撤销  q 退出 "
         }

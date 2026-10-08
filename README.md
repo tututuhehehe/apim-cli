@@ -95,6 +95,7 @@ apim --version  # version
 apim auth openai login  # connect ChatGPT/Codex OAuth for usage reporting
 apim auth openai status
 apim auth openai logout
+apim auth openai import-codex  # write that credential into Codex itself (official route; = x on the AUTH row)
 ```
 
 ## Keybindings
@@ -111,8 +112,8 @@ apim auth openai logout
 | `i` | Provider details (auth / endpoints / balance script / origin / vars — values are hidden) | Key details (`r` toggles the full token, `c` copies) |
 | `Enter` | Open the provider homepage (console) in your default browser | — |
 | `m` | — | Fetch the model list with **the selected key** (model providers only; visibility depends on the key/group; in the dialog `/` focuses the search box for live filtering, `Esc` leaves search back to the list (filter kept), `j`/`k` scroll, `c` copies a model name, `Esc` closes) |
-| `o` | — | On the built-in OpenAI provider, start or reauthorize apim's own ChatGPT/Codex OAuth; the fixed `AUTH` row is informational and is not an API key or import target |
-| `x` | — | One-click **import into Codex or Pi** (model providers only): the selected key + its provider + the models you tick, written to the client's config. Steps: `⏎` to advance → pick a client → tick models (`space` toggles, `a` toggles all, `/` searches) → (Codex only) pick the default model (`j`/`k` move, `h` goes back, `⏎` imports; a single ticked model skips this step; Pi has no such step). See below |
+| `o` | — | On the built-in OpenAI provider, start or reauthorize apim's own ChatGPT/Codex OAuth. The `AUTH` row under the keys is not an API key, but it **is** a selectable row: with it selected `x` imports the OAuth credential into Codex's official route instead of opening the key-import panel, and `c`/`i`/`d`/`m`/`e` say so instead of pretending there is no key |
+| `x` | — | One-click **import into Codex or Pi** (model providers only): the selected key + its provider + the models you tick, written to the client's config. Steps: `⏎` to advance → pick a client → tick models (`space` toggles, `a` toggles all, `/` searches) → (Codex only) pick the default model (`j`/`k` move, `h` goes back, `⏎` imports; a single ticked model skips this step; Pi has no such step). See below. On the OpenAI provider's `AUTH` row, `x` instead writes the OAuth credential into Codex's [official route](#import-into-codexs-official-route-chatgpt-login) — no API key, no model picking |
 | `j` / `k` | Move up/down | Move up/down |
 | `Tab` | Switch the provider page: `模型` (model providers) ⇄ `非模型` (non-model APIs). Each page remembers its own selection and filter | Same |
 | `h` / `l` | Switch panes (`h` = provider list, `l` = key table; no-op at the edge) | Same |
@@ -125,7 +126,7 @@ Press `/` to open the search box; filtering is live and case-insensitive, and ea
 
 ## CRUD
 
-**OpenAI Codex OAuth**: on the built-in OpenAI provider, press `o` in the key pane (or run `apim auth openai login`) to authorize apim in the browser. The sign-in uses the same Codex CLI client profile as Pi and cc-switch, because OpenAI's [documented open-source dynamic registration flow](https://developers.openai.com/siwc/token-sharing-open-source/sign-in) issues tokens whose `https://api.openai.com/auth` claim carries no `chatgpt_account_id` and the Codex usage endpoint answers `401` for them (set `APIM_OAUTH_CLIENT=apim` to use that profile anyway). The OAuth record is stored separately at `~/.config/apim/openai-oauth.json` with mode `600`; the host ID is stored beside it. `apim auth openai status|logout` reports or removes the credential. The fixed `AUTH` row is not a normal key and cannot be copied, edited, deleted, or imported with `x`. If sign-in fails, apim writes a step-by-step diagnostic (status codes and redacted response bodies, never tokens) to `~/.config/apim/openai-oauth.log`, and the footer toast shows the cause followed by that path. The OpenAI balance pane always shows Codex OAuth usage (every rate-limit window the API returns, labelled by its real length, with reset countdowns) alongside the selected API key's separate API balance; which windows exist depends on the plan (a `go` account reports one monthly window, `pro` reports 5h + 1w), and OAuth usage uses an undocumented ChatGPT endpoint that may need maintenance if OpenAI changes it.
+**OpenAI Codex OAuth**: on the built-in OpenAI provider, press `o` in the key pane (or run `apim auth openai login`) to authorize apim in the browser. The sign-in uses the same Codex CLI client profile as Pi and cc-switch, because OpenAI's [documented open-source dynamic registration flow](https://developers.openai.com/siwc/token-sharing-open-source/sign-in) issues tokens whose `https://api.openai.com/auth` claim carries no `chatgpt_account_id` and the Codex usage endpoint answers `401` for them (set `APIM_OAUTH_CLIENT=apim` to use that profile anyway). The OAuth record is stored separately at `~/.config/apim/openai-oauth.json` with mode `600`; the host ID is stored beside it. `apim auth openai status|logout` reports or removes the credential. The `AUTH` row is not a normal key (it cannot be copied, edited or deleted), but it **is** selectable: `x` on it imports this credential into Codex's own [official route](#import-into-codexs-official-route-chatgpt-login), and the AUTH block in the balance pane always shows which route Codex is on right now. If sign-in fails, apim writes a step-by-step diagnostic (status codes and redacted response bodies, never tokens) to `~/.config/apim/openai-oauth.log`, and the footer toast shows the cause followed by that path. The OpenAI balance pane always shows Codex OAuth usage (every rate-limit window the API returns, labelled by its real length, with reset countdowns) alongside the selected API key's separate API balance; which windows exist depends on the plan (a `go` account reports one monthly window, `pro` reports 5h + 1w), and OAuth usage uses an undocumented ChatGPT endpoint that may need maintenance if OpenAI changes it.
 
 **Add a key (`a` in the right pane)**: fill in the alias, an optional group, and the key; switch providers with `←`/`→`. You can paste the key with `⌘V`. `Enter` saves, writes to disk immediately, and probes it.
 
@@ -203,6 +204,8 @@ The TUI is for humans, the CLI is for machines: after `cargo install --path .` e
 
 | Command | Description |
 |---|---|
+| `apim auth openai login\|status\|logout` | Sign in to / inspect / remove apim's own ChatGPT/Codex OAuth credential (see [OpenAI Codex OAuth](#crud)) |
+| `apim auth openai import-codex` | Write that credential into Codex itself (official route): `~/.codex/auth.json` + the third-party routing removed from `config.toml`. Same as pressing `x` on the `AUTH` row |
 | `apim provider ls [--json]` | List providers (including kind, balance binding mode and key count; non-model providers are tagged `[非模型]`) |
 | `apim provider add <id> --name <name> --base-url <URL> [--homepage <URL>\|none] [--kind model\|non-model] [--health <path>\|none] [--script <path>\|none]` | Create a provider (`--kind` defaults to `model`; `--health` is rejected for non-model providers) |
 | `apim provider set <id> [--name <name>] [--base-url <URL>] [--homepage <URL>\|none] [--health <path>\|none] [--script <path>\|none]` | Update a provider (only the fields you pass). The kind cannot be changed — that is what `provider add` is for |
@@ -285,6 +288,26 @@ Deliberate choices:
 
 > Requires `codex` on your machine (it is used to generate and verify the model catalog). apim finds it on `PATH`, or you can point `APIM_CODEX_BIN` at it.
 
+### Import into Codex's official route (ChatGPT login)
+
+Select the `AUTH` row in the built-in OpenAI provider's key table and press `x` (or run `apim auth openai import-codex`) to point **Codex itself** at your ChatGPT subscription instead of a relay — the same thing cc-switch's "OpenAI Official" card does, and the other half of the switch: `x` on a key puts a relay back. This path needs no API key and no model list, so it does not open the import panel.
+
+| Location | Content |
+|---|---|
+| `~/.codex/auth.json` | Codex's native ChatGPT login: `auth_mode = "chatgpt"`, `OPENAI_API_KEY = null`, `tokens` (`id_token` / `access_token` / `refresh_token` / `account_id`) and `last_refresh` |
+| `~/.codex/config.toml` | **Removed**: the top-level `model_provider`, `model` and apim's own `model_catalog_json` pointer. Everything else — `[model_providers.*]` blocks, `notify`, `[projects.*]`, `[tui]`, `[plugins.*]` … — is left alone (comments and order included) |
+
+Deliberate choices:
+
+- **Codex keeps the token fresh by itself.** apim's sign-in uses the same public client id as the Codex CLI (`app_EMoamEEZ73f0CkXaXp7hrann`) and codex refreshes against the same token endpoint with the same parameters, so the copy in `auth.json` is self-sustaining — that is why `refresh_token` is always written. The flip side: once codex refreshes, the new tokens live only in `auth.json`; if OpenAI rotates the refresh token, apim's own copy in `openai-oauth.json` goes stale and you re-authorize with `o` (apim does not sync back).
+- **Only apim's own keys are removed.** cc-switch empties `config.toml` because it keeps a provider database; apim has none, and the `.apim.bak` backup is overwritten by the next import, so wiping would silently delete your `[projects.*]` / `[plugins.*]` / `notify` for good. A `model_catalog_json` you wrote by hand is kept as well.
+- **`model` goes away too**, so Codex falls back to its own default model: apim's `model` is a third-party slug (say `deepseek-flash`) that the official endpoint does not serve. The `[model_providers.*]` blocks are never touched, so switching back to a relay is one `x` away.
+- **It refuses to write a credential Codex cannot see**: with `cli_auth_credentials_store = "keyring"` or `"ephemeral"` codex never reads `auth.json`, so the import fails with that explanation instead of leaving a file that does nothing (apim does not touch your OS keychain).
+- **Verified by codex itself**: after writing, apim runs `codex login status` with `CODEX_HOME` pointed at the directory it just wrote and requires a logged-in ChatGPT session. Real codex 0.161 prints `Logged in using ChatGPT` on **stderr** with exit 0 (and `Not logged in` / config errors on stderr with exit 1), so apim checks both streams *and* the exit code. On failure both files are restored from their `.apim.bak` backups.
+- **The daemon is restarted** exactly like a third-party import (codex reads its configuration once, at daemon start); `APIM_NO_RESTART_CODEX=1` disables that.
+- **`~/.codex/auth.json` is Codex's own login file**, not an apim side-car: `codex login` / `codex logout` own it, and `apim uninstall` therefore does not list it as an apim leftover.
+- **The balance pane tells you which route Codex is on right now** (`Codex：OpenAI 官方 OAuth` / `OpenAI 官方 API Key` / `provider deepseek` / `未登录`), read back from `~/.codex` on the same schedule as the ★ badges — never from an apim-side record.
+
 ### One-click import into Pi
 
 The same `x` panel targets **Pi** — pick `Pi` in step one (Pi needs only two steps: picking a default model is Codex-specific and is skipped). Pi takes a third-party provider as pure data (`models.json`), so apim writes exactly one place:
@@ -318,7 +341,7 @@ Everything lives under `~/.config/apim/`. TUI edits write the API key files dire
 - `secrets.toml` — API tokens, keyed by `"provider.alias"`
 - `openai-oauth.json` — apim's OpenAI Codex OAuth credentials (mode 600); `openai-oauth-host-id` stores the stable host ID, and `openai-oauth.log` records the last sign-in or refresh attempt (status codes and redacted response bodies, never tokens)
 
-Import targets live outside that directory: `~/.codex/config.toml` + `~/.codex/apim-models.json` (Codex, backed up as `config.toml.apim.bak`) and `~/.pi/agent/models.json` (Pi, backed up as `models.json.apim.bak`; `PI_CODING_AGENT_DIR` overrides the directory). Pi's `settings.json` is never written — apim only *reads* `auth.json` (never writes it either) to work out which key is in use.
+Import targets live outside that directory: `~/.codex/config.toml` + `~/.codex/apim-models.json` (Codex, backed up as `config.toml.apim.bak`), `~/.codex/auth.json` (Codex's own ChatGPT login, written by the [official-route import](#import-into-codexs-official-route-chatgpt-login), backed up as `auth.json.apim.bak`) and `~/.pi/agent/models.json` (Pi, backed up as `models.json.apim.bak`; `PI_CODING_AGENT_DIR` overrides the directory). Pi's `settings.json` is never written — apim only *reads* `auth.json` (never writes it either) to work out which key is in use.
 
 Nothing apim-side records the import: the ★ marker on a key row is computed from the client's own config (see above).
 

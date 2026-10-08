@@ -78,7 +78,8 @@ pub(crate) fn draw_keys(frame: &mut Frame, app: &App, area: Rect) {
     }
 
     let mut state = TableState::default();
-    if n > 0 {
+    // AUTH 行也是一个可选中的行（openai 分页）：没有密钥时它就是唯一那一行
+    if n > 0 || super::oauth_row_status(app).is_some() {
         state.select(Some(app.selected_key));
     }
 
@@ -187,7 +188,44 @@ mod tests {
         assert_eq!(
             app.selected_key_entry().unwrap().alias,
             "api-key",
-            "AUTH 是固定信息行，不进入普通密钥选择索引"
+            "AUTH 不是密钥（selected_key_entry 为 None），但它是可选中的单独一行"
+        );
+    }
+
+    /// AUTH 行是可选中的：光标走上去时高亮在 AUTH 行（`x` 在那里 = 导入 Codex 官方路），
+    /// 而不是永远停在最后一把密钥上。
+    #[test]
+    fn auth_row_can_be_selected_and_highlighted() {
+        let (mut app, _rx, _rx_task) = test_app(&[("openai", &["api-key"])]);
+        app.focus_provider("openai");
+        app.focus = Focus::Keys;
+
+        let render = |app: &App| {
+            let mut terminal = Terminal::new(TestBackend::new(100, 12)).unwrap();
+            terminal
+                .draw(|frame| draw_keys(frame, app, frame.area()))
+                .unwrap();
+            terminal
+                .backend()
+                .buffer()
+                .content()
+                .iter()
+                .map(|c| c.symbol())
+                .collect::<String>()
+        };
+
+        app.selected_key = 0;
+        assert!(
+            !render(&app).contains("▶ —   AUTH"),
+            "光标在密钥行时 AUTH 行不该带高亮"
+        );
+
+        app.selected_key = 1;
+        assert!(app.auth_row_selected());
+        assert!(app.selected_key_entry().is_none());
+        assert!(
+            render(&app).contains("▶ —   AUTH"),
+            "选中 AUTH 行时高亮应落在它上面"
         );
     }
 

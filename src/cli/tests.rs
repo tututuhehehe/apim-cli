@@ -404,6 +404,18 @@ async fn auth_openai_rejects_an_unknown_subcommand() {
     assert!(auth::run(&ctx, &argv(&["openai", "status"])).await.is_ok());
 }
 
+/// `import-codex` 没有凭据时在碰 `~/.codex` **之前**就报错（提示去登录）。
+/// 这里只测这一条：真写盘要碰客户端配置，那是 `codex::official` 自己的沙盒测试干的。
+#[tokio::test]
+async fn auth_openai_import_codex_needs_a_credential_first() {
+    let ctx = temp_ctx("auth-import-codex");
+    let err = auth::run(&ctx, &argv(&["openai", "import-codex"]))
+        .await
+        .unwrap_err()
+        .to_string();
+    assert!(err.contains("auth openai login"), "{err}");
+}
+
 #[tokio::test]
 async fn provider_rm_protections() {
     let ctx = temp_ctx("rm-protect");
