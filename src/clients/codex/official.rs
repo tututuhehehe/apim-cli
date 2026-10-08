@@ -41,6 +41,10 @@ use crate::util::truncate;
 /// codex 的 ChatGPT 登录凭据文件名（相对 `CODEX_HOME`）。
 pub const AUTH_FILE: &str = "auth.json";
 
+/// `codex login status` 报出 ChatGPT 登录的那句话（实测 0.161，写在 stderr）。
+/// 用它而不是 `Logged in`：API Key 登录是 `Logged in using an API key - sk-***`，那条路不算数。
+const LOGGED_IN_MARKER: &str = "Logged in using ChatGPT";
+
 /// 一次官方路导入的结果（提示条只读这里）。
 #[derive(Debug, Clone)]
 pub struct OfficialReport {
@@ -154,13 +158,15 @@ pub fn import_in(
 
     // 端到端校验：让 codex 自己读这份 auth.json + config.toml，必须认成「已登录」
     if let Err(err) = verify_login(bin, home) {
-        let restored = rollback(&auth_path, auth_backup.as_deref())
-            && match &config_backup {
-                // fs::copy 连权限一起复制（备份是 600），不会把配置摊成 644
-                Some(backup) => fs::copy(backup, &config_path).is_ok(),
-                None => remove_if_exists(&config_path),
-            };
-        return Err(if restored {
+        // 两处都要试着还原：写成 `rollback(...) && match ...` 会在 auth.json 还原失败时短路掉
+        // config.toml 的还原，留下「apim 说导入失败、codex 配置其实已经被摘掉第三方路由」的状态
+        let auth_restored = rollback(&auth_path, auth_backup.as_deref());
+        let config_restored = match &config_backup {
+            // fs::copy 连权限一起复制（备份是 600），不会把配置摊成 644
+            Some(backup) => fs::copy(backup, &config_path).is_ok(),
+            None => remove_if_exists(&config_path),
+        };
+        return Err(if auth_restored && config_restored {
             format!("{err}（已还原到导入前的配置）")
         } else {
             format!(
@@ -250,9 +256,16 @@ fn auth_json_text(cred: &Credential) -> Result<String, String> {
 
 /// 端到端校验：`codex login status` 真的读 auth.json（形状不对直接报错）并解析 config.toml。
 ///
-/// **两个流都要看**：本机 0.161 实测把「Logged in using ChatGPT」写在 **stderr** 且 exit 0
-/// （未登录 / 配置非法同样是 stderr，但 exit 1），而 stdout 也可能带上同一句；只认一个流
-/// 会把自己写的凭据判成失败。所以：exit 0 + 任一流里有 `Logged in` 才算过。
+/// **两个流都要看，而且必须认成 ChatGPT 登录**。本机 codex 0.161 实测的三种输出都写在
+/// **stderr**：
+/// - ChatGPT 登录：`Logged in using ChatGPT`，exit 0
+/// - API Key 登录：`Logged in using an API key - sk-***`，exit 0 —— **不能算过**：那条路不走
+///   auth.json 里的 ChatGPT 凭据，把成功说出来等于「官方 OAuth 已导入」是假话
+/// - 未登录 / 配置非法：`Not logged in` / 报错，exit 1
+///
+/// 所以只匹配 `Logged in` 太松（`cli_auth_credentials_store = auto` 且钥匙串里另有一把 API Key
+/// 时，codex 报的就是 API Key 那一条），必须匹配 [`LOGGED_IN_MARKER`]。stdout 也一起看：
+/// 同一句话在不同版本可能写在另一个流。
 fn verify_login(codex_bin: &Path, home: &Path) -> Result<(), String> {
     let output = Command::new(codex_bin)
         .args(["login", "status"])
@@ -261,7 +274,9 @@ fn verify_login(codex_bin: &Path, home: &Path) -> Result<(), String> {
         .map_err(|err| format!("执行 {} 失败：{err}", codex_bin.display()))?;
     let stdout = String::from_utf8_lossy(&output.stdout);
     let stderr = String::from_utf8_lossy(&output.stderr);
-    if output.status.success() && (stdout.contains("Logged in") || stderr.contains("Logged in")) {
+    if output.status.success()
+        && (stdout.contains(LOGGED_IN_MARKER) || stderr.contains(LOGGED_IN_MARKER))
+    {
         return Ok(());
     }
     // 报错优先给 stderr（codex 的提示在那里），空的话再退回 stdout
@@ -386,6 +401,9 @@ mod tests {
         let value: Value = serde_json::from_str(&text).unwrap();
         assert_eq!(value["auth_mode"], "chatgpt");
         assert!(value["OPENAI_API_KEY"].is_null());
+        // 四个 token 字段一个都不能少（codex 靠 refresh_token 自刷新，缺 id/access 也认不出账号）
+        assert_eq!(value["tokens"]["id_token"], "id.token.sig");
+        assert_eq!(value["tokens"]["access_token"], "access.token.sig");
         assert_eq!(value["tokens"]["refresh_token"], "refresh-token");
         assert_eq!(value["tokens"]["account_id"], "acct-test");
         // last_refresh 必须是 chrono 认的 RFC3339
@@ -579,6 +597,13 @@ screen_reader_detection_done = true
         assert!(verify_login(&stderr_bin, &home).is_ok());
         let stdout_bin = write_fake("#!/bin/sh\necho 'Logged in using ChatGPT'\nexit 0\n");
         assert!(verify_login(&stdout_bin, &home).is_ok());
+        // API Key 登录（真机 0.161 的原话）不是 ChatGPT 登录：不能算过，否则
+        // cli_auth_credentials_store = auto + 钥匙串里另有一把 API Key 时会把假话说成真的
+        let api_key_bin = write_fake(
+            "#!/bin/sh\necho 'Logged in using an API key - sk-fake-***l-key' >&2\nexit 0\n",
+        );
+        let err = verify_login(&api_key_bin, &home).unwrap_err();
+        assert!(err.contains("API key"), "{err}");
         // exit 非 0：即使输出里带着「Logged in」也不认
         let failed_bin = write_fake("#!/bin/sh\necho 'Logged in using ChatGPT' >&2\nexit 1\n");
         assert!(verify_login(&failed_bin, &home).is_err());

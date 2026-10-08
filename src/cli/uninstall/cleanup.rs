@@ -219,5 +219,15 @@ pub(super) fn codex_leftovers_in(home: &Path) -> Vec<String> {
             backup.display()
         ));
     }
+    // 官方路导入（AUTH 行按 x）留的 auth.json 备份：里面是**上一份完整的 ChatGPT 凭据**
+    // （id/access/refresh token），比 config 备份里的中转站密钥更敏感，同样必须一起报。
+    // 不报 auth.json 本身：那是 codex 自己的登录文件，归 codex login/logout 管。
+    let auth_backup = crate::clients::file_io::backup_path_of(&home.join("auth.json"));
+    if auth_backup.exists() {
+        out.push(format!(
+            "{}（apim 导入 Codex 官方路前留的备份，里面是上一份 ChatGPT 登录凭据）",
+            auth_backup.display()
+        ));
+    }
     out
 }

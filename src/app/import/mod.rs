@@ -63,6 +63,19 @@ impl App {
             return;
         }
         if self.auth_row_selected() {
+            // 非模型厂商不能导入客户端（约定 15）：AUTH 行也不能当例外。只有手改 recipe 的 kind
+            // 才会走到这里（内置 openai 本来是模型厂商），但口径要一致
+            let non_model = self
+                .current_recipe()
+                .filter(|recipe| !recipe.is_model())
+                .map(|recipe| recipe.name.clone());
+            if let Some(name) = non_model {
+                self.toast = Some((
+                    format!("{name} 是非模型厂商，不能导入到客户端"),
+                    Instant::now(),
+                ));
+                return;
+            }
             self.import_oauth_to_codex();
             return;
         }

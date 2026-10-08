@@ -77,9 +77,10 @@ rm ~/.codex/apim-models.json                 # 1. apim 生成的模型目录
 # 2. ~/.codex/config.toml 里：删掉 [model_providers.apim-*] 块，以及顶层的
 #    model_provider / model_catalog_json 指针
 rm ~/.codex/config.toml.apim.bak             # 3. 改写前的备份，里面也有明文密钥
+rm ~/.codex/auth.json.apim.bak               # 4. apim 给 Codex 自己的登录留的备份 —— 上一份 ChatGPT 凭据
 
-# 4. ~/.pi/agent/models.json 里：删掉 providers.apim-* 条目（apiKey 是明文）
-rm ~/.pi/agent/models.json.apim.bak          # 5. 改写前的备份，里面也有明文密钥
+# 5. ~/.pi/agent/models.json 里：删掉 providers.apim-* 条目（apiKey 是明文）
+rm ~/.pi/agent/models.json.apim.bak          # 6. 改写前的备份，里面也有明文密钥
 ```
 
 `apim uninstall` 会把上面这些**列出来提醒你**（它不代删：它们和手写配置混在同一个文件里）。
@@ -304,7 +305,7 @@ apim status glm --json
 - **Codex 看不见的凭据不写**：`cli_auth_credentials_store = "keyring"` 或 `"ephemeral"` 时 codex 根本不读 `auth.json`，导入会直接拒绝并说清原因，而不是写一份没用的文件（apim 不碰系统钥匙串）。
 - **让 codex 自己校验**：写完 apim 会带着刚写的目录跑 `codex login status`，要求它报出已登录的 ChatGPT 会话。真机 0.161 把 `Logged in using ChatGPT` 写在 **stderr** 且 exit 0（`Not logged in` / 配置非法同样是 stderr 但 exit 1），所以两个流和退出码都要看。校验不过就用 `.apim.bak` 把两处都还原。
 - **照旧重启守护进程**（与第三方导入同一口径：codex 只在 daemon 启动时读一次配置）；`APIM_NO_RESTART_CODEX=1` 可关。
-- **`~/.codex/auth.json` 是 Codex 自己的登录文件**，不是 apim 的旁挂文件：`codex login` / `codex logout` 管它，所以 `apim uninstall` 不把它当成 apim 残留列出来。
+- **`~/.codex/auth.json` 是 Codex 自己的登录文件**，不是 apim 的旁挂文件：`codex login` / `codex logout` 管它，所以 `apim uninstall` 不把它当成 apim 残留列出来（但会列出 apim 自己那份 `auth.json.apim.bak` 备份 —— 里面是上一份 ChatGPT 凭据）。
 - **额度面板会告诉你 Codex 现在走哪条路**（`Codex：OpenAI 官方 OAuth` / `OpenAI 官方 API Key` / `provider deepseek` / `未登录`），与 ★ 角标同一个节奏从 `~/.codex` 现场读，不存 apim 侧台账。
 
 ### 一键导入到 Pi

@@ -131,7 +131,16 @@ fn codex_real_official_end_to_end() {
 
     let written = fs::read_to_string(home.join("config.toml")).unwrap();
     assert!(!written.contains("model_provider = "), "{written}");
-    assert!(!written.contains("model_catalog_json"), "{written}");
+    // 目录指针只在它指向 apim 自己生成的那个文件时才被摘；手写的目录按约定原样保留
+    // （`strip_keeps_a_hand_written_catalog` + README「手写的 model_catalog_json 也会保留」）。
+    // 这里喂进来的是开发者真实机器上的配置，所以断言必须按输入决定：别再改回无条件断言，
+    // 那会诱使下一个人为了“修好”这个测试去改 strip_third_party 删掉用户手写的目录。
+    if original
+        .as_deref()
+        .is_some_and(|text| text.contains(CATALOG_FILE))
+    {
+        assert!(!written.contains("model_catalog_json"), "{written}");
+    }
     if let Some(original) = original {
         for marker in ["[projects.", "[tui]", "notify", "[model_providers."] {
             if original.contains(marker) {

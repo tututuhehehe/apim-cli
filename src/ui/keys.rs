@@ -227,6 +227,18 @@ mod tests {
             render(&app).contains("▶ —   AUTH"),
             "选中 AUTH 行时高亮应落在它上面"
         );
+
+        // 没有密钥的 openai 面板：AUTH 行是唯一那一行，必须能带高亮
+        // （`n > 0 || oauth_row_status(app).is_some()` 这个分支的真实用途）
+        let (mut empty, _rx, _rx_task) = test_app(&[("openai", &[])]);
+        empty.focus_provider("openai");
+        empty.focus = Focus::Keys;
+        assert!(empty.auth_row_selected(), "没有密钥时光标就在 AUTH 行上");
+        let rendered = render(&empty);
+        assert!(
+            rendered.contains("▶ —   AUTH"),
+            "空面板也要高亮 AUTH 行：\n{rendered}"
+        );
     }
 
     /// ★ 角标只反映「这个客户端现在真的在用这把密钥」。

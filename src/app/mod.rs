@@ -1707,4 +1707,45 @@ pub(crate) mod tests {
         assert!(toast.contains("不能复制"), "{toast}");
         assert!(!app.recipes.contains_key("openai-copy"));
     }
+
+    /// AUTH 行也算在 clamp 的上限里：光标停在它上面不会被拽回最后一把密钥。
+    #[test]
+    fn clamp_selections_keeps_the_auth_row_selected() {
+        let (mut app, _rx, _rx_models) = test_app(&[("openai", &["api-key"])]);
+        app.focus = Focus::Keys;
+        app.selected_key = 1;
+        app.clamp_selections();
+        assert_eq!(app.selected_key, 1, "AUTH 行（openai 分页）也是合法选中位");
+        assert!(app.auth_row_selected());
+
+        // 过滤到一把都没剩：AUTH 行仍然可选（它就是唯一那一行），光标不会被清掉
+        app.key_filter = Some("没有这把".into());
+        app.clamp_selections();
+        assert_eq!(app.selected_key, 0);
+        assert!(app.auth_row_selected());
+    }
+
+    /// 非模型厂商不能导入客户端（约定 15）：手改 openai 的 `kind` 后，AUTH 行按 `x` 也要拦住。
+    #[test]
+    fn x_on_the_auth_row_refuses_a_non_model_openai() {
+        let (mut app, _rx, _rx_models) = test_app(&[("openai", &["api-key"])]);
+        app.config_dir = test_config_dir("auth-row-non-model");
+        // TUI 与 CLI 都不给改类型，只有手写 YAML 能走到这一步
+        app.recipes.get_mut("openai").unwrap().kind = ProviderKind::NonModel;
+        app.rebuild_provider_list();
+        app.focus_provider("openai");
+        app.focus = Focus::Keys;
+        app.selected_key = app.auth_row_index().expect("非模型页也画 AUTH 行");
+        assert!(app.auth_row_selected());
+
+        app.open_import();
+        assert!(
+            matches!(app.modal, Modal::None),
+            "非模型厂商不该走官方路导入"
+        );
+        assert_eq!(
+            app.toast_text(),
+            Some("openai 假厂商 是非模型厂商，不能导入到客户端")
+        );
+    }
 }

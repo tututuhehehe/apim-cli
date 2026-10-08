@@ -79,12 +79,13 @@ rm ~/.codex/apim-models.json                 # 1. the model catalog apim generat
 # 2. in ~/.codex/config.toml: drop the [model_providers.apim-*] blocks plus the
 #    top-level model_provider / model_catalog_json pointers
 rm ~/.codex/config.toml.apim.bak             # 3. the pre-import backup — it holds a plaintext key too
+rm ~/.codex/auth.json.apim.bak               # 4. apim's backup of Codex's own login — the previous ChatGPT tokens
 
-# 4. in ~/.pi/agent/models.json: drop the providers.apim-* entries (plaintext apiKey)
-rm ~/.pi/agent/models.json.apim.bak          # 5. the pre-import backup — it holds a plaintext key too
+# 5. in ~/.pi/agent/models.json: drop the providers.apim-* entries (plaintext apiKey)
+rm ~/.pi/agent/models.json.apim.bak          # 6. the pre-import backup — it holds a plaintext key too
 ```
 
-`apim uninstall` lists all five for you; it never deletes them itself.
+`apim uninstall` lists all six for you; it never deletes them itself.
 
 ## Usage
 
@@ -305,7 +306,7 @@ Deliberate choices:
 - **It refuses to write a credential Codex cannot see**: with `cli_auth_credentials_store = "keyring"` or `"ephemeral"` codex never reads `auth.json`, so the import fails with that explanation instead of leaving a file that does nothing (apim does not touch your OS keychain).
 - **Verified by codex itself**: after writing, apim runs `codex login status` with `CODEX_HOME` pointed at the directory it just wrote and requires a logged-in ChatGPT session. Real codex 0.161 prints `Logged in using ChatGPT` on **stderr** with exit 0 (and `Not logged in` / config errors on stderr with exit 1), so apim checks both streams *and* the exit code. On failure both files are restored from their `.apim.bak` backups.
 - **The daemon is restarted** exactly like a third-party import (codex reads its configuration once, at daemon start); `APIM_NO_RESTART_CODEX=1` disables that.
-- **`~/.codex/auth.json` is Codex's own login file**, not an apim side-car: `codex login` / `codex logout` own it, and `apim uninstall` therefore does not list it as an apim leftover.
+- **`~/.codex/auth.json` is Codex's own login file**, not an apim side-car: `codex login` / `codex logout` own it, so `apim uninstall` does not list it as an apim leftover (it does list apim's own `auth.json.apim.bak` backup, which holds the previous ChatGPT tokens).
 - **The balance pane tells you which route Codex is on right now** (`Codex：OpenAI 官方 OAuth` / `OpenAI 官方 API Key` / `provider deepseek` / `未登录`), read back from `~/.codex` on the same schedule as the ★ badges — never from an apim-side record.
 
 ### One-click import into Pi

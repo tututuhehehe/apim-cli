@@ -310,15 +310,25 @@ fn codex_leftovers_follows_apim_files() {
         "experimental_bearer_token = \"sk-x\"\n",
     )
     .unwrap();
+    fs::write(
+        home.join("auth.json.apim.bak"),
+        r#"{"auth_mode":"chatgpt","tokens":{"refresh_token":"rt"}}"#,
+    )
+    .unwrap();
     let found = cleanup::codex_leftovers_in(&home);
     assert_eq!(
         found.len(),
-        3,
-        "目录文件、config.toml 指针、备份各一条：{found:?}"
+        4,
+        "目录文件、config.toml 指针、两份备份各一条：{found:?}"
     );
     assert!(
         found.iter().any(|item| item.contains("apim.bak")),
         "含密钥的备份必须报出来：{found:?}"
+    );
+    // 官方路留下的 auth.json 备份里是上一份 ChatGPT 凭据（refresh token），不能漏报
+    assert!(
+        found.iter().any(|item| item.contains("auth.json.apim.bak")),
+        "官方路的 ChatGPT 凭据备份必须报出来：{found:?}"
     );
 }
 
