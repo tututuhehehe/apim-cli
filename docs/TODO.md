@@ -50,3 +50,25 @@ compare-and-swap（cc-switch 那套：比对 auth.json 里还是不是我们写�
 **要做的**：在 `refresh_active_keys` 的节奏上顺带回读 `auth.json`，若它带着 ChatGPT 凭据且
 refresh token 比 apim 那份新，就回写 apim 的凭据（写前校验 ownership，别把用户自己 `codex login`
 的另一个账号抄进 apim）。
+
+## 3. 评审留下的报告级小账（都只在这份手改/边缘配置里出现，暂不做）
+
+来自两轮子代理评审（见 `target/apim-review/`）的 P2，父会话决定**只记账**，不在这轮改：
+
+- **AUTH 行的提示与厂商类型无关**：手改 `~/.config/apim/recipes/openai.yaml` 为 `kind: non_model` 后，
+  在那行按 `c/i/d/m/e` 会提示「只支持 x」，而 `x` 又按约定 15 被拒（`open_import` 的非模型门）。
+  真要修就在 `App::note_auth_row_only_imports`（`src/app/mod.rs`）里先看 `is_model()`，
+  非模型走「非模型厂商…」那套文案，并补一条测试。
+- **密钥过滤命中为空时**，AUTH 行仍是唯一选中行（此时按 `x` 会真的写 Codex），而空面板提示写着
+  「没有匹配的密钥」。提示本身没说错（AUTH 不是密钥），但两句看着矛盾。要修就改
+  `ui/keys.rs` 的空面板文案（或过滤生效时不把 AUTH 当选中位）—— **别改选择模型**，
+  现有 `clamp_selections_keeps_the_auth_row_selected` 是照着当前口径钉的。
+- **摘掉三个键时，挂在它们上面的注释一起没了**（`toml_edit::DocumentMut::remove` 连 decor 一起删）。
+  README 的「其余不动（含注释与顺序）」说的是别的键。要真保留得把 prefix 挪到下一个键上，
+  但那条注释本来就说的是被删掉的键，搬过去反而误导 —— 倾向保持现状，只在文档里别过度承诺。
+- **`verify_login` 绑死 codex 的措辞**：将来 codex 换掉 `Logged in using ChatGPT` 会硬失败 + 回滚
+  （安全但用户可见）。真出问题就在 `clients/codex/official.rs` 的 `LOGGED_IN_MARKER` 上加一条
+  备选措辞，并同步真机 opt-in 测试 `codex_real_official_end_to_end`。
+- **CLI `import-codex` 不区分 ambiguous 守护进程**：TUI 会说「有 N 个类似进程没敢动，若它正开着
+  请手动重启」，CLI 只说「重开 Codex 生效」。要修就把 `app/mod.rs` 那段文案镜像到 `cli/auth.rs`。
+  顺带：`App::apply_oauth_codex` 的四个重启分支与 CLI 的 happy path 目前没有测试。
