@@ -17,7 +17,7 @@ Blocked by: 无（可立即开工）
 4. **npm 渠道更新前要同时核对主包与当前平台子包的版本**（`npm view <pkg> version`；npm 发布异步、optional 依赖失败静默跳过 —— 只看主包会装出跑不起来的 shim，v0.1.4 实测）；落后于 GitHub tag 时报两个版本号并拒绝安装（`--force` 可越过）；
 5. 加渠道的清单：同时改 `Channel` + 识别规则 + 单测 + RELEASING 的表；`apim uninstall` 复用 `detect_channel`，新渠道的卸载动作被 `uninstall_program` 的穷尽 `match` 拦下（编译器逼你补），但**提示语与单测仍要手工过一遍**。
 
-**② 新家**：`docs/RELEASING.md` 新增一节 **`## 更新渠道的契约（\`apim update\` / \`apim uninstall\`）`**，插在 `## 各渠道速查` **之后**（表与契约相邻，加渠道时一起改）。**不新开 `docs/update-channels.md`**：那会拆散「表 + 契约」，还要多一行 Doc map。
+**② 新家**：`docs/RELEASING.md` 新增一节 **`## 更新渠道的契约（`apim update` / `apim uninstall`）`**，插在 `## 各渠道速查` **之后**（表与契约相邻，加渠道时一起改）。**不新开 `docs/update-channels.md`**：那会拆散「表 + 契约」，还要多一行 Doc map。
 
 **③ 原地留什么指针**：`AGENTS.md` 约定 12 一行，保住「三条渠道 + 机制有家 + 什么时候读」：
 
@@ -47,7 +47,7 @@ Doc map 那一行的描述同步扩成「发版手册（含更新渠道的契约
   - `cargo test --all` → `335 passed; 0 failed; 4 ignored` + 守卫 `11 passed`
   - `AGENTS.md`：**181 行 / 11848 字符**（上限 = 181 行 / **11848** 字符，本票把字符上限从 12508 收到实测值）
 - **反向验证**（各自单独跑，实测报错如下，验完恢复）：
-  - A：把 `（\`APIM_INSTALL_DIR\` 先 canonicalize）` 写回 `AGENTS.md` → **两条同时红**：`the_update_channel_contract_lives_in_its_doc` 报 `出现了只在机制节里的 APIM_INSTALL_DIR / 怎么修：把机制搬进 docs/RELEASING.md 的「更新渠道的契约」一节`；`agents_md_stays_within_its_budget` 报 `字符数 11883 超过上限 11848（多了 35 字符）`
+  - A：把 `（`APIM_INSTALL_DIR` 先 canonicalize）` 写回 `AGENTS.md` → **两条同时红**：`the_update_channel_contract_lives_in_its_doc` 报 `出现了只在机制节里的 APIM_INSTALL_DIR / 怎么修：把机制搬进 docs/RELEASING.md 的「更新渠道的契约」一节`；`agents_md_stays_within_its_budget` 报 `字符数 11883 超过上限 11848（多了 35 字符）`
   - B：把 RELEASING 那节的 `detect_channel` 换掉 → `the_update_channel_contract_lives_in_its_doc` **FAILED**，报 `docs/RELEASING.md：「更新渠道的契约」一节里没有 detect_channel（机制没搬过来？）`
   - C：往 `AGENTS.md` 标题加**一个字符** → `agents_md_stays_within_its_budget` **FAILED**，报 `字符数 11849 超过上限 11848（多了 1 字符）`—— 证明收紧后的上限是**紧的**，不是留了余量的数字
 - **偏离 spec：四处，前三处是票面写错/写得不准。**
