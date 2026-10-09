@@ -210,7 +210,7 @@ echo "MCP    本月已用 ${MCP_USED} · ${LEVEL}"
 
 ## 4. 注册与验证（产出物里要包含这段）
 
-优先用 apim CLI（`cargo install --path .` 后可用；文件本身就是数据源，CLI 不可用时直接把两个文件放到位也等效）：
+优先用 apim CLI（入口 `apim`，跑本仓库的代码用 `cargo run -- <args>`；文件本身就是数据源，CLI 不可用时直接把两个文件放到位也等效）：
 
 ```bash
 # 1. 写入两个文件后，注册厂商并绑定脚本：

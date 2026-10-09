@@ -1,56 +1,27 @@
 ---
 name: apim
-description: 用 apim CLI 管理模型厂商/API Key：厂商与密钥的增删改查、探活与余额查询、编写和绑定额度查询脚本（balance.kind=script）。当用户要加厂商、配密钥、查额度/余额、写额度脚本、或提到 apim 项目本身时使用。
+description: 用 apim 管厂商额度：为新厂商写 / 绑定 / 调试额度查询脚本（balance.kind=script），并用 apim status 查余额。当用户要查某个厂商的余额或额度、要给新厂商配额度查询、或额度脚本跑不出数时使用。
 ---
 
 # apim 使用指南（CLI + 额度脚本）
 
-apim 是终端 API Key 管理器。AI/脚本一律走 CLI，入口 `apim`（`cargo install --path .` 安装；开发时用 `target/debug/apim`）。数据都在 `~/.config/apim/`：`config.toml`（密钥清单）、`secrets.toml`（token，600 权限）、`recipes/<id>.yaml`（厂商协议）、`scripts/`（额度脚本）。
+apim 是终端 API Key 管理器。AI/脚本一律走 CLI，入口 `apim`（跑本仓库的代码用 `cargo run -- <args>`；不要把开发副本 `cargo install` 进 `~/.cargo/bin`，见 AGENTS.md 约定 10）。数据都在 `~/.config/apim/`：`config.toml`（密钥清单）、`secrets.toml`（token，600 权限）、`recipes/<id>.yaml`（厂商协议）、`scripts/`（额度脚本）。
 
-## CLI 命令速查
+## 命令面：看 README，别在这里找
 
-```
-# 厂商 CRUD
-apim provider ls [--json]
-apim provider add <id> --name <名> --base-url <URL> [--homepage <主页URL>|none] [--health <路径>|none] [--script <脚本路径>|none]
-apim provider set <id> [--name <名>] [--base-url <URL>] [--homepage <主页URL>|none] [--health <路径>|none] [--script <脚本路径>|none]
-apim provider rm <id> [--force]          # 有密钥时拒绝；--force 连带删密钥；内置四家(deepseek/openai/moonshot/openrouter)不可删
-apim provider copy <源id> [新id] [--name 名]  # 整份复制厂商；外部额度脚本 fs::copy 成独立文件（命名跟随新 id，同名已存在则顺延 -2，不引用原脚本；绝不覆盖）；新 id 缺省 <源id>-copy，被占自动顺延 -copy-2；secrets.toml 里的密钥不跟随（但 recipe.vars 会带走）
+**CLI 的全部子命令与开关以 `README.md` 的 *CLI (AI / script friendly)* 一节为准**（它与 `apim help` 的输出对齐，有守卫看着）；`apim help` 是同一份事实的机器可读版。本 skill 只讲 **README 不讲的那一件事 —— 额度脚本**；下面出现的 `apim ...` 都是**流程示例**，不是签名定义。
 
-# 密钥 CRUD（token 一律走 stdin，绝不进 argv / shell history）
-apim key ls [<provider>] [--json]        # token 掩码显示
-apim key add <provider> <别名> [--group <分组>]     # 已存在则覆盖更新 token
-apim key set <厂商.别名> [--alias <新别名>] [--group <分组>|none]
-apim key rm <厂商.别名>
+两条 README 里没有的操作知识：
 
-# 查询 / 快捷
-apim status [<provider>] [--json]        # 并发真实探活 + 额度（跑绑定的脚本）
-apim copy <厂商.别名> [--base-url]       # 复制密钥 / Base URL
-apim use <厂商.别名>                     # 输出 export OPENAI_API_KEY=... OPENAI_BASE_URL=...
-apim update [--check] [--force] [--json] # 认渠道（npm/Homebrew/install.sh）后从原渠道更新自己
-apim uninstall [--yes] [--purge] [--dry-run] [--json]  # 从原渠道卸掉自己（--purge 连配置+密钥一起删）
-```
+- **测试 / 沙盒**：每条会写盘的命令都显式前缀 `APIM_CONFIG_DIR=<临时目录>`（shell 每次调用是新的，`export` 不跨调用），**绝不碰真实 `~/.config/apim`**。
+- **坏配置不锁死 CLI**：recipe 被误删 / `secrets.toml` 缺条目时，命令会跳过坏条目并打警告，下一次成功写盘自动清除 —— 所以别因为自己删过配置就以为 CLI 坏了。
 
-要点：
+## recipe YAML：只讲额度脚本相关的那两个字段
 
-- `--script none` = 解绑额度脚本；空串（`--script ""`）同义。`--health none` = 不探活。`--homepage` 是厂商控制面板主页。
-- `provider set` 只改传了的字段；`--script` 是显式整体替换，没有「未改保留」语义。
-- `provider copy` 复制协议配置不复制 `secrets.toml` 密钥（但 recipe 的 `vars` 会原样带走，可能含访问令牌）；绑定外部脚本时新厂商指向新副本（如 `glm-quota.sh` → `glm-copy-quota.sh`，同名已存在则顺延 `-2`，权限位保留），没绑/内联 run/原文件丢失则无文件动作。TUI 厂商栏同功能按 `y`。
-- 坏配置（recipe 误删 / secrets 缺条目）不会锁死 CLI：命令跳过坏条目并打警告，下一次成功写盘自动清除。
-- 测试/沙盒：每条会写盘的命令都显式前缀 `APIM_CONFIG_DIR=<临时目录>`（shell 每次调用是新的，export 不跨调用），绝不碰真实 `~/.config/apim`。
-
-## recipe YAML 字段含义
-
-`~/.config/apim/recipes/<id>.yaml`，一个文件描述一个厂商「怎么鉴权、怎么探活、怎么查额度」：
+`~/.config/apim/recipes/<id>.yaml` 的**字段含义表在 `README.md` 的 *Adding a provider* 一节**（`id` / `name` / `base_url` / `homepage` / `models_url` / `auth.kind` / `health` 都在那儿）。本 skill 只留与额度脚本有关的两项：
 
 | 字段 | 含义 |
 |---|---|
-| `id` / `name` | 厂商标识（小写字母/数字/-，密钥配置里 `provider` 引用它）/ 显示名 |
-| `base_url` | API 根地址，`{base_url}` 占位符在请求/脚本里展开 |
-| `homepage` | 控制面板主页（可选）；TUI 选中厂商按 Enter 用默认浏览器打开 |
-| `models_url` | 模型列表端点模板（可选，按 key 浏览模型用）。缺省按序尝试 `{base_url}/models` → `{base_url}/v1/models`，404 自动换下一个；OpenAI 兼容厂商不用配，GLM 这类非标路径的才配（如 `'{base_url}/api/paas/v4/models'`） |
-| `auth.kind` | `bearer`（发 `Authorization: Bearer <key>`）｜ `header`（发裸 key）｜ `query`（拼 `?api_key=<key>`）；探活请求也用它 |
-| `health` | 探活 GET（`{base_url}` 模板），HTTP 2xx 即算活；留空 = 不探活 |
 | `vars` | 自定义变量表。两个用途：注入脚本 env（`APIM_VAR_<大写名>`，如访问令牌）、参与脚本/YAML 的 `{placeholder}` 替换。存敏感值时整个文件保持 600 |
 | `balance` | 额度查询绑定，**必须脚本**（见下） |
 
@@ -72,7 +43,7 @@ balance:
   timeout_secs: 15                                # 可选，缺省 15
 ```
 
-三个等价入口：直接写 recipe YAML、CLI `--script`、TUI 表单「脚本路径」。脚本建议放 `~/.config/apim/scripts/<id>-quota.sh` 并 `chmod +x`。绑定后 `apim status <id>` 与额度面板跑同一脚本。
+三个等价入口：直接写 recipe YAML、CLI `--script`、TUI 表单「脚本路径」。**解绑**用 `--script none`（空串 `--script ""` 同义）。脚本建议放 `~/.config/apim/scripts/<id>-quota.sh` 并 `chmod +x`。绑定后 `apim status <id>` 与额度面板跑同一脚本。
 
 ### 脚本能拿到的参数（env 注入，脚本从 env 读，不要让用户手填）
 
