@@ -167,16 +167,8 @@ recipes/              内置 recipe ×4（deepseek/openai/moonshot/openrouter，
     - **只支持 API key 这一路**：pi 的订阅渠道是 `/login` 的 OAuth（凭据在 `auth.json`），apim 拿不到也不该碰。
     - **`apim uninstall` 要报 pi 残留**（同 codex：只报不删）：`models.json` 里的 `providers.apim-*` 条目与含明文 apiKey 的 `models.json.apim.bak`（`cli/uninstall/cleanup.rs::pi_leftovers_in`）。
 
-15. **厂商类型 = 两个分页，类型创建时定死**（模型 / 非模型）：
-    - 数据源只有一个字段：recipe 的 `kind: model|non_model`（`ProviderKind`，缺省 model，所以老 YAML / 内置 recipe 不用动；序列化时 model 不写 kind）。非模型厂商 **没有模型列表（`m`）、不能导入客户端（`x`）、不探活**（`health` 恒空，`m`/`x` 给提示而不是静默）；密钥、别名/分组、主页 `⏎`、`c`、`y` 复制、`^Z`、额度脚本、`provider ls`、`apim status` 全都一样。
-    - **类型的唯一入口是创建**：TUI 添加表单的「非模型」勾选框（默认跟随当前分页）、CLI `provider add --kind`。编辑表单里它只读，且 `save_provider_form` 一律取原值（规则落在保存这一处，不靠 UI 灰掉）；`provider set --kind` 与给非模型厂商传 `--health` 都报错。要换类型只能删了重建 / `provider copy`。
-    - **不适用当前类型的表单行直接不出现**：`Field::Toggle` 用 `.hides(下标)` 声明「勾上就把这一行收起来」，勾选状态一变由 Form 自己开关（构造时先按初值对齐）；隐藏的行不渲染、不占弹窗高度、Tab 跳过、也写不进去（`Field::Text{hidden}`）。添加/编辑表单的「探活路径」都靠它养活：勾上非模型就没了这一行（不是灰掉）。
-    - **详情弹窗只列真适用的**：鉴权/探活只服务 HTTP 请求（探活、模型列表），非模型厂商两行都不列；也不列「类型」那种背景信息（打开它的分页已经说明了一切）。
-    - **分页状态在 App 里**：`tab: ProviderKind` + `tabs: [TabView; 2]`（每个分页自己的 `provider_ids` / `selected` / `filter`，下标 = `ProviderKind::ALL` 顺序）；取值一律走 `provider_ids()` / `provider_ids_filtered()` / `selected_provider()` / `provider_filter()`，**不要**再引入第三个「全局选中项」。`rebuild_provider_list` 两个分页各建一份（有密钥的在前，其余按 id 排序）；保存 / 复制厂商后必须 `focus_provider(id)`（分页跟着厂商类型跳，否则新建的厂商落在看不见的那一页）。
-    - **快捷键**：`Tab` = 切分页（两栏焦点都生效），`h`/`l` 与 ←/→ = 切左右栏焦点。改按键提示时四个分支都要过一遍（厂商焦点 / 模型页密钥焦点 / 模型页密钥焦点且光标在 AUTH 行 / 非模型页密钥焦点，非模型页不出现 `m`/`x`；AUTH 行那支只留 `x`/`o`/`a`/`r` —— 那行不是密钥，`c` 也不复制任何东西，见约定 11）。
-    - **状态口径**：非模型厂商没有探活，密钥表状态列与左栏厂商摘要都用**额度脚本的成败**（`ui::script_status`，一处写、两个地方用；CLI `status` 同一口径）。
-    - `health` / `models_url` 对非模型照旧保留在 YAML 里（加载期不拒收），但**不生效**：探活/模型列表的消费点一律走 `Recipe::health_call()`（非模型恒为 None）与 `is_model()` 门，手改 `kind:` 也不会拿旧 `health` 去发请求；`auth` 可省略（`#[serde(default)]`）——非模型厂商没有 HTTP 请求。
-
+15. **厂商类型 = 两个分页，类型创建时定死**（模型 / 非模型）：分页、表单、快捷键、状态口径上对非模型的
+    差异与红线见 `docs/provider-kinds.md` —— 改分页 / 厂商表单 / 非模型行为之前先读它。
 16. **待办写在 `docs/TODO.md`**：已知缺口（例：「OpenAI OAuth 凭据按厂商存」）连同「现状 / 为什么不现在做 / 真要动哪些文件」一起记在那里，别只留在脑子里；做了就把它从 TODO 删掉。
 
 ## 验证命令速查
@@ -215,6 +207,7 @@ apim provider ls --json                # CLI 冒烟（跑已发布版；本地�
 | 已完成的历史 | `CHANGELOG.md` |
 | 面向用户的使用手册（CLI / 按键 / recipe / 额度脚本） | `README.md`；中文版 `README.zh-CN.md` 同源翻译 |
 | 客户端契约细节（Codex / Pi 的 TOML、JSON 形状） | `docs/clients/*.md`（尚未建：AGENTS 约定 11/14/15 的细节该迁过去，只留指针） |
+| 厂商类型（模型 / 非模型）的语义与不适用面 | `docs/provider-kinds.md` |
 | 发版手册 / 额度脚本提示词 | `docs/RELEASING.md`、`docs/quota-script-prompt.md` |
 | 本机私有笔记（只在本机有效、不宜进仓库） | `DEV-NOTES.local.md`（gitignored） |
 | 会话交接 | 不落库：`/skill:handoff` 写到 `$TMPDIR` |
