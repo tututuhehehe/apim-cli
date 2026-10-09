@@ -171,9 +171,24 @@ OpenAI、能配密钥、却永远登录不上，也没有 AUTH 行 —— README
 不再引用 `target/`。
 
 
-## TODO-21 · GitHub 侧两件事：2 条依赖告警 + 一条 dependabot 分支
+## TODO-21 · `lru` 的 low 告警被 ratatui 0.29 挡住（需先升 ratatui 0.30）
 
-**现状**：远端默认分支报 **2 条依赖漏洞**（1 moderate + 1 low，GitHub Dependabot alerts）；另有一条
+**现状（2026-10-09 更新）**：rustls 那条**已修** —— `8593e08`（0.23.43 → 0.23.45，只动 `Cargo.lock`），验证 = 三命令全绿 + `cargo +1.88 check --locked --all-targets` 编过 + 真 TLS 的 `cargo test -- --ignored latest_tag_live` 通过；Dependabot PR #2 已按「被取代」关闭（它基于开工前的旧 main）；GitHub 告警 #3 已转 `fixed`。
+
+**只剩 `lru`（low）一条 open**：
+
+- `lru` 是 `ratatui 0.29.0` 的间接依赖，而 ratatui 硬要 `lru = "^0.12.0"` → **锁文件升不动**（实测 `cargo update -p lru --precise 0.16.3` 报 `failed to select a version`）。
+- 修它得把 `Cargo.toml` 的 `ratatui = "^0.29"` 升到 **0.30**（0.30 已发布；0.31/0.32 不存在）—— 对一个 TUI 全靠 ratatui 的项目，这是一次**有 API 破坏面的升级**，必须用 `--snapshot*` 那套快照逐个核对渲染（约定 5）。
+
+**为什么现在不做**：为一条 low 告警做一次 TUI 框架升级，风险/收益不对等，且不阻塞任何功能。
+
+**第一步**（单独开一轮）：升 ratatui 0.30 → 跟着编译器改 API → `cargo run -- --snapshot` 全系列快照逐个比对 → 确认 `lru` 落到 ≥ 0.16.3、告警清零 → 三命令 + MSRV。
+
+---
+
+（以下保留当时的第一手调研原文，只作留档）
+
+**现状（原）**：远端默认分支报 **2 条依赖漏洞**（1 moderate + 1 low，GitHub Dependabot alerts）；另有一条
 dependabot 分支 `dependabot/cargo/rustls-0.23.45` 挂在远端（`rustls` 是 `reqwest` 的间接依赖，`Cargo.toml`
 里没有直接声明）。本地 `main` 与远端同步、工作区干净。
 
