@@ -21,6 +21,10 @@ const RULE_LISTED: &str = "src/ 下每个非测试源文件都要进目录树";
 const RULE_TOP_LEVEL: &str = "仓库根下的非隐藏目录都要进目录树";
 const RULE_BUDGET: &str = "AGENTS.md 的体量只允许变小或保持（ratchet）";
 const RULE_CLI_SURFACE: &str = "apim help 里的每个子命令都要在 README 里出现";
+const RULE_SKILL_NO_SURFACE: &str = "SKILL 不定义命令面（只允许引用 README 已写的）";
+const RULE_BANNED_COMMAND: &str = "那条安装禁令只许待在它的家里";
+/// 那条禁令的字面串（`R4` 只认它，写法与 `AGENTS.md` 约定 10 一致）。
+const BANNED_COMMAND: &str = "cargo install --path .";
 
 /// 仓库根。集成测试的 cwd 不保证是仓库根，取编译期常量（本仓已有同款先例）。
 fn repo_root() -> PathBuf {
@@ -419,4 +423,214 @@ fn the_cli_surface_is_documented_in_the_readme() {
         }
     }
     assert!(problems.is_empty(), "{}", report(problems));
+}
+
+/// 把反斜杠续行接起来：shell 里一条命令可以拆成多行，而「这一行有没有调 `apim`」要按**逻辑行**判。
+fn join_continuations(text: &str) -> String {
+    text.replace("\\\n", " ")
+}
+
+/// 一行里的所有 `--flag`。
+fn flags_in(line: &str) -> BTreeSet<String> {
+    let mut out = BTreeSet::new();
+    for (at, _) in line.match_indices("--") {
+        let flag: String = line[at..]
+            .chars()
+            .take_while(|c| *c == '-' || c.is_ascii_lowercase() || c.is_ascii_digit())
+            .collect();
+        if flag.len() > 2 {
+            out.insert(flag);
+        }
+    }
+    out
+}
+
+/// 「调了 `apim` 的行」：逻辑行里出现 `apim <词>`。只有这种行上的动词与开关归 R2 管 ——
+/// 别把整份 SKILL 的开关都拿来比：里面还有 curl（`--connect-timeout` / `--max-time`）、
+/// cargo（`--all-targets` / `--ignored`）与 codex（`--profile`）的开关，它们不是 apim 的命令面。
+fn apim_call_lines(text: &str) -> Vec<String> {
+    join_continuations(text)
+        .lines()
+        .filter(|line| !apim_tokens(line).is_empty())
+        .map(str::to_owned)
+        .collect()
+}
+
+/// 6 · SKILL 不定义命令面（`R2`）。
+///
+/// **边界（重要）**：子集检查只能抓「发明了 README 里没有的命令 / 开关」与「两份说法互相
+/// 矛盾」，**抓不到遗漏** —— SKILL 少写了一整个 `apim auth` 不会让这条红（那是「删掉第二份」
+/// 要解决的问题，不是集合关系能发现的）。所以这条的定位是**兜底**：SKILL 里允许出现示例命令，
+/// 但不许出现 README 没有的动词 / 开关。
+#[test]
+fn the_skill_does_not_redefine_the_cli_surface() {
+    let root = repo_root();
+    let skill = fs::read_to_string(root.join(".agents/skills/apim/SKILL.md")).expect("读 SKILL.md");
+    let readme = fs::read_to_string(root.join("README.md")).expect("读 README.md");
+    let mut problems = Vec::new();
+
+    // R2b：必须留一条指向 README CLI 一节的指针（读 skill 的人要被送过去）
+    let has_pointer = skill
+        .lines()
+        .any(|line| line.contains("README.md") && line.contains("CLI"));
+    if !has_pointer {
+        problems.push(problem(
+            ".agents/skills/apim/SKILL.md",
+            RULE_SKILL_NO_SURFACE,
+            "没有指向 `README.md` CLI 一节的指针（命令面由此不再有第二个家）",
+            "在 SKILL 顶部补一句：CLI 的子命令与开关以 `README.md` 的 *CLI* 一节为准",
+        ));
+    }
+
+    // R2a：调用行上的动词与开关 ⊆ README 调用行上的
+    let readme_lines = apim_call_lines(&readme);
+    let readme_verbs: BTreeSet<String> = readme_lines
+        .iter()
+        .flat_map(|line| apim_tokens(line))
+        .map(|token| canonical_command(&token).to_string())
+        .collect();
+    let readme_flags: BTreeSet<String> = readme_lines
+        .iter()
+        .flat_map(|line| flags_in(line))
+        .collect();
+    for line in apim_call_lines(&skill) {
+        for verb in apim_tokens(&line) {
+            let verb = canonical_command(&verb).to_string();
+            let short = snippet_around(&line, &verb);
+            if !readme_verbs.contains(&verb) {
+                problems.push(problem(
+                    ".agents/skills/apim/SKILL.md",
+                    RULE_SKILL_NO_SURFACE,
+                    &format!("`{short}` 用了 README 里没有的子命令 `{verb}`"),
+                    &format!("要么删掉这条示例，要么先在 README 的 CLI 一节把 `apim {verb}` 写上"),
+                ));
+            }
+        }
+        for flag in flags_in(&line) {
+            let short = snippet_around(&line, &flag);
+            if !readme_flags.contains(&flag) {
+                problems.push(problem(
+                    ".agents/skills/apim/SKILL.md",
+                    RULE_SKILL_NO_SURFACE,
+                    &format!("`{short}` 用了 README 里没有的开关 `{flag}`"),
+                    "要么删掉这条示例，要么先在 README 的 CLI 一节写上这个开关",
+                ));
+            }
+        }
+    }
+    assert!(problems.is_empty(), "{}", report(problems));
+}
+
+/// R4 的白名单：文件（相对仓库根）→ 允许出现几次 + 为什么。
+///
+/// 没在这里的文件**一次都不许出现** —— 它是「本机装了一份」的环境事实，写在别处就是抄一份会
+/// 过期的副本（SKILL 就这么错过一版：把它当成「跑本地代码」的说明教了一遍）。
+fn banned_command_allowance(path: &str) -> Option<(usize, &'static str)> {
+    match path {
+        "README.md" | "README.zh-CN.md" => {
+            Some((usize::MAX, "用户手册：「从源码安装」那一步要用它"))
+        }
+        "AGENTS.md" => Some((1, "约定 10 就是那条禁令（只许一处）")),
+        "docs/RELEASING.md" => Some((
+            1,
+            "渠道速查表要点名「源码」这个渠道，用来说明它**不在** apim update 覆盖范围内",
+        )),
+        _ => None,
+    }
+}
+
+/// 长期文档的 `.md` 清单（相对仓库根）。
+///
+/// **显式根目录**，不整仓递归：仓库根（非递归）、`docs/`、`.agents/`。
+/// **刻意不含 `.scratch/`** —— 那是进行中的工作区，spec / ticket 本来就要讨论这条禁令
+/// （本特性的 spec 里就写着它），拿它当“文档”去卡只会自伤。
+fn durable_markdown_files(root: &Path) -> Vec<String> {
+    let mut out = Vec::new();
+    let mut roots = vec![
+        (root.to_path_buf(), false),
+        (root.join("docs"), true),
+        (root.join(".agents"), true),
+    ];
+    for (dir, recursive) in roots.drain(..) {
+        let mut todo = vec![dir.clone()];
+        while let Some(current) = todo.pop() {
+            let Ok(entries) = fs::read_dir(&current) else {
+                continue;
+            };
+            for entry in entries.flatten() {
+                let path = entry.path();
+                if path.is_dir() {
+                    if recursive {
+                        todo.push(path);
+                    }
+                    continue;
+                }
+                if path.extension().is_some_and(|ext| ext == "md") {
+                    out.push(
+                        path.strip_prefix(root)
+                            .expect("仓库内的路径")
+                            .to_string_lossy()
+                            .replace('\\', "/"),
+                    );
+                }
+            }
+        }
+    }
+    out.sort();
+    out
+}
+
+/// 7 · 那条安装禁令只许待在它的家里（`R4`）。
+#[test]
+fn the_dev_install_command_stays_in_its_own_home() {
+    let root = repo_root();
+    let mut problems = Vec::new();
+    for file in durable_markdown_files(&root) {
+        let text = fs::read_to_string(root.join(&file))
+            .unwrap_or_else(|err| panic!("读 {file} 失败：{err}"));
+        let found = text.matches(BANNED_COMMAND).count();
+        if found == 0 {
+            continue;
+        }
+        match banned_command_allowance(&file) {
+            Some((allowed, why)) if found <= allowed => {
+                let _ = why; // 白名单带理由是为了下一个人读得懂，不是为了运行时输出
+            }
+            Some((allowed, why)) => problems.push(problem(
+                &file,
+                RULE_BANNED_COMMAND,
+                &format!("出现 {found} 次，白名单只允许 {allowed} 次（{why}）"),
+                "删掉多余的那几处，改成指向 README 的安装一节或 AGENTS.md 约定 10",
+            )),
+            None => problems.push(problem(
+                &file,
+                RULE_BANNED_COMMAND,
+                &format!("出现了 `{BANNED_COMMAND}`，但这里不是它的家"),
+                "删掉它（要说「怎么跑本地代码」就指向 AGENTS.md 约定 10；要说「这个渠道不自动更新」就放进 docs/RELEASING.md 的渠道表）",
+            )),
+        }
+    }
+    assert!(problems.is_empty(), "{}", report(problems));
+}
+
+/// 失败信息里引用的那行可能很长：截**出错那段的前后窗口**，而不是行首 —— 否则读的人看不到
+/// 出问题的那个 token（shell 示例动辄一整行）。
+fn snippet_around(line: &str, needle: &str) -> String {
+    let line = line.trim();
+    const WINDOW: usize = 36;
+    let chars: Vec<char> = line.chars().collect();
+    let Some(at) = line
+        .find(needle)
+        .map(|byte_at| line[..byte_at].chars().count())
+    else {
+        return format!("{}…", chars.iter().take(WINDOW * 2).collect::<String>());
+    };
+    let start = at.saturating_sub(WINDOW);
+    let end = (at + needle.chars().count() + WINDOW).min(chars.len());
+    format!(
+        "{}{}{}",
+        if start > 0 { "…" } else { "" },
+        chars[start..end].iter().collect::<String>(),
+        if end < chars.len() { "…" } else { "" },
+    )
 }
