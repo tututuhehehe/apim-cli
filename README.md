@@ -91,6 +91,7 @@ rm ~/.pi/agent/models.json.apim.bak          # 6. the pre-import backup — it h
 
 ```bash
 apim            # no arguments: launch the TUI
+apim tui        # the same TUI, by name
 apim help       # CLI usage
 apim --version  # version
 apim auth openai login  # connect ChatGPT/Codex OAuth for usage reporting

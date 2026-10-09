@@ -89,6 +89,7 @@ rm ~/.pi/agent/models.json.apim.bak          # 6. 改写前的备份，里面也
 
 ```bash
 apim            # 无参数：进 TUI
+apim tui        # 同上，显式写法
 apim help       # CLI 用法
 apim --version  # 版本
 apim auth openai login   # 连接 ChatGPT/Codex OAuth 查询用量

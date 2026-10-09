@@ -20,6 +20,7 @@ const RULE_EXISTS: &str = "目录树里的路径必须真实存在";
 const RULE_LISTED: &str = "src/ 下每个非测试源文件都要进目录树";
 const RULE_TOP_LEVEL: &str = "仓库根下的非隐藏目录都要进目录树";
 const RULE_BUDGET: &str = "AGENTS.md 的体量只允许变小或保持（ratchet）";
+const RULE_CLI_SURFACE: &str = "apim help 里的每个子命令都要在 README 里出现";
 
 /// 仓库根。集成测试的 cwd 不保证是仓库根，取编译期常量（本仓已有同款先例）。
 fn repo_root() -> PathBuf {
@@ -336,6 +337,86 @@ fn agents_md_stays_within_its_budget() {
             &format!("字符数 {chars} 超过上限 {AGENTS_CHARS_MAX}（多了 {over} 字符）"),
             "同上；注意把一段长文拆成多行并不会省字符 —— 字符才是常驻上下文的成本",
         ));
+    }
+    assert!(problems.is_empty(), "{}", report(problems));
+}
+
+/// 一段文本里出现的「`apim` 后面那个词」—— 命令面的 token。
+///
+/// 语法驱动的解析：`apim` + 空格之后，取连续的 `[a-z0-9-]` 前缀（`--version` 这类开关也算，
+/// 它同样要能在 README 里查到）；`apim —`（破折号）那种自然取到空串、被丢掉。
+fn apim_tokens(text: &str) -> BTreeSet<String> {
+    let mut out = BTreeSet::new();
+    for (at, _) in text.match_indices("apim ") {
+        let token: String = text[at + 5..]
+            .chars()
+            .take_while(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || *c == '-')
+            .collect();
+        if !token.is_empty() {
+            out.insert(token);
+        }
+    }
+    out
+}
+
+/// 别名 → 规范名。守卫按**规范名**要求 README：别名只是另一种拼法，重复要求它等于重复一条
+/// 规矩（`apim help` 末尾的「别名」那一行也印证了这层关系）。
+fn canonical_command(token: &str) -> &str {
+    match token {
+        "keys" => "key",
+        "upgrade" => "update",
+        other => other,
+    }
+}
+
+/// 跑真二进制的 `apim help`，取它的 stdout。
+///
+/// `CARGO_BIN_EXE_apim` 是 cargo 给集成测试的编译期常量（刚编出来的那个二进制），所以这条
+/// 守卫测的是**外部行为**，不读源码文本、不依赖内部函数。
+fn apim_help() -> String {
+    let out = std::process::Command::new(env!("CARGO_BIN_EXE_apim"))
+        .arg("help")
+        .output()
+        .expect("跑 apim help（守卫按它的 stdout 取命令面）");
+    assert!(
+        out.status.success(),
+        "apim help 退出码非 0：{:?}",
+        out.status
+    );
+    String::from_utf8_lossy(&out.stdout).into_owned()
+}
+
+/// 5 · `apim help` 里的命令面都在两份 README 里出现过。
+///
+/// 命令面的**唯一事实来源是代码**（`apim help`），README 是人读的那一份；这条防的是「加了
+/// 子命令、README 没跟上」。断言只比 **token 集合**（别名并进规范名），不比对措辞、行号或
+/// 段落顺序；也**不按小节标题定位**哪些行算数 —— `README.zh-CN.md` 的标题是译过的，按标题
+/// 定位等于把守卫焊死在中文字符串上（改个标题就假红）。
+#[test]
+fn the_cli_surface_is_documented_in_the_readme() {
+    let root = repo_root();
+    let required: BTreeSet<String> = apim_tokens(&apim_help())
+        .iter()
+        .map(|token| canonical_command(token).to_string())
+        .collect();
+    let mut problems = Vec::new();
+    for file in ["README.md", "README.zh-CN.md"] {
+        let readme = fs::read_to_string(root.join(file))
+            .unwrap_or_else(|err| panic!("读 {file} 失败：{err}"));
+        let documented: BTreeSet<String> = apim_tokens(&readme)
+            .iter()
+            .map(|token| canonical_command(token).to_string())
+            .collect();
+        for token in &required {
+            if !documented.contains(token) {
+                problems.push(problem(
+                    file,
+                    RULE_CLI_SURFACE,
+                    &format!("`apim help` 里有子命令 `{token}`，{file} 里一次都没出现"),
+                    &format!("在 README 的 CLI 一节补一行 `apim {token} ...`（两版同步，约定 7）"),
+                ));
+            }
+        }
     }
     assert!(problems.is_empty(), "{}", report(problems));
 }
