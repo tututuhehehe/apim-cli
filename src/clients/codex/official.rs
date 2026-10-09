@@ -327,7 +327,6 @@ fn auth_has_api_key(auth: &Value) -> bool {
 /// 单独一个类型是刻意的：`auth.json` 的形状只有本模块认，apim 自己那份凭据由
 /// `openai_auth` 管，两边靠这个结构交接（与 `ADR-0002` 的分工同旨）。
 #[derive(Debug, Clone, PartialEq, Eq)]
-#[allow(dead_code)] // 接线在票 04；在那之前只有测试在用
 pub struct CodexLogin {
     pub id_token: String,
     pub access_token: String,
@@ -340,7 +339,6 @@ pub struct CodexLogin {
 /// 「看起来像官方路」（任意一个 token 在就算，用来判断路由）；这份快照是要拿去
 /// 采纳的，所以三个 token 必须齐、`auth_mode` 必须是 `chatgpt` —— 缺一个就返回
 /// `None`，交给调用方按「这次不同步」处理。
-#[allow(dead_code)] // 接线在票 04；在那之前只有测试在用
 pub fn read_local_login(home: &Path) -> Option<CodexLogin> {
     let auth = read_auth(home)?;
     if auth.get("auth_mode").and_then(Value::as_str) != Some("chatgpt") {

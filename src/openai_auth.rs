@@ -787,7 +787,6 @@ async fn refresh(dir: &Path, c: Credential, http: &Client) -> Result<Option<Cred
 /// 单独立一个类型是刻意的：凭据模块**不认** codex 的 JSON 形状（那是客户端适配层的事），
 /// 两边只经这个结构交接（分工见 `ADR-0002`）。
 #[derive(Debug, Clone, PartialEq, Eq)]
-#[allow(dead_code)] // 接线在票 04；在那之前只有测试在用
 pub struct ExternTokens {
     pub id_token: String,
     pub access_token: String,
@@ -796,13 +795,19 @@ pub struct ExternTokens {
 
 /// 回写判定（`TODO-2`）。**判不了就拒绝**（fail closed）：最坏的情况是「这次没同步」，
 /// 绝不能是「把别人的凭据抄进 apim」。
+///
+/// 四种「不采纳」各自一个变体（而不是带一个原因字符串）：生产路径静默、不读原因，
+/// 而测试要能分辨「因为哪个理由没采纳」—— 挂在类型上两边都满足。
 #[derive(Debug)]
-#[allow(dead_code)] // 接线在票 04；在那之前只有测试在用
 pub enum AdoptDecision {
-    /// 不是 apim 写进去的那份 / 凭据不全 / 读不出有效期：一个字节都不写
-    Reject(&'static str),
+    /// 三个 token 不全
+    Incomplete,
+    /// refresh token 不吻合：那不是 apim 写进去的那份凭据（用户自己 `codex login` 的账号）
+    NotOurs,
+    /// 读不出 access token 的有效期（绝不替它编一个）
+    UnknownExpiry,
     /// 是自己那份，但没有更新的东西：不写盘（幂等，不会来回抖）
-    Skip(&'static str),
+    NotNewer,
     /// 采纳：这是回写之后的凭据
     Adopt(Box<Credential>),
 }
@@ -816,7 +821,6 @@ pub enum AdoptDecision {
 /// - **只采纳 token 与有效期**：`client_id` / `host_id` / `subject` / `email` / `scopes` /
 ///   `codex_family` 是 apim 自己的注册身份，一律保留；`account_id` 按既有刷新口径从新
 ///   access token 推导，推导不出就沿用旧值。
-#[allow(dead_code)] // 接线在票 04；在那之前只有测试在用
 pub fn adopt_plan(
     ours: &Credential,
     theirs: &ExternTokens,
@@ -826,16 +830,16 @@ pub fn adopt_plan(
         || theirs.refresh_token.trim().is_empty()
         || theirs.id_token.trim().is_empty()
     {
-        return AdoptDecision::Reject("Codex 现场那份凭据不完整");
+        return AdoptDecision::Incomplete;
     }
     if theirs.refresh_token != ours.refresh_token {
-        return AdoptDecision::Reject("refresh token 不吻合：那不是 apim 写进去的那份凭据");
+        return AdoptDecision::NotOurs;
     }
     let Some(exp) = theirs_exp else {
-        return AdoptDecision::Reject("Codex 现场那份 access token 读不出有效期");
+        return AdoptDecision::UnknownExpiry;
     };
     if exp <= ours.expires_at {
-        return AdoptDecision::Skip("Codex 现场那份 token 不比 apim 的新");
+        return AdoptDecision::NotNewer;
     }
     let mut next = ours.clone();
     next.access_token = theirs.access_token.clone();
@@ -852,15 +856,31 @@ pub fn adopt_plan(
 
 /// `adopt_plan` 的正式入口：有效期由 Codex 现场那份 access token 自己给出。
 /// 拆成两个函数是为了让「有效期读不出 → 拒绝」这一行能在判定表里单独钉住。
-#[allow(dead_code)] // 接线在票 04；在那之前只有测试在用
 pub fn plan_adoption(ours: &Credential, theirs: &ExternTokens) -> AdoptDecision {
     adopt_plan(ours, theirs, access_token_exp(&theirs.access_token))
 }
 
 /// access token 里的 `exp`（不是 JWT / 没有该 claim → `None`，调用方据此拒绝）。
-#[allow(dead_code)] // 接线在票 04；在那之前只有测试在用
 pub fn access_token_exp(access: &str) -> Option<u64> {
     decode_unverified::<AccessClaims>(access).ok()?.exp
+}
+
+/// 回写（`TODO-2`）的编排：读 apim 自己那份 → 判定 → 受限写。
+///
+/// 调用方拿不到「为什么没同步」的细节是**刻意的**：拒绝（不是 apim 写的那份）、跳过
+/// （没有更新的）与写成功对调用方是同一件事 —— 一次静默的顺手同步；判不了就保持现状。
+pub(crate) fn adopt_from_codex(dir: &Path, theirs: &ExternTokens) -> Result<()> {
+    // 没登录过就没什么可回写的（也不会凭空造一份凭据出来）
+    let Some(ours) = load(dir)? else {
+        return Ok(());
+    };
+    let baseline = baseline_of(Some(&ours));
+    let AdoptDecision::Adopt(next) = plan_adoption(&ours, theirs) else {
+        return Ok(());
+    };
+    // 走受限写：与登录并发时谁先落盘谁赢，而登录永远赢（它是权威写）
+    save_guarded(dir, &next, &baseline)?;
+    Ok(())
 }
 
 /// POST 一次 token 端点请求，并按顺序试两个已知端点（见 `TOKEN_URLS`）。
@@ -1617,10 +1637,7 @@ mod tests {
             ..extern_tokens("refresh", &access)
         };
         let rejected = adopt_plan(&ours, &theirs, Some(newer));
-        assert!(
-            matches!(&rejected, AdoptDecision::Reject(reason) if reason.contains("refresh token")),
-            "{rejected:?}"
-        );
+        assert!(matches!(&rejected, AdoptDecision::NotOurs), "{rejected:?}");
 
         // ② 凭据不全 → 拒绝（三个 token 都得在）
         for theirs in [
@@ -1640,7 +1657,7 @@ mod tests {
             assert!(
                 matches!(
                     adopt_plan(&ours, &theirs, Some(newer)),
-                    AdoptDecision::Reject(_)
+                    AdoptDecision::Incomplete
                 ),
                 "{theirs:?}"
             );
@@ -1648,16 +1665,17 @@ mod tests {
 
         // ③ 读不出有效期 → 拒绝（绝不替它编一个）
         let theirs = extern_tokens("refresh", &access);
-        assert!(
-            matches!(adopt_plan(&ours, &theirs, None), AdoptDecision::Reject(reason) if reason.contains("有效期"))
-        );
+        assert!(matches!(
+            adopt_plan(&ours, &theirs, None),
+            AdoptDecision::UnknownExpiry
+        ));
 
         // ④ 不比 apim 的新（相同或更早）→ 跳过，不写盘
         for exp in [ours.expires_at, ours.expires_at - 1] {
             assert!(
                 matches!(
                     adopt_plan(&ours, &theirs, Some(exp)),
-                    AdoptDecision::Skip(_)
+                    AdoptDecision::NotNewer
                 ),
                 "exp={exp}"
             );
@@ -1714,7 +1732,7 @@ mod tests {
         );
         let theirs = extern_tokens("refresh", "not-a-jwt");
         assert!(
-            matches!(plan_adoption(&ours, &theirs), AdoptDecision::Reject(_)),
+            matches!(plan_adoption(&ours, &theirs), AdoptDecision::UnknownExpiry),
             "读不出有效期就拒绝"
         );
     }

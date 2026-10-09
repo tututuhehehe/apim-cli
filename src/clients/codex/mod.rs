@@ -33,7 +33,7 @@ pub(crate) use active::active_key_ids;
 pub use catalog::DEFAULT_EFFORT;
 pub use import::{import, normalize_base_url, provider_key};
 pub use official::import as import_official;
-pub use official::{CodexRoute, OfficialReport, codex_route};
+pub use official::{CodexRoute, OfficialReport, codex_route, read_local_login};
 pub use restart::{RestartReport, restart_daemon};
 
 use std::path::PathBuf;

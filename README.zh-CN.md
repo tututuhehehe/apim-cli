@@ -299,7 +299,7 @@ apim status glm --json
 
 几个有意为之的取舍：
 
-- **token 由 Codex 自己续。** apim 登录用的公开 client id 与 Codex CLI 是同一个（`app_EMoamEEZ73f0CkXaXp7hrann`），刷新端点与参数也一致，所以 `auth.json` 里这份凭据是自维持的 —— 这就是 `refresh_token` 必须写进去的原因。代价：codex 刷新后新 token 只在 `auth.json` 里；如果 OpenAI 轮换了 refresh token，apim 自己那份 `openai-oauth.json` 会失效，需要按 `o` 重新授权（apim 不回写同步）。
+- **token 由 Codex 自己续。** apim 登录用的公开 client id 与 Codex CLI 是同一个（`app_EMoamEEZ73f0CkXaXp7hrann`），刷新端点与参数也一致，所以 `auth.json` 里这份凭据是自维持的 —— 这就是 `refresh_token` 必须写进去的原因。代价：codex 刷新后的新 token 只写进 `auth.json`，apim 会在自己的刷新节奏里读回来 —— 但只在能证明那份就是自己写进去的（refresh token 吻合）时才这么做；如果 OpenAI 轮换了 refresh token，apim 自己那份 `openai-oauth.json` 会失效，需要按 `o` 重新授权。
 - **只摘 apim 自己写的键。** cc-switch 是整份清空 `config.toml`（它有 provider 数据库兜底）；apim 没有，而且 `.apim.bak` 备份会被下一次导入覆盖，清空等于把你的 `[projects.*]` / `[plugins.*]` / `notify` 真的删掉。你自己手写的 `model_catalog_json` 也会保留。
 - **`model` 也一起摘掉**，让 Codex 回到自己的默认模型：apim 写进去的 `model` 是第三方模型名（比如 `deepseek-flash`），官方端点没有它。`[model_providers.*]` 块一个都没动，所以切回中转站只差在密钥行上再按一次 `x`。
 - **Codex 看不见的凭据不写**：`cli_auth_credentials_store = "keyring"` 或 `"ephemeral"` 时 codex 根本不读 `auth.json`，导入会直接拒绝并说清原因，而不是写一份没用的文件（apim 不碰系统钥匙串）。

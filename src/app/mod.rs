@@ -418,7 +418,28 @@ impl App {
     /// 与 ★ 同一个节奏，用户在别的窗口里改了 `~/.codex` 也能立刻看到。
     pub(crate) fn refresh_active_keys(&mut self) {
         self.active_keys = Agent::detect_active_keys(&self.keys, &self.recipes, &self.agent_homes);
+        self.sync_oauth_from_codex();
         self.codex_route = crate::clients::codex::codex_route(Some(&self.codex_home()));
+    }
+
+    /// 官方路的回写（`TODO-2`）：codex 自己刷新过的 token 只写回 `~/.codex/auth.json`，
+    /// 这里把「能证明是 apim 写进去的那份」采纳回 `openai-oauth.json`。
+    ///
+    /// 与 ★ / `codex_route` 同一个节奏、同一个函数（启动、每 5 分钟、`r`、以及配置变更后）——
+    /// 那两件事本来就在读 `~/.codex`，顺手做不额外增加时机。
+    ///
+    /// 判定与写盘都在 `openai_auth`（客户端形状不进来）；判不了或写不进去**一律静默**：
+    /// 这是后台的顺手同步，用户可见的结果只有一个 —— 额度查询一直能用。
+    fn sync_oauth_from_codex(&mut self) {
+        let Some(login) = crate::clients::codex::read_local_login(&self.codex_home()) else {
+            return;
+        };
+        let theirs = crate::openai_auth::ExternTokens {
+            id_token: login.id_token,
+            access_token: login.access_token,
+            refresh_token: login.refresh_token,
+        };
+        let _ = crate::openai_auth::adopt_from_codex(&self.config_dir, &theirs);
     }
 
     /// codex 的配置目录（`CODEX_HOME` / `~/.codex`；测试经 `agent_homes` 注入）。
@@ -967,6 +988,178 @@ pub(crate) mod tests {
         };
         app.rebuild_provider_list();
         (app, rx, rx_task)
+    }
+
+    /// 一份「apim 已登录」的 OAuth 凭据（合成值，与真实 token 无关）。
+    fn oauth_credential() -> crate::openai_auth::Credential {
+        crate::openai_auth::Credential {
+            client_id: "app_EMoamEEZ73f0CkXaXp7hrann".into(),
+            host_id: "urn:uuid:test".into(),
+            subject: "auth0|test".into(),
+            email: Some("user@example.invalid".into()),
+            id_token: "old-id".into(),
+            access_token: "old-access".into(),
+            refresh_token: "rt-shared".into(),
+            expires_at: 1_900_000_000,
+            scopes: vec!["openid".into()],
+            account_id: "acct-old".into(),
+            codex_family: true,
+        }
+    }
+
+    /// 把凭据按 apim 自己的布局写进配置目录（测试里只当「现场已存在这么一份」用）。
+    fn write_credential(dir: &std::path::Path, cred: &crate::openai_auth::Credential) {
+        std::fs::write(
+            crate::openai_auth::credential_path(dir),
+            serde_json::to_string_pretty(cred).unwrap(),
+        )
+        .unwrap();
+    }
+
+    /// 合成一份 codex 现场的 `auth.json`（`refresh_token` 决定它是不是 apim 写的那份）。
+    fn write_codex_auth_json(home: &std::path::Path, refresh_token: &str, access_token: &str) {
+        std::fs::write(
+            home.join("auth.json"),
+            serde_json::json!({
+                "auth_mode": "chatgpt",
+                "tokens": {
+                    "id_token": "codex-id",
+                    "access_token": access_token,
+                    "refresh_token": refresh_token,
+                    "account_id": "acct-from-codex",
+                },
+                "last_refresh": "2026-10-09T00:00:00Z",
+            })
+            .to_string(),
+        )
+        .unwrap();
+    }
+
+    /// 合成一个不带签名的 access JWT（回写要读它的 `exp` 与 `chatgpt_account_id`）。
+    fn access_jwt(exp: u64, account_id: &str) -> String {
+        use base64::{Engine as _, engine::general_purpose::URL_SAFE_NO_PAD};
+        let payload = serde_json::json!({
+            "exp": exp,
+            "https://api.openai.com/auth": {"chatgpt_account_id": account_id},
+        });
+        format!(
+            "h.{}.s",
+            URL_SAFE_NO_PAD.encode(serde_json::to_vec(&payload).unwrap())
+        )
+    }
+
+    /// 回写（`TODO-2`）的端到端：Codex 刷新过的 token 被 apim 采纳。
+    ///
+    /// 合成凭据 + 临时目录，不碰真实 `~/.codex` / `~/.config/apim`，也不发网络请求。
+    #[test]
+    fn codex_refreshed_tokens_are_adopted_into_apims_credential() {
+        let (mut app, _rx, _rx_task) = test_app(&[("openai", &["api-key"])]);
+        // 自己一个配置目录：`test_app` 给的那个名字是多个测试共用的
+        let dir = test_config_dir("oauth-sync-adopt");
+        std::fs::create_dir_all(&dir).unwrap();
+        app.config_dir = dir.clone();
+        let home = app.codex_home();
+
+        let ours = oauth_credential();
+        write_credential(&dir, &ours);
+
+        // 同一个账号（refresh token 一样），但 access token 更新
+        let newer_exp = ours.expires_at + 6_000;
+        let fresh = access_jwt(newer_exp, "acct-from-codex");
+        write_codex_auth_json(&home, &ours.refresh_token, &fresh);
+
+        app.refresh_active_keys();
+
+        let adopted = crate::openai_auth::load(&dir).unwrap().unwrap();
+        assert_eq!(
+            adopted.access_token, fresh,
+            "Codex 现场那份新 token 要被采纳"
+        );
+        assert_eq!(adopted.expires_at, newer_exp);
+        assert_eq!(adopted.id_token, "codex-id");
+        assert_eq!(
+            adopted.account_id, "acct-from-codex",
+            "account id 从新的 access token 推导"
+        );
+        // 身份字段仍是 apim 自己那份（`auth.json` 里根本没有这些）
+        assert_eq!(adopted.refresh_token, ours.refresh_token);
+        assert_eq!(adopted.client_id, ours.client_id);
+        assert_eq!(adopted.host_id, ours.host_id);
+        assert_eq!(adopted.subject, ours.subject);
+        assert_eq!(adopted.scopes, ours.scopes);
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            assert_eq!(
+                std::fs::metadata(crate::openai_auth::credential_path(&dir))
+                    .unwrap()
+                    .permissions()
+                    .mode()
+                    & 0o777,
+                0o600,
+                "回写的文件必须是 600"
+            );
+        }
+
+        // 幂等：没有更新的东西时再跑一次不写盘（看 mtime：内容相同也可能被重写）
+        let path = crate::openai_auth::credential_path(&dir);
+        let before = std::fs::metadata(&path).unwrap().modified().unwrap();
+        std::thread::sleep(std::time::Duration::from_millis(20));
+        app.refresh_active_keys();
+        let after = std::fs::metadata(&path).unwrap().modified().unwrap();
+        assert_eq!(before, after, "没有更新的东西时不该写盘");
+    }
+
+    /// 不是 apim 写进去的那份（用户自己 `codex login` 的另一个账号）→ 一个字都不动。
+    #[test]
+    fn a_foreign_codex_login_is_never_copied_into_apim() {
+        let (mut app, _rx, _rx_task) = test_app(&[("openai", &["api-key"])]);
+        let dir = test_config_dir("oauth-sync-foreign");
+        std::fs::create_dir_all(&dir).unwrap();
+        app.config_dir = dir.clone();
+        let home = app.codex_home();
+
+        let ours = oauth_credential();
+        write_credential(&dir, &ours);
+        let path = crate::openai_auth::credential_path(&dir);
+        let original = std::fs::read(&path).unwrap();
+
+        // 另一个账号：refresh token 完全不同，而且 token 更新、account id 也不一样
+        write_codex_auth_json(
+            &home,
+            "someone-elses-refresh-token",
+            &access_jwt(ours.expires_at + 60_000, "acct-someone-else"),
+        );
+        app.refresh_active_keys();
+
+        assert_eq!(
+            std::fs::read(&path).unwrap(),
+            original,
+            "别人的凭据一个字节都不许进 apim"
+        );
+        let kept = crate::openai_auth::load(&dir).unwrap().unwrap();
+        assert_eq!(kept.access_token, ours.access_token);
+        assert_eq!(kept.account_id, ours.account_id);
+    }
+
+    /// 没登录过（或 codex 那边不是 ChatGPT 登录）时：不凭空造凭据，也不报错。
+    #[test]
+    fn adopting_from_codex_does_nothing_without_a_stored_credential() {
+        let (mut app, _rx, _rx_task) = test_app(&[("openai", &["api-key"])]);
+        let dir = test_config_dir("oauth-sync-none");
+        std::fs::create_dir_all(&dir).unwrap();
+        app.config_dir = dir.clone();
+        let home = app.codex_home();
+        let path = crate::openai_auth::credential_path(&dir);
+
+        write_codex_auth_json(&home, "rt-shared", &access_jwt(2_000_000_000, "acct"));
+        app.refresh_active_keys();
+        assert!(!path.exists(), "没登录过就不该凭空造一份凭据");
+
+        // API Key 路的 auth.json：同样什么都不做
+        std::fs::write(home.join("auth.json"), r#"{"OPENAI_API_KEY":"sk-test"}"#).unwrap();
+        app.refresh_active_keys();
+        assert!(!path.exists());
     }
 
     /// 测试用配置目录：target/ 下的临时目录，避免任何测试写到真实 ~/.config/apim。
