@@ -170,45 +170,24 @@ OpenAI、能配密钥、却永远登录不上，也没有 AUTH 行 —— README
 **第一步**：把那句改成「结论已内联在下面各条」；往后新评审的结论直接落到 `docs/`（或写进对应台账条目），
 不再引用 `target/`。
 
-## TODO-18 · 客户端子模块的模块头注释仍与 `docs/clients/*.md` 重复（`B06` 的剩余部分）
 
-**现状**：`ADR-0010` 落地时把 `clients/codex/{mod,official}.rs` 与 `clients/pi/mod.rs` 的模块头压成了
-「负责什么 + 契约在哪 + 子模块分工」，其余 9 个仍把契约细节抄在 `//!` 里（括号里是当时的 `//!` 行数）：
-`clients/mod.rs`(16)、`clients/codex/catalog.rs`(18)、`clients/codex/import.rs`(13)、
-`clients/codex/restart.rs`(7)、`clients/codex/active.rs`(6)、`clients/pi/active.rs`(17)、
-`clients/pi/import.rs`(10)、`clients/pi/config.rs`(9)、`clients/pi/verify.rs`(4)。
+## TODO-21 · GitHub 侧两件事：2 条依赖告警 + 一条 dependabot 分支
 
-**为什么现在不做**：模块头注释不是常驻上下文（打开那个文件才读），收益只有「单一来源」一条；且它们此刻
-与文档一致，没有漂移。
+**现状**：远端默认分支报 **2 条依赖漏洞**（1 moderate + 1 low，GitHub Dependabot alerts）；另有一条
+dependabot 分支 `dependabot/cargo/rustls-0.23.45` 挂在远端（`rustls` 是 `reqwest` 的间接依赖，`Cargo.toml`
+里没有直接声明）。本地 `main` 与远端同步、工作区干净。
 
-**第一步**：逐个对照 `docs/clients/{codex,pi}.md`，把已在文档里的细节删成一行指针（保留「这个模块负责
-什么」）；删之前确认每条细节在文档里都有。
+**为什么现在不做**：还没看清告警的来源（哪个 crate / 哪条 advisory / 有没有 `fixed_in`），而 `rustls`
+这种网络层依赖升级要跑全套测试 + MSRV `--locked` + 至少一遍真机 opt-in 路径（CI 的沙盒测试覆盖不到 TLS
+握手）。在没看清之前动依赖，只会把一个「不确定」换成一个「不知道哪里坏」。
 
-## TODO-19 · SKILL 的「一键导入」整节与 `docs/clients/*.md` 重复
-
-**现状**：`.agents/skills/apim/SKILL.md` 的「一键导入到 Codex / Pi」整节（约 21 行）讲的是客户端契约，
-而那一类信息的家是 `docs/clients/{codex,pi}.md`（`ADR-0010` 起的规矩）。有两处**只有这一节有**：
-查 codex daemon 启动时间的那条 `ps -o pid,lstart,command -p $(pgrep -f "app-server" …)` 诊断命令，以及
-`codex --profile <name>` 多套并存的提示。
-
-**为什么现在不做**：那两处得先有个家（否则删节即丢信息）；`docs-single-source` 票 06 的清单只管命令表。
-
-**第一步**：先把那两条并进 `docs/clients/codex.md`，再把整节压成一句指向 `docs/clients/{codex,pi}.md`
-的指针。
-
-## TODO-20 · 约定 12（`apim update` 三条渠道）该收成指针
-
-**现状**：`AGENTS.md` 约定 12 是全文最大的一行（约 1000 字符）：渠道识别规则 + 三条硬约束（URL 钉 tag、
-按 `install.sh.sha256` 校验摘要、`APIM_INSTALL_DIR` 先 canonicalize、npm 子包版本交叉核对、加渠道要同步
-改哪几处）。其中「为什么不能靠 `on: release: [published]`」已经指向 `docs/RELEASING.md`，机制细节却仍只
-在 AGENTS.md 里。
-
-**为什么现在不做**：它的家应该是 `docs/RELEASING.md`（渠道表与发布教训都在那儿）或新开
-`docs/update-channels.md` —— 两种落法要选一个，而 `docs-single-source` 票 07 没把它列进清单（当时不敢替
-RELEASING 扩角色）。
-
-**第一步**：决定家（倾向 `docs/RELEASING.md` 加一节「更新渠道的契约」），把机制搬过去，约定 12 压成
-「三条渠道 + 指针」；顺手让那一节与 `src/cli/update/channel.rs` 的 `Channel` 对齐（加渠道时同步改）。
+**第一步**（先查、不改）：
+1. `gh api repos/tututuhehehe/apim-cli/dependabot/alerts --jq '.[] | {number,state,severity,summary:.security_advisory.summary,package:.dependency.package.name,fixed_in:.security_vulnerability.first_patched_version.identifier}'`
+   —— 看清是哪两个包、哪条 advisory、下游有没有可用修复版本；
+2. `git ls-remote --heads origin | grep rustls` 确认那条分支是「开着的 PR」还是遗留分支；
+3. 若指向可直接升级的间接依赖：新开分支上 `cargo update -p <crate> --precise <fixed>` → 跑三命令 +
+   `cargo +1.88 check --locked --all-targets`（MSRV 那步是 `--locked`，锁文件一动必须重跑）→ 再决定怎么
+   处理那条 dependabot 分支（合并或关掉）。
 
 ---
 
