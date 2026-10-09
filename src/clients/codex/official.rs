@@ -1,27 +1,9 @@
-//! 把 apim 的 OpenAI Codex OAuth 凭据导入 Codex 的**官方路**（与第三方 provider 并列的另一条路）。
+//! 官方路（ChatGPT 登录）：把 apim 的 OAuth 凭据写进 `~/.codex/auth.json`，并摘掉 `config.toml`
+//! 的第三方路由 —— 供密钥表里 `AUTH` 行的 `x` 用。
 //!
-//! 机制来自 cc-switch（`codexProviderPresets.ts` 的「OpenAI Official」卡 + `codex_config.rs`）
-//! 与本机 codex 0.161 实测，几条硬约束别凭感觉改：
-//!
-//! - **官方路 = `auth.json` 里的 ChatGPT 登录**：`auth_mode: "chatgpt"` + `tokens{id_token,
-//!   access_token, refresh_token, account_id}` + `last_refresh`。config.toml **没有** `model_provider`
-//!   （缺省即内置 `openai`）时 codex 才用它；有第三方 `model_provider` 时 auth.json 被晾在一边。
-//! - **`refresh_token` 必须带上**：access token 过期后 codex 自己拿它去
-//!   `auth.openai.com/oauth/token` 刷新（codex 源码 `request_chatgpt_token_refresh`），client id
-//!   与 apim 用的是同一个 `app_EMoamEEZ73f0CkXaXp7hrann`、同样不发 `resource`，所以这份凭据
-//!   codex 能自续。少了它，「裸跑 codex」在 access token 到期后会静默失效。
-//! - `last_refresh` 只是兜底：codex 优先看 access token 的 `exp`（`should_refresh_proactively`，
-//!   提前 5 分钟），解析不出来才看 `last_refresh`（8 天），写当前时间即可。
-//! - **`cli_auth_credentials_store = keyring|ephemeral` 时 codex 根本不读 auth.json** → 直接拒绝，
-//!   不写一份看不见的凭据（apim 不碰系统钥匙串）。
-//! - 端到端校验用 **`codex login status`**：它离线读 auth.json（形状不对/未登录都 exit 1）并顺带
-//!   解析 config.toml，比只看自己写的文件更硬。
-//!
-//! 与第三方导入（`import.rs`）的差别：这条**不动** `[model_providers.*]` 块（没有 `model_provider`
-//! 指向就是死的），只摘掉 `model_provider` / `model` / apim 自己写的 `model_catalog_json` ——
-//! 用户手写的 `notify` / `[projects]` / `[plugins]` … 一个字不碰（cc-switch 是整份清空，因为它有
-//! provider 数据库兜底，apim 没有）。
-
+//! **契约与真机实测坑（`auth.json` 形状、只摘哪几个键、`keyring|ephemeral` 直接拒绝、
+//! `codex login status` 的两个流 + 退出码、失败要还原两处）在 `docs/clients/codex.md`；
+//! 单向采纳（只读现场、永不写 `auth.json`）见 `docs/adr/0009` —— 改这个文件之前先读它们。**
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::process::Command;

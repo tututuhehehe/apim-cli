@@ -30,6 +30,8 @@ Codex **官方路**时，Codex 侧的契约与实测约束。
 
 ### 官方路
 
+机制来自 cc-switch（`codexProviderPresets.ts` 的「OpenAI Official」卡 + `codex_config.rs`）与本机 codex 0.161 实测；**浏览器登录那一段的实测红线（为什么要复刻 Codex CLI 客户端、动态注册为什么会 401、两个 token 端点、刷新口径）见本节末尾**。
+
 - `~/.codex/auth.json` 是 **Codex 自己的**登录文件（`codex login` / `codex logout` 也管它）：apim 只在
   导入时写它，之后**只读**。
 - `config.toml` **只摘三个键**：顶层 `model_provider` / `model` / **apim 自己写的** `model_catalog_json`
@@ -74,6 +76,13 @@ account_id}` + `last_refresh`。
 - **`refresh_token` 必须带**：codex 自己拿它刷新；client id 与 apim 用的是同一个
   `app_EMoamEEZ73f0CkXaXp7hrann`、同样不发 `resource`，所以这份凭据 codex 能自续。
 - apim 侧那份凭据是**单份**（`~/.config/apim/openai-oauth.json`），只服务内置 `openai`。
+- **浏览器登录缺省复刻 Codex CLI 客户端**（Pi / cc-switch 同款：固定公开 client id
+  `app_EMoamEEZ73f0CkXaXp7hrann`、`localhost` 回调、不发 nonce、不申请 `resource`）。**不要改回缺省走
+  动态注册**：实测动态注册签发的 token 里 `https://api.openai.com/auth` 只有 `per_user_salt` +
+  `encrypted_auth_metadata`（无 `chatgpt_account_id`），请求 `backend-api/wham/usage` 一律 401；
+  `APIM_OAUTH_CLIENT=apim` 是显式切回的口子（写错的值会被点名写进诊断日志，不静默）。token 端点按
+  `/api/accounts/oauth/token` → `/oauth/token` 依次尝试；刷新 token 与登录同口径（Codex CLI 档位不带
+  `resource`），服务端不轮换 refresh token 时沿用旧的。
 
 ## 怎么写（文件 IO 与顺序）
 
@@ -137,7 +146,7 @@ account_id}` + `last_refresh`。
 ## `AUTH` 行（官方路的入口，不是一个密钥）
 
 - **只在内置 `openai` 分页**，下标 = 过滤后密钥数、排在密钥行之后（`App::auth_row_index` /
-  `auth_row_selected`）。
+  `auth_row_selected`）。它在 `open_import` 里**提前分流**，所以导入面板本身仍然不认识任何客户端细节。
 - 在它上面按 `x` 走官方路导入；按 `c` / `i` / `d` / `m` / `e` 给「只支持 x」的提示，而不是假装没有密钥。
 - `clamp_selections` / `move_down` 的密钥上限要跟着它 **+1**。
 - 已知小账（见 `docs/TODO.md`）：手改 `openai.yaml` 为 `kind: non_model` 后，那一行按 `c/i/d/m/e` 提示

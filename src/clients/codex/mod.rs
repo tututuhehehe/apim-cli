@@ -1,27 +1,11 @@
-//! 把 apim 的密钥 / 厂商 / 模型一键写进 Codex 配置（`~/.codex/config.toml`）。
+//! Codex 适配：把密钥 / 厂商 / 模型一键写进 Codex（第三方路），以及官方路（ChatGPT 登录）的导入。
 //!
-//! Codex 允许在 `config.toml` 里同时定义多个 `[model_providers.*]`，但同一时刻只有
-//! 顶层 `model_provider` 指向的那一个是激活的。所以这里只切换「激活项」：已导入的
-//! 其它厂商配置块原样保留（用户手写的注释、`[projects]`、`[tui]` 也一律不动）。
+//! **契约与真机实测坑（`config.toml` 怎么写、模型目录条目、`auth.json`、`★` 回读、`AUTH` 行、内置
+//! `openai` 不可复制）在 `docs/clients/codex.md` —— 改这个模块之前先读它。**
 //!
-//! 两点来自 codex 源码的硬约束（0.159.2 实测）：
-//! 1. `wire_api = "chat"` 已被移除，只接受 `"responses"`；
-//! 2. `model_catalog_json` 的条目必须有 `base_instructions` 或
-//!    `model_messages.instructions_template`，两样都缺会解析报错 —— 见 `catalog`。
-//!
-//! 子模块分工：
-//! - `active`：回读 `config.toml` 现场，回答「现在在用哪把密钥」（★ 角标）
-//! - `catalog`：模型目录的生成与校验（照官方字段手写迷你条目）+ 本机 codex 可执行文件定位
-//! - `config_file`：`config.toml` 的保注释读写（toml_edit + 备份 + 原子写）
-//! - `import`：一次第三方导入的编排（锁 → 改配置 → 写目录 → 校验 → 回滚）
-//! - `official`：官方路（ChatGPT 登录）：写 `auth.json` + 摘掉第三方路由，供 AUTH 行的 `x` 用
-//! - `restart`：导入后重启 codex 的 app-server 守护进程
-//!
-//! 下面只再导出**模块外真的在用的**那几条 —— `clients/mod.rs` 经 [`crate::clients::Agent`]
-//! 调它们；测试（在同一个模块树里）直接经子模块路径取内部项（如
-//! `codex::import::import_in`），不再往外搬一层（在二进制 crate 里，没人用的 `pub use`
-//! 会被 `unused_imports` 判成警告）。
-
+//! 子模块分工：`active` 回读现场算 ★ / `catalog` 模型目录生成与校验 / `config_file`
+//! `config.toml` 保注释读写 / `import` 第三方导入编排 / `official` 官方路导入 / `restart` 重启
+//! app-server 守护进程。
 mod active;
 mod catalog;
 mod config_file;

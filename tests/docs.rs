@@ -8,16 +8,18 @@
 //! 副本（含同名 `AGENTS.md` 与 `docs/**`），`target/` 里也有大量产物；整仓扫描会把它们当成仓库
 //! 内容、给出假红。本文件碰的东西：`AGENTS.md`（读）、`src/`（递归）、仓库根（非递归读一层）。
 //!
-//! 三条不变量各一个 `#[test]`（独立失败），口径写在 `AGENTS.md` 的「目录结构」那段里。
+//! 四条不变量各一个 `#[test]`（独立失败）：前三条的口径写在 `AGENTS.md` 的「目录结构」那段里，
+//! 第四条（体量 ratchet）的口径写在它的两个常量上。
 
 use std::collections::BTreeSet;
 use std::fs;
 use std::path::{Path, PathBuf};
 
-/// 三条不变量各自的名字：失败信息里要写清「违反哪条规则」。
+/// 四条不变量各自的名字：失败信息里要写清「违反哪条规则」。
 const RULE_EXISTS: &str = "目录树里的路径必须真实存在";
 const RULE_LISTED: &str = "src/ 下每个非测试源文件都要进目录树";
 const RULE_TOP_LEVEL: &str = "仓库根下的非隐藏目录都要进目录树";
+const RULE_BUDGET: &str = "AGENTS.md 的体量只允许变小或保持（ratchet）";
 
 /// 仓库根。集成测试的 cwd 不保证是仓库根，取编译期常量（本仓已有同款先例）。
 fn repo_root() -> PathBuf {
@@ -291,6 +293,49 @@ fn every_top_level_directory_is_listed() {
                 &format!("在树里补一行：`{named}   <一句话职责>`"),
             ));
         }
+    }
+    assert!(problems.is_empty(), "{}", report(problems));
+}
+
+/// AGENTS.md 的行数上限（ratchet：**只允许变小或保持**）。
+///
+/// 它每次运行都进上下文，所以这是唯一一条「持续变紧」的不变量。这个数不是拿来好看的：想让
+/// AGENTS.md 长大，就得先回答「删掉什么」—— 或者把细节挪进它自己的家（Doc map 里那些）留一行指针。
+const AGENTS_LINES_MAX: usize = 181;
+
+/// AGENTS.md 的字符数上限（ratchet）。
+///
+/// 行数单独守不住：把一段长文拆成十行反而更容易「看起来没变多」，而**真正花掉的是字符 / token**。
+/// 所以两个一起钉。
+const AGENTS_CHARS_MAX: usize = 12508;
+
+/// 4 · AGENTS.md 的体量只允许变小或保持（ratchet）。
+///
+/// 红了不要「把上限调大」—— 那等于把 ratchet 变成橡皮筋。要么删掉等量的旧内容，要么把细节搬到它的
+/// 家（`docs/clients/*.md`、`docs/provider-kinds.md`、`docs/adr/`…）之后留一行指针。
+#[test]
+fn agents_md_stays_within_its_budget() {
+    let agents = fs::read_to_string(repo_root().join("AGENTS.md")).expect("读 AGENTS.md");
+    let lines = agents.lines().count();
+    let chars = agents.chars().count();
+    let mut problems = Vec::new();
+    if lines > AGENTS_LINES_MAX {
+        let over = lines - AGENTS_LINES_MAX;
+        problems.push(problem(
+            "AGENTS.md",
+            RULE_BUDGET,
+            &format!("行数 {lines} 超过上限 {AGENTS_LINES_MAX}（多了 {over} 行）"),
+            "删掉等量的旧内容，或把细节挪进它的家后留一行指针；**不要**直接调大上限",
+        ));
+    }
+    if chars > AGENTS_CHARS_MAX {
+        let over = chars - AGENTS_CHARS_MAX;
+        problems.push(problem(
+            "AGENTS.md",
+            RULE_BUDGET,
+            &format!("字符数 {chars} 超过上限 {AGENTS_CHARS_MAX}（多了 {over} 字符）"),
+            "同上；注意把一段长文拆成多行并不会省字符 —— 字符才是常驻上下文的成本",
+        ));
     }
     assert!(problems.is_empty(), "{}", report(problems));
 }
