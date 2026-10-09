@@ -3,6 +3,48 @@
 本项目遵循 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.1.0/) 与
 [语义化版本](https://semver.org/lang/zh-CN/)。
 
+## [0.1.8] - 2026-10-09
+
+### 新增
+
+- **AUTH 行按 `x` 一键把 OpenAI Codex OAuth 导入 Codex 的官方路**：让 Codex 自己用你的 ChatGPT 订阅，
+  而不是走中转站 —— 与 cc-switch 的「OpenAI Official」卡同一件事。写 `~/.codex/auth.json`（Codex 原生
+  ChatGPT 登录形状：`auth_mode` + `tokens{id_token,access_token,refresh_token,account_id}` + `last_refresh`；
+  `refresh_token` 必带，codex 自己拿它续期），config.toml 只摘顶层 `model_provider` / `model` 与 apim 自己
+  写的 `model_catalog_json`，其余（`notify`、`[projects.*]`、`[tui]`、`[plugins.*]`、其它 `[model_providers.*]`
+  块、注释与顺序）一个字不动 —— cc-switch 是整份清空，它有 provider 数据库兜底，apim 没有。
+  CLI：`apim auth openai import-codex`。
+- 密钥表里的 `AUTH` 行变成**可选中行**（只在内置 `openai` 分页，排在密钥行之后）：在它上面按 `x` 走上面
+  那条官方路导入，`c`/`i`/`d`/`m`/`e` 会明说「只支持 x」而不是假装没有密钥。
+- 导入前先拒掉 codex 读不到的凭据：`cli_auth_credentials_store = keyring|ephemeral` 时直接报错并说明原因
+  （apim 不写系统钥匙串）；导入后让 **codex 自己**校验（`codex login status` 必须认到
+  `Logged in using ChatGPT`），失败就把 `auth.json` 与 `config.toml` 两处都还原，成功则照旧重启 codex 的
+  app-server 守护进程（`APIM_NO_RESTART_CODEX=1` 可关）。
+- 额度面板的 AUTH 区多一行「Codex：官方 OAuth / 官方 API Key / provider x / 未登录」：与 ★ 角标同一个
+  思路，**回读 `~/.codex` 现场**算出来，不存台账。
+- **内置 `openai` 不可复制**（TUI `y` 与 CLI `provider copy` 都拒绝，消息里指向 `provider add`）：它的
+  OAuth 凭据是全局一份，复制出来的 `openai-copy` 会是一个「看着像 OpenAI、却永远登录不上、也没有 AUTH 行」
+  的厂商。想加第二个 OpenAI 兼容厂商就用 `provider add` 建新 id（本来就不带 OAuth）。
+
+### 变更
+
+- `apim uninstall` 多报一项 apim 自己的备份 `~/.codex/auth.json.apim.bak`（里面是上一份 ChatGPT 登录
+  凭据），手工清理清单同步；`auth.json` 本身仍不报 —— 那是 codex 自己的登录文件，归 `codex login/logout` 管。
+- AUTH 行选中时的底栏提示只列真能用的键（去掉了 `c 复制`）。
+
+### 修复
+
+- 官方路导入失败时，`auth.json` 还原失败不再短路掉 `config.toml` 的还原（原来可能留下「apim 说导入失败、
+  codex 配置其实已经被摘掉第三方路由」的状态）。
+- 校验口径收紧：codex 的 API Key 登录同样是 exit 0 的 `Logged in using an API key - sk-***`，只匹配
+  `Logged in` 会把「官方 OAuth 已导入」说成假话，现在必须认到 `Logged in using ChatGPT`。
+
+### 内部
+
+- 两轮子代理评审（5 个 fresh 上下文：正确性/回归、测试与凭据安全、命令行反证）后按 P2 回修 7 处并补强测试
+  （空 openai 面板的 AUTH 高亮、`clamp_selections` 保留 AUTH 选中位、auth.json 四个 token 字段一个都不能少、
+  真机 opt-in 测试的目录指针断言按输入判）；`docs/TODO.md` 记下 5 条报告级小账与残留风险。
+
 ## [0.1.7] - 2026-10-05
 
 ### 新增
@@ -203,7 +245,8 @@
 - `apim --version` 版本输出（供安装脚本与更新检测使用）
 - MIT 开源协议
 
-[Unreleased]: https://github.com/tututuhehehe/apim-cli/compare/v0.1.7...HEAD
+[Unreleased]: https://github.com/tututuhehehe/apim-cli/compare/v0.1.8...HEAD
+[0.1.8]: https://github.com/tututuhehehe/apim-cli/releases/tag/v0.1.8
 [0.1.7]: https://github.com/tututuhehehe/apim-cli/releases/tag/v0.1.7
 [0.1.6]: https://github.com/tututuhehehe/apim-cli/releases/tag/v0.1.6
 [0.1.5]: https://github.com/tututuhehehe/apim-cli/releases/tag/v0.1.5
