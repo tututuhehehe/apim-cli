@@ -167,7 +167,7 @@ apim provider ls --json                # CLI 冒烟（跑已发布版；本地�
 |---|---|
 | 进行中的特性（spec + ticket） | `.scratch/<feature-slug>/`（规格见 `docs/agents/issue-tracker.md`） |
 | 已知缺口 / 待做 / 待验 + 第一步 | `docs/TODO.md`（条目编号 `TODO-N`） |
-| 已定的取舍、以及「故意不做 + 理由」 | `docs/adr/NNNN-*.md`（索引见 `docs/adr/README.md`）—— 防止重开已决的事 |
+| 已定的取舍、以及「故意不做 + 理由」 | `docs/adr/*.md`（索引见 `docs/adr/README.md`）—— 防止重开已决的事 |
 | 已完成的历史 | `CHANGELOG.md` |
 | 面向用户的使用手册（CLI / 按键 / recipe / 额度脚本） | `README.md`；中文版 `README.zh-CN.md` 同源翻译 |
 | 客户端契约细节（Codex / Pi 的 TOML、JSON 形状） | `docs/clients/*.md`（一个客户端一份） |

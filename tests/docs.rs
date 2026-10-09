@@ -23,6 +23,7 @@ const RULE_BUDGET: &str = "AGENTS.md 的体量只允许变小或保持（ratchet
 const RULE_CLI_SURFACE: &str = "apim help 里的每个子命令都要在 README 里出现";
 const RULE_SKILL_NO_SURFACE: &str = "SKILL 不定义命令面（只允许引用 README 已写的）";
 const RULE_BANNED_COMMAND: &str = "那条安装禁令只许待在它的家里";
+const RULE_DOC_MAP: &str = "每个长期文档都要能从 Doc map 走到";
 /// 那条禁令的字面串（`R4` 只认它，写法与 `AGENTS.md` 约定 10 一致）。
 const BANNED_COMMAND: &str = "cargo install --path .";
 
@@ -633,4 +634,140 @@ fn snippet_around(line: &str, needle: &str) -> String {
         chars[start..end].iter().collect::<String>(),
         if end < chars.len() { "…" } else { "" },
     )
+}
+
+/// `AGENTS.md` 的 Doc map：`### Doc map` 之后到下一个标题之前那张表的行。
+fn doc_map_lines(agents: &str) -> Vec<String> {
+    let start = agents
+        .find("### Doc map")
+        .expect("AGENTS.md 里应有「### Doc map」一节（孤儿文档守卫按它判）");
+    agents[start..]
+        .lines()
+        .skip(1)
+        .take_while(|line| !line.starts_with("### ") && !line.starts_with("## "))
+        .filter(|line| line.starts_with("| "))
+        .map(str::to_owned)
+        .collect()
+}
+
+/// 文档引用：文本里那些**像文档路径**的 token（允许 `*`）。
+///
+/// 只认「含 `/`」或「以 `.md` 结尾」的 token —— `TODO-N`、`<feature-slug>`、`$TMPDIR`
+/// 这类不是路径，自然落选。
+fn doc_references(text: &str) -> BTreeSet<String> {
+    text.split(|c: char| !(c.is_ascii_alphanumeric() || matches!(c, '.' | '_' | '-' | '/' | '*')))
+        .filter(|token| !token.is_empty())
+        .filter(|token| token.contains('/') || token.ends_with(".md"))
+        .map(str::to_owned)
+        .collect()
+}
+
+/// 一条引用可能的落点：**仓库相对**（`docs/TODO.md`）与**相对引用者所在目录**（`0001-x.md`
+/// 写在 `docs/adr/README.md` 里 —— 索引里的链接就是这么写的）。两种写法本仓都有。
+fn reference_candidates(from: &str, reference: &str) -> Vec<String> {
+    let mut out = vec![reference.to_owned()];
+    if let Some((dir, _)) = from.rsplit_once('/') {
+        out.push(format!("{dir}/{reference}"));
+    }
+    out
+}
+
+/// 逐段通配：`*` 只在**一段之内**匹配（`docs/clients/*.md` ✓；`docs/**` 这种跨段的写法没用到，
+/// 也就不实现）。段数必须相同 —— 这样 `docs/adr/*.md` 不会意外匹配到更深的路径。
+fn wildcard_matches(pattern: &str, path: &str) -> bool {
+    let pattern: Vec<&str> = pattern.split('/').collect();
+    let path: Vec<&str> = path.split('/').collect();
+    pattern.len() == path.len()
+        && pattern
+            .iter()
+            .zip(&path)
+            .all(|(p, t)| segment_matches(p, t))
+}
+
+/// 一段之内的 `*` 匹配：按 `*` 切开，依次吃掉前缀（最后一段要求后缀）。
+fn segment_matches(pattern: &str, text: &str) -> bool {
+    if !pattern.contains('*') {
+        return pattern == text;
+    }
+    let parts: Vec<&str> = pattern.split('*').collect();
+    let mut rest = text;
+    for (i, part) in parts.iter().enumerate() {
+        if part.is_empty() {
+            continue;
+        }
+        if i == parts.len() - 1 && !pattern.ends_with('*') {
+            return rest.ends_with(part) && rest.len() >= part.len();
+        }
+        match rest.find(part) {
+            Some(at) => rest = &rest[at + part.len()..],
+            None => return false,
+        }
+    }
+    true
+}
+
+/// 8 · 长期文档都要能从 Doc map 走到（**最多一跳**）。
+///
+/// 判据就是 `AGENTS.md` 的 Doc map：每个有名字、有角色的文档都该出现在那张表里；
+/// 表里指到的索引文件（例：`docs/adr/README.md`）又指到的文件，算**第二跳**、同样可达。
+///
+/// 防的是「孤儿文档」：上一版的 `HANDOFF.md` 就是这样 —— 谁都不指向它，它自己在仓库根待了一个月，
+/// 里面写的是早就过期的状态。
+#[test]
+fn every_durable_document_is_reachable_from_the_doc_map() {
+    let root = repo_root();
+    let agents = fs::read_to_string(root.join("AGENTS.md")).expect("读 AGENTS.md");
+    let docs = durable_markdown_files(&root);
+
+    // 第一跳：Doc map 那几行里点到的文件
+    let map_text = doc_map_lines(&agents).join("\n");
+    let mut reachable: BTreeSet<String> = BTreeSet::new();
+    let mut frontier: Vec<String> = Vec::new();
+    for reference in doc_references(&map_text) {
+        for candidate in reference_candidates("AGENTS.md", &reference) {
+            for file in &docs {
+                if wildcard_matches(&candidate, file) && reachable.insert(file.clone()) {
+                    frontier.push(file.clone());
+                }
+            }
+        }
+    }
+    // 第二跳：被指到的索引文件自己再点名的（例：`docs/adr/README.md` → 每条 ADR）
+    while let Some(index) = frontier.pop() {
+        let Ok(text) = fs::read_to_string(root.join(&index)) else {
+            continue;
+        };
+        for reference in doc_references(&text) {
+            for candidate in reference_candidates(&index, &reference) {
+                for file in &docs {
+                    if wildcard_matches(&candidate, file) && reachable.insert(file.clone()) {
+                        frontier.push(file.clone());
+                    }
+                }
+            }
+        }
+    }
+
+    let mut problems = Vec::new();
+    for file in &docs {
+        if reachable.contains(file) || is_self_indexed(file) {
+            continue;
+        }
+        problems.push(problem(
+            file,
+            RULE_DOC_MAP,
+            "没有任何长期文档指向它（从 Doc map 走不到，也不是某个索引的条目）",
+            "在 `AGENTS.md` 的 Doc map 里补一行指向它；或者把它并进已有的家、删掉这个文件",
+        ));
+    }
+    assert!(problems.is_empty(), "{}", report(problems));
+}
+
+/// 自己就是那张图（或本来就是虚拟路径）的文件不需要别人指向它。
+///
+/// - `AGENTS.md`：Doc map 就在它里面，给自己一行等于自我引用；
+/// - `.scratch/` 下的东西：进行中的工作区，生命周期跟着 effort 走（本守卫的发现范围本来也
+///   不含它，这条只是把口径写明白）。
+fn is_self_indexed(path: &str) -> bool {
+    path == "AGENTS.md" || path.starts_with(".scratch/")
 }
