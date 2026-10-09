@@ -19,5 +19,6 @@
 | [ADR-0005](0005-purge-refuses-symlinked-config-dir.md) | `--purge` 拒绝软链配置目录，且不提供 `--force` 绕过 | Accepted |
 | [ADR-0006](0006-oauth-deliberate-tradeoffs.md) | OAuth 的四个有意取舍（不是缺陷，别再改回去） | Accepted |
 | [ADR-0007](0007-tolerated-small-duplications.md) | 容忍三处小重复（附动手触发条件） | Accepted |
+| [ADR-0008](0008-oauth-stays-builtin-openai-only.md) | OAuth 只服务内置 `openai`，不做「凭据按厂商存」 | Accepted |
 
-> 来源：ADR-0001~0005、0007 由本机 `DEV-NOTES.local.md` §2 迁入（2026-10-09），ADR-0006 由 §3.12 迁入。
+> 来源：ADR-0001~0005、0007 由本机 `DEV-NOTES.local.md` §2 迁入（2026-10-09）；ADR-0006 由 §3.12 迁入；ADR-0008 由 `TODO-1` 的取向决议产生（2026-10-09）。
