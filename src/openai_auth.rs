@@ -621,25 +621,69 @@ fn next_refresh_token(current: &str, rotated: Option<String>) -> String {
         .unwrap_or_else(|| current.to_owned())
 }
 
-async fn refresh(dir: &Path, mut c: Credential, http: &Client) -> Result<Credential> {
-    if c.expires_at > now() + 60 {
-        return Ok(c);
-    }
-    let mut log = AttemptLog::new();
-    // 与登录同一口径：只有动态注册档位带 `resource`（见 login_inner 的 token form）。
-    // Pi 只发 grant_type/refresh_token/client_id，cc-switch 再带一个 scope，都不带 resource。
-    let (client_id, token) = (c.client_id.clone(), c.refresh_token.clone());
+/// 刷新请求的表单。
+///
+/// 与登录同一口径：只有动态注册档位带 `resource`（见 `login_inner` 的 token form）。
+/// Pi 只发 grant_type/refresh_token/client_id，cc-switch 再带一个 scope，都不带 resource。
+/// 独立成纯函数是为了把「档位门」钉在测试里：少给或多给 `resource` 会有测试变红（TODO-13）。
+fn refresh_form(c: &Credential) -> Vec<(&str, &str)> {
     let mut form: Vec<(&str, &str)> = vec![
         ("grant_type", "refresh_token"),
-        ("client_id", client_id.as_str()),
-        ("refresh_token", token.as_str()),
+        ("client_id", c.client_id.as_str()),
+        ("refresh_token", c.refresh_token.as_str()),
     ];
     if !c.codex_family {
         form.push(("resource", "https://api.openai.com/v1"));
     }
-    let r = token_grant(http, &form, "刷新 token", &mut log)
-        .await
-        .inspect_err(|_| log.save(dir))?;
+    form
+}
+
+/// 从刷新后的 access token 推导 account id；`None` = 沿用旧值（两种情况都写进诊断日志）。
+fn derive_account_from_access(access: &str, log: &mut AttemptLog) -> Option<String> {
+    match decode_unverified::<AccessClaims>(access) {
+        Ok(access) => match access.auth.and_then(|a| a.chatgpt_account_id) {
+            Some(account) => Some(account),
+            None => {
+                log.step("刷新后的 access token 没有 chatgpt_account_id，沿用旧值".to_string());
+                None
+            }
+        },
+        Err(err) => {
+            log.step(format!(
+                "刷新后的 access token 无法解析（{err}），沿用旧 account id"
+            ));
+            None
+        }
+    }
+}
+
+/// 刷新拿到新 token 之后的落盘编排：**先把新 token 落盘**，再推导 account id（可能再写一次）。
+///
+/// POST 成功后服务端可能已经旋转了 refresh token，所以两步之间任何失败都不能让磁盘留着
+/// 被顶替的那一份（否则下次刷新是 `invalid_grant`）。
+/// `derive` 是注入点：生产路径用 `derive_account_from_access`，测试用它观察两次写盘之间的
+/// 磁盘状态 —— 「先落盘再推导」这个顺序只有这样才钉得住（只断言最终结果区分不出两种顺序）。
+fn persist_refreshed(
+    dir: &Path,
+    c: &mut Credential,
+    log: &mut AttemptLog,
+    derive: impl Fn(&str, &mut AttemptLog) -> Option<String>,
+) -> Result<()> {
+    save(dir, c)?;
+    if let Some(account) = derive(&c.access_token, log) {
+        c.account_id = account;
+        save(dir, c)?;
+    }
+    Ok(())
+}
+
+/// POST **之后**的合并与落盘（注入点是响应而不是传输：测试不需要真实的 token 端点）。
+fn refresh_from_response(
+    dir: &Path,
+    mut c: Credential,
+    r: TokenResponse,
+    log: &mut AttemptLog,
+) -> Result<Credential> {
     c.access_token = r.access_token;
     c.expires_at = now() + r.expires_in;
     let rotated = r.refresh_token.filter(|s| !s.is_empty());
@@ -653,21 +697,19 @@ async fn refresh(dir: &Path, mut c: Credential, http: &Client) -> Result<Credent
     if !r.scope.is_empty() {
         c.scopes = scopes(&r.scope)
     }
-    // 先把拿到的新 token 落盘：POST 成功后服务端可能已经旋转了 refresh token，
-    // 下面任何失败都不能让磁盘留着被顶替的那一份（否则下次刷新是 invalid_grant）。
-    save(dir, &c)?;
-    match decode_unverified::<AccessClaims>(&c.access_token) {
-        Ok(access) => match access.auth.and_then(|a| a.chatgpt_account_id) {
-            Some(account) => {
-                c.account_id = account;
-                save(dir, &c)?;
-            }
-            None => log.step("刷新后的 access token 没有 chatgpt_account_id，沿用旧值".to_string()),
-        },
-        Err(err) => log.step(format!(
-            "刷新后的 access token 无法解析（{err}），沿用旧 account id"
-        )),
+    persist_refreshed(dir, &mut c, log, derive_account_from_access)?;
+    Ok(c)
+}
+
+async fn refresh(dir: &Path, c: Credential, http: &Client) -> Result<Credential> {
+    if c.expires_at > now() + 60 {
+        return Ok(c);
     }
+    let mut log = AttemptLog::new();
+    let r = token_grant(http, &refresh_form(&c), "刷新 token", &mut log)
+        .await
+        .inspect_err(|_| log.save(dir))?;
+    let c = refresh_from_response(dir, c, r, &mut log)?;
     log.save(dir);
     Ok(c)
 }
@@ -1206,5 +1248,161 @@ mod tests {
         );
         let c: AccessClaims = decode_unverified(&format!("h.{body}.s")).unwrap();
         assert_eq!(c.auth.unwrap().chatgpt_account_id.as_deref(), Some("acct"));
+    }
+
+    /// 档位门（TODO-13）：只有动态注册档位带 `resource`。这条规则写在注释里很久了，
+    /// 但改回去不会有测试变红 —— 现在会了。
+    #[test]
+    fn refresh_form_follows_the_profile() {
+        // Codex CLI 档位（Pi / cc-switch 同款）：只有三个字段
+        let mut codex = credential();
+        codex.client_id = "app_EMoamEEZ73f0CkXaXp7hrann".into();
+        codex.refresh_token = "rt-codex".into();
+        codex.codex_family = true;
+        assert_eq!(
+            refresh_form(&codex),
+            vec![
+                ("grant_type", "refresh_token"),
+                ("client_id", "app_EMoamEEZ73f0CkXaXp7hrann"),
+                ("refresh_token", "rt-codex"),
+            ]
+        );
+
+        // 动态注册档位：多一个 `resource`，一个不多一个不少
+        let mut dynamic = credential();
+        dynamic.client_id = "oaiapp-real".into();
+        dynamic.refresh_token = "rt-dynamic".into();
+        dynamic.codex_family = false;
+        let form = refresh_form(&dynamic);
+        assert_eq!(form.len(), 4, "{form:?}");
+        assert_eq!(form[0], ("grant_type", "refresh_token"));
+        assert_eq!(form[1], ("client_id", "oaiapp-real"));
+        assert_eq!(form[2], ("refresh_token", "rt-dynamic"));
+        assert_eq!(form[3], ("resource", "https://api.openai.com/v1"));
+    }
+
+    /// POST 之后：新 token 必须**先落盘**，account id 是第二步。
+    /// 两种顺序的**最终**磁盘状态一模一样，所以只能在两次写盘之间观察 —— 这就是
+    /// `persist_refreshed` 的 `derive` 会成为注入点的原因。
+    #[test]
+    fn refreshed_tokens_hit_the_disk_before_the_account_id_is_derived() {
+        let p = dir("refresh-order");
+        let mut c = credential();
+        c.access_token = "new.access.token".into();
+        c.refresh_token = "rotated-refresh".into();
+        c.account_id = "acct-old".into();
+
+        let between = std::cell::RefCell::new(None);
+        let probe = p.clone();
+        let mut log = AttemptLog::new();
+        persist_refreshed(&p, &mut c, &mut log, |_, _| {
+            *between.borrow_mut() = load(&probe).unwrap();
+            Some("acct-new".into())
+        })
+        .unwrap();
+
+        let between = between.into_inner().expect("第一步就必须已经写过一次盘");
+        assert_eq!(
+            between.access_token, "new.access.token",
+            "新 access token 要在推导 account id 之前就落盘"
+        );
+        assert_eq!(between.refresh_token, "rotated-refresh");
+        assert_eq!(
+            between.account_id, "acct-old",
+            "这一步还没有推导 account id"
+        );
+
+        let landed = load(&p).unwrap().unwrap();
+        assert_eq!(landed.account_id, "acct-new", "第二步才补上推导结果");
+        assert_eq!(landed.access_token, "new.access.token");
+        let _ = fs::remove_dir_all(p);
+    }
+
+    /// 推导不出 account id 时只写一次盘：新 token 已经在盘上，account id 沿用旧值。
+    /// （「下面任何失败都不能让磁盘留着被顶替的那一份」的另一半。）
+    #[test]
+    fn refreshed_tokens_stay_on_disk_when_the_account_id_cannot_be_derived() {
+        let p = dir("refresh-no-account");
+        let mut c = credential();
+        c.access_token = "new.access.token".into();
+        c.refresh_token = "rotated-refresh".into();
+        c.account_id = "acct-old".into();
+
+        let mut log = AttemptLog::new();
+        persist_refreshed(&p, &mut c, &mut log, |_, log| {
+            log.step("推导不出 account id".to_string());
+            None
+        })
+        .unwrap();
+
+        let on_disk = load(&p).unwrap().unwrap();
+        assert_eq!(on_disk.access_token, "new.access.token");
+        assert_eq!(on_disk.refresh_token, "rotated-refresh");
+        assert_eq!(on_disk.account_id, "acct-old");
+        assert_eq!(c.account_id, "acct-old", "内存里也不该被改");
+        let _ = fs::remove_dir_all(p);
+    }
+
+    /// `refresh_from_response` 的合并规则：不轮换时沿用旧 refresh token / id_token / scope，
+    /// 轮换与带新值时全部采纳；`expires_at` 按响应里的 `expires_in` 推算。
+    #[test]
+    fn refresh_response_merges_tokens_and_keeps_the_old_refresh_token_when_not_rotated() {
+        let p = dir("refresh-merge");
+        let mut c = credential();
+        c.access_token = "old".into();
+        c.refresh_token = "rt-old".into();
+        c.id_token = "id-old".into();
+        c.scopes = vec!["scope-old".into()];
+        c.account_id = "acct-old".into();
+
+        let mut log = AttemptLog::new();
+        let out = refresh_from_response(
+            &p,
+            c,
+            TokenResponse {
+                access_token: "new".into(),
+                expires_in: 3_600,
+                refresh_token: None,
+                id_token: None,
+                scope: String::new(),
+            },
+            &mut log,
+        )
+        .unwrap();
+        assert_eq!(out.access_token, "new");
+        assert_eq!(out.refresh_token, "rt-old", "没轮换就沿用旧的");
+        assert_eq!(out.id_token, "id-old");
+        assert_eq!(out.scopes, vec!["scope-old".to_string()]);
+        assert_eq!(out.account_id, "acct-old", "非 JWT 推导不出来，沿用旧值");
+        assert!(
+            out.expires_at > now() + 3_000,
+            "expires_at 按 expires_in 推"
+        );
+        assert!(log.render().contains("沿用旧的"), "{}", log.render());
+        assert_eq!(load(&p).unwrap().unwrap().access_token, "new");
+
+        // 轮换 + 新 id_token + 新 scope：全部采纳
+        let mut log = AttemptLog::new();
+        let out = refresh_from_response(
+            &p,
+            out,
+            TokenResponse {
+                access_token: "newer".into(),
+                expires_in: 60,
+                refresh_token: Some("rt-new".into()),
+                id_token: Some("id-new".into()),
+                scope: "scope-a scope-b".into(),
+            },
+            &mut log,
+        )
+        .unwrap();
+        assert_eq!(out.refresh_token, "rt-new");
+        assert_eq!(out.id_token, "id-new");
+        assert_eq!(
+            out.scopes,
+            vec!["scope-a".to_string(), "scope-b".to_string()]
+        );
+        assert_eq!(load(&p).unwrap().unwrap().refresh_token, "rt-new");
+        let _ = fs::remove_dir_all(p);
     }
 }
