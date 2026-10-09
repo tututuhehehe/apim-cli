@@ -7,7 +7,7 @@
 - ✅ = 已答复（理由与去向下述）
 - ⏳ = 需要人类拍板（我给了倾向，但你说了算）
 
-**待你拍板：只剩 A07**（其余已定；A 组多数条目随 `TODO-1` 关闭而失效，见下）
+**全部已定**（2026-10-09）。A07 由用户拍板：**竞态本轮修、回写也做**；其余 27 条按本文件答复执行。
 实施方仍是 `wC:p3` 那个 pi —— 它读这份文件执行，不需要你在 pane 里重述。
 
 ---
@@ -47,9 +47,9 @@
 
 ### A07 本轮范围：回写与竞态做不做
 - 选项：a) 回写不做、`§3.9` 竞态本轮一起修；b) 都做；c) 都不做。
-- **答复：待你定，我拆成两件**（⏳）。
-  ① **竞态**（`TODO-12`）：`fetch_usage` 是「load → 可能刷新 → save」的读改写，登录落盘与在途探针会互相覆盖 → 用户可见后果是**底栏说「已连接」但凭据已被覆盖回旧的那份**，之后额度查询会失败/要求重新登录。建议**本轮就修**（`save` 里做 compare-and-swap，改动很小）。
-  ② **回写**（`TODO-2`）：Codex 自己刷新 token 后只写回 `~/.codex/auth.json`，apim 那份落后 → 后果通常只是 apim 额度查询用旧 access token 自己再刷一次（能自愈）；只有服务端轮换 refresh token 时才真失效。建议**不做**，单独一轮。
+- **答复（用户拍板，2026-10-09）：两件都做，同一轮**（✅）。已立项为 `.scratch/oauth-credential-sync/`（spec + ticket）。
+  ① **竞态**（`TODO-12`）：`fetch_usage` 的「load → 可能刷新 → save」读改写与登录落盘互相覆盖 → 用户可见后果是**底栏说「已连接」但凭据已被写回旧的那份**，之后额度查询会失败/要求重新登录。修法二选一：`save` 里做 compare-and-swap（`WRITE_LOCK` 内重读，`client_id` + `refresh_token` 变了就跳过），或登录在途时不派发 OAuth 探针。
+  ② **回写**（`TODO-2`）：Codex 自己刷新 token 后只写回 `~/.codex/auth.json`，apim 那份落后。**必须认 ownership**（只有 `auth.json` 里的 refresh token 就是我们写进去的那份才回写；用户自己 `codex login` 的另一个账号绝不能抄进 apim），并挂在 `refresh_active_keys` 的节奏上。
 
 ### A08 多厂商 AUTH 状态：单槽还是 `HashMap`
 - 选项：a) 跟着当前厂商走（切厂商重查）；b) `HashMap<String, _>`。
@@ -132,7 +132,7 @@
 
 ## 答复之后的下一步
 
-1. **A 组**：`TODO-1` 已关闭（`docs/adr/0008`），**不需要 spec 也不需要拆票**。只剩 A07 待定：若同意「竞态本轮修」，就把它按 `TODO-12` 单独拆一张票；回写（`TODO-2`）留在台账。
+1. **A 组**：`TODO-1` 已关闭（`docs/adr/0008`）。A07 已定 → 新在制品 `.scratch/oauth-credential-sync/`（覆盖 `TODO-12` 竞态 + `TODO-2` 回写），与 `docs-single-source` 并行。
 2. **B 组**：答案已写进 `docs-single-source/spec.md` 的口径要求里，按票 01→10 顺序执行；`ADR-0008` 与 `TODO-16` 顺手立起来。
 3. **C 组**：票 01/03/04/05/06 即 frontier，可 5 个上下文并行（本会话不并行，交给 `wC:p3` 串行做也可）。
 4. 收尾：`docs/TODO.md` 的 `TODO-1` 划掉、`CHANGELOG.md` 记账、本文件退役。

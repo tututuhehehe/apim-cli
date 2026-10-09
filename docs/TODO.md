@@ -50,6 +50,8 @@ OpenAI、能配密钥、却永远登录不上，也没有 AUTH 行 —— README
 
 ## TODO-2 · 官方路导入不回写同步 codex 刷新的 token
 
+> **已开工**（2026-10-09）：ticket 在 `.scratch/oauth-credential-sync/`（票 03 采纳判定 / 04 接线）。收尾时删掉本条。
+
 **现状**：`x` 把 apim 的 OAuth 凭据写进 `~/.codex/auth.json` 之后，codex 自己会刷新 access token
 （`last_refresh` / access token 的 `exp` 到期前 5 分钟）并把新 token 只写回 `auth.json`。apim 那份
 `~/.config/apim/openai-oauth.json` 就此落后。
@@ -146,6 +148,8 @@ refresh token 比 apim 那份新，就回写 apim 的凭据（写前校验 owner
 
 ## TODO-12 · OAuth 凭据的 last-writer-wins 竞争（登录任务 vs 在途探针）（原 §3.9）
 
+> **已开工**（2026-10-09）：ticket 在 `.scratch/oauth-credential-sync/`（票 02 写入闸）。收尾时删掉本条。
+
 **现状**：`save` 只串行化了「写」本身（`WRITE_LOCK` 只包住落盘），但 `fetch_usage` 是「load → 可能 POST 刷新 → save」的读改写：探针在登录落盘前 load、在登录落盘后 save，会把刚登进去的凭据覆盖回旧那份，而 toast 已经说「已连接」。
 
 **触发条件**：自动刷新（5 分钟一档）正好落在登录窗口（≤10 分钟）内，且凭据已过期（才真的会 POST）。
@@ -153,6 +157,8 @@ refresh token 比 apim 那份新，就回写 apim 的凭据（写前校验 owner
 **第一步**：`save` 里做 compare-and-swap（在 `WRITE_LOCK` 内重读，`client_id` + `refresh_token` 变了就跳过），或在 `oauth_login_running` 时不派发 OAuth 探针。评审结论：属报告项，不阻塞当时合并。
 
 ## TODO-13 · `refresh` 的档位门与落盘顺序没有测试守住（原 §3.10）
+
+> **已开工**（2026-10-09）：作为 `.scratch/oauth-credential-sync/` 的票 01 prefactor 并入本轮（写入闸需要 refresh 路径有测试守卫）。收尾时删掉本条。
 
 **现状**：`next_refresh_token` 与 `IdTokenIdentity` 这两个抽出来的 helper 有测试，但「refresh 只对非 codex 档位带 `resource`」和「新 token 先落盘再推导 account id」只有读代码验证——改回去不会有测试变红。
 
