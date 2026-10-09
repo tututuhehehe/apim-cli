@@ -1,10 +1,7 @@
-//! 导入成功后重启 codex 的 app-server 守护进程。
+//! 导入成功后重启 codex 的 app-server 守护进程（codex 只在它启动时读一次模型目录）。
 //!
-//! codex 的模型目录（`model_catalog_json`）只在 app-server 启动那一刻读一次，之后一直缓存 ——
-//! 实测：导入后新开的 codex 会话仍然列出旧目录（`codex exec` 却能直接用新模型），因为
-//! TUI/桌面端都挂在同一个常驻 daemon 上。cc-switch 遇到同一件事，也只是提示用户重启 Codex
-//! （v3.16.1 release notes）；apim 做得更直接：把在跑的 `codex app-server` 杀掉，
-//! codex 下次启动会自动起新的（`APIM_NO_RESTART_CODEX=1` 可关）。
+//! 为什么必须重启、怎么只杀 daemon、`APIM_NO_RESTART_CODEX` 的语义见 `docs/clients/codex.md` 的
+//! 「怎么重载」—— **改这个文件之前先读它**。
 
 /// 一次自动重启的结果。
 #[derive(Debug, Default, Clone, Copy, PartialEq, Eq)]

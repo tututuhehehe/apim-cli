@@ -1,21 +1,7 @@
-//! 生成 `~/.codex/apim-models.json`（codex 的 `model_catalog_json` 指向它）。
+//! 生成并校验 `~/.codex/apim-models.json`（codex 的 `model_catalog_json` 指向它）。
 //!
-//! codex 靠「模型目录」决定 `/model` 里列出哪些模型、以及每个模型的思考等级、上下文窗口、
-//! 工具形态。自定义 provider 的模型不在目录里时，codex 会打
-//! `Model metadata for ... not found. Defaulting to fallback metadata` 并且 `/model` 里
-//! 看不到它们 —— 这就是这个文件存在的唯一理由。
-//!
-//! 条目是**极小的手写条目**，对齐 codex 官方字段与 GLM / DeepSeek 官方 Codex 接入文档，
-//! **不克隆 codex 内置的 GPT 模板**：那个模板会把 `input_modalities: [text, image]`、
-//! `tool_mode: code_mode_only`、`use_responses_lite: true`、`max_context_window: 872000`
-//! 和 62KB 的 GPT-6 harness 提示词一起带进去，对第三方模型全是错的（实测把这些原样写进
-//! `apim-models.json` 过）。
-//!
-//! 两条来自 codex 源码的硬约束：
-//! - 条目必须有 `base_instructions` 或 `model_messages.instructions_template`，两样都缺会让
-//!   整个目录解析失败；这里给一句中性的 Codex 身份说明（不能给空串，见 `BASE_INSTRUCTIONS`）。
-//! - `shell_type` / `apply_patch_tool_type` 决定 codex 往请求里塞哪种工具，用官方文档的
-//!   `shell_command` + `freeform`。
+//! 条目形状（哪些字段必填、**别克隆哪些**）、为什么这个文件非有不可、以及版本敏感项见
+//! `docs/clients/codex.md` 的「`apim-models.json`（模型目录）」—— **改这个文件之前先读它**。
 
 use std::path::{Path, PathBuf};
 use std::process::Command;

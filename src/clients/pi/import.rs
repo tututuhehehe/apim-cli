@@ -1,13 +1,8 @@
-//! 一次 pi 导入的编排：定位 pi → 改内存里的 models.json → 写盘 → `pi --list-models` 校验 → 失败回滚。
+//! pi 的一键导入编排：定位 pi → 改内存里的 `models.json` → 写盘 → `pi --list-models` 校验 →
+//! 失败回滚。
 //!
-//! **只写一处**：`models.json` → `providers.<apim-厂商id>`（`name` / `baseUrl`（补 `/v1`）/
-//! `api = "openai-completions"` / `apiKey` / `models`（勾选的那几个））。
-//!
-//! **不动 `settings.json`**：一键导入只是「往模型列表里加上我要的模型和厂商」，默认 provider /
-//! 默认模型由用户自己在 pi 里挑（`/model` + `Ctrl+S`），`enabledModels` 也不碰 —— 改用户
-//! 原有设定不是这个功能该干的事。
-//!
-//! 顺序上（同 codex）：**先在内存里改完（失败时磁盘一点没动）**，**校验不过要把改动还原**。
+//! 只写哪一处、写什么形状、为什么不动 `settings.json`、写盘顺序与回滚见 `docs/clients/pi.md` 的
+//! 「写到哪 / 写什么形状 / 怎么写」—— **改这个文件之前先读它**。
 
 use std::path::Path;
 

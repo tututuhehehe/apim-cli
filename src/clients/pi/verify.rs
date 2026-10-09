@@ -1,7 +1,6 @@
-//! 校验：写完让 **pi 自己**把模型列一遍（`pi --list-models`），勾选的必须都在。
+//! 校验：写完让 **pi 自己**列一遍模型（`pi --list-models`），勾选的必须都在。
 //!
-//! 跟 codex 那边一个思路（`codex debug models`）：apim 只负责把配置写进 pi 认识的形状，
-//! 「pi 到底认不认」由 pi 说了算。没装 pi 就直接失败 —— 不校验的导入等于没验证过。
+//! 为什么要让客户端自己校验、没装 pi 为什么直接失败见 `docs/clients/pi.md` 的「怎么校验」。
 
 use std::path::Path;
 use std::process::Command;

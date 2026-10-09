@@ -1,16 +1,8 @@
-//! 一次一键导入的编排：定位本机 codex → 生成目录 → 改写 config.toml → 端到端校验。
+//! 第三方路的一键导入编排：定位本机 codex → 生成模型目录 → 改写 `config.toml` → 端到端校验 →
+//! 失败回滚。
 //!
-//! （★ 不在这里记台账：「哪把密钥在用」是回读 `config.toml` 现场算出来的，见 `active`。）
-//!
-//! 写进 `config.toml` 的内容：
-//! - `model_provider` = 厂商 id（保留 id 加 `apim-` 前缀，见 [`provider_key`]）
-//! - `model` = 勾选的默认模型
-//! - `[model_providers.<key>]`：name / base_url / `wire_api = "responses"` /
-//!   `experimental_bearer_token`
-//! - `model_catalog_json`：勾选模型生成的目录，让 codex 的 `/model` 能列出它们
-//!
-//! 顺序上有两条硬要求：**先纯内存改配置（失败时磁盘一点没动）**，**校验不过要把两处改动
-//! 都还原**（否则用户看到「导入失败」，`~/.codex/config.toml` 其实已经切到新厂商 + 新目录）。
+//! 写进 `config.toml` 是哪几个键、以及写盘顺序与「校验不过要把两处都还原」见
+//! `docs/clients/codex.md` 的「写到哪 / 写什么形状 / 怎么写」—— **改这个文件之前先读它**。
 
 use std::path::Path;
 

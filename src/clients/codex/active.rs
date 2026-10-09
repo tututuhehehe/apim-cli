@@ -1,9 +1,7 @@
-//! 回读 codex 自己的 `config.toml`：它现在真正在用哪个 provider / 哪把密钥。
+//! 回读 codex 自己的 `config.toml`：它现在真正在用哪个 provider / 哪把密钥（★ 角标）。
 //!
-//! ★ 标记只认这里读出来的**现场**（apim 不再另存一份「上次导入了谁」）：顶层
-//! `model_provider` 指向 `[model_providers.<key>]`，表里的 `base_url` 与
-//! `experimental_bearer_token` 才是现在生效的东西。用户手改配置（换 token、把
-//! `model_provider` 切走、删掉那个块）后 ★ 跟着变；读不到 / 没配 → 什么都没在用。
+//! 对账口径（拿哪两个字段比、只有 `env_key` 时怎么退化）与「用户手改配置之后会怎样」见
+//! `docs/clients/codex.md` 的「怎么认出正在用的密钥」—— **改这个文件之前先读它**。
 
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};

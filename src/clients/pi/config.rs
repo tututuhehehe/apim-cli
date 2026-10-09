@@ -1,12 +1,7 @@
 //! `~/.pi/agent/models.json` 的读写（`auth.json` 只读、`settings.json` 完全不碰）。
 //!
-//! `auth.json`（pi 自己的凭据库）**只读不写**：里面有 `/login` 的订阅凭据，而且 pi 用
-//! `proper-lockfile` 自己管、读取时逐条校验（任何一条坏掉整份加载失败）—— 我们碰它只会
-//! 给自己找麻烦，也帮不上什么忙（`active.rs` 只是拿它对账）。
-//!
-//! `models.json` 是 JSON，而且常被用户手写（里面有人写 `modelOverrides` /
-//! `headers` / `compat`）：所以**只按我们认识的键改，其余字段原样保留**，
-//! 写前备份成 `<原名>.apim.bak`，落盘走 `file_io`（跟随符号链接 + 原子 + 建文件即 600）。
+//! 为什么 `auth.json` 一个字都不写、只动哪些键、备份与权限见 `docs/clients/pi.md` 的「怎么写」
+//! 与「只动我们认识的键」—— **改这个文件之前先读它**。
 
 use std::path::{Path, PathBuf};
 

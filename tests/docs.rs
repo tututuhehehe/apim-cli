@@ -24,6 +24,9 @@ const RULE_CLI_SURFACE: &str = "apim help 里的每个子命令都要在 README 
 const RULE_SKILL_NO_SURFACE: &str = "SKILL 不定义命令面（只允许引用 README 已写的）";
 const RULE_BANNED_COMMAND: &str = "那条安装禁令只许待在它的家里";
 const RULE_DOC_MAP: &str = "每个长期文档都要能从 Doc map 走到";
+const RULE_CLIENT_MODULE_DOC: &str = "客户端模块头只留「负责什么 + 契约在哪」";
+/// 客户端适配模块头的行数上限（ratchet：只允许变小或保持）。实施时最大的是 `clients/mod.rs` 7 行。
+const CLIENT_MODULE_DOC_MAX_LINES: usize = 10;
 /// 那条禁令的字面串（`R4` 只认它，写法与 `AGENTS.md` 约定 10 一致）。
 const BANNED_COMMAND: &str = "cargo install --path .";
 
@@ -770,4 +773,65 @@ fn every_durable_document_is_reachable_from_the_doc_map() {
 ///   不含它，这条只是把口径写明白）。
 fn is_self_indexed(path: &str) -> bool {
     path == "AGENTS.md" || path.starts_with(".scratch/")
+}
+
+/// 9 · 客户端适配模块的模块头只留「负责什么 + 契约在哪」。
+///
+/// 扫 `src/clients/mod.rs` 与 `src/clients/<子模块>/*.rs`（嵌套的 `tests/` 不算）。行数上限是
+/// **ratchet**：这一层不是常驻上下文，但它是模块级入口 —— 契约细节一旦长回这里就有了第二份，
+/// 而它与 `docs/clients/*.md` 之间没有任何东西保证同步。
+#[test]
+fn the_client_modules_point_at_their_contract() {
+    let root = repo_root();
+    let clients = root.join("src/clients");
+    let mut files = vec![clients.join("mod.rs")];
+    for entry in fs::read_dir(&clients).expect("读 src/clients") {
+        let sub = entry.expect("读目录项").path();
+        if !sub.is_dir() {
+            continue;
+        }
+        for file in fs::read_dir(&sub).expect("读客户端子模块目录") {
+            let file = file.expect("读目录项").path();
+            if file.extension().is_some_and(|ext| ext == "rs") {
+                files.push(file);
+            }
+        }
+    }
+    files.sort();
+    let mut problems = Vec::new();
+    for file in files {
+        let rel = file
+            .strip_prefix(&root)
+            .expect("仓库内的路径")
+            .to_string_lossy()
+            .replace('\\', "/");
+        let text = fs::read_to_string(&file).unwrap_or_else(|err| panic!("读 {rel} 失败：{err}"));
+        let doc: Vec<&str> = text
+            .lines()
+            .take_while(|line| line.starts_with("//!"))
+            .collect();
+        if doc.len() > CLIENT_MODULE_DOC_MAX_LINES {
+            problems.push(problem(
+                &rel,
+                RULE_CLIENT_MODULE_DOC,
+                &format!(
+                    "模块头 {} 行，超过上限 {CLIENT_MODULE_DOC_MAX_LINES} 行",
+                    doc.len()
+                ),
+                "把细节搬进 `docs/clients/<id>.md`，模块头只留「负责什么 + 契约在哪」",
+            ));
+        }
+        let points_at_home = doc
+            .iter()
+            .any(|line| line.contains("docs/clients/") || line.contains("约定 13"));
+        if !points_at_home {
+            problems.push(problem(
+                &rel,
+                RULE_CLIENT_MODULE_DOC,
+                "模块头里没有指向契约的家（`docs/clients/`；`clients/mod.rs` 也可以是 `AGENTS.md` 约定 13）",
+                "补一行：细节见 `docs/clients/<id>.md` —— 改这个文件之前先读它",
+            ));
+        }
+    }
+    assert!(problems.is_empty(), "{}", report(problems));
 }

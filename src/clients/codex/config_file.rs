@@ -1,4 +1,7 @@
 //! `~/.codex/config.toml` 的读写：用 toml_edit 保注释、保顺序，写前备份，原子落盘 600。
+//!
+//! 为什么必须用 `toml_edit`、注释要挂在哪个 decor、符号链接怎么处理见 `docs/clients/codex.md`
+//! 的「怎么写」—— **改这个文件之前先读它**。
 
 use std::fs;
 use std::path::{Path, PathBuf};

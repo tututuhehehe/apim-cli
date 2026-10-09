@@ -1,20 +1,8 @@
 //! 回读 **pi 现场**：它配置里在用的凭据都有哪些（★ 角标）。
 //!
-//! 和 codex 不同，pi **没有**「唯一激活的 provider」：`settings.json` 的 `defaultProvider` 只是
-//! **启动时**默认选哪个，之后 `/model`、`Ctrl+P`、会话记录都可能让你用别的 provider。所以这里
-//! 把 pi 配置里**每一份可用凭据**都算「在用」，两张表都看：
-//!
-//! 1. `<agent-dir>/auth.json` —— `/login` 存下来的（`{ "<providerId>": { "type": "api_key",
-//!    "key": "…" } }`）。**只读**：里面有订阅的 OAuth 凭据，而且 pi 用 `proper-lockfile` 自己管、
-//!    读取时逐条校验（任一条坏掉整份加载失败），apim 一个字都不写它。
-//! 2. `<agent-dir>/models.json` —— 每个 `providers.<id>` 的 `apiKey`（apim 导入时写的就是这里）。
-//!
-//! 能看见明文就**只比 token**（谁的 token 和它一样，谁就是在用的那把）；`$NAME` / `!command`
-//! 要运行时才求值、看不见，退化成比 `models.json` 里那个 provider 的 `baseUrl`；
-//! `type: "oauth"` 是订阅凭据，不算 apim 的 key。
-//!
-//! **provider 键的 `apim-` 前缀只约束「写」，不约束「认」**：用户手写的 provider（叫什么都行）
-//! 只要用着 apim 里这把 key，就是「在用」。
+//! pi 为什么没有「唯一激活的 provider」、两张表各看什么、`$NAME` / `!command` 怎么退化、
+//! `type: "oauth"` 为什么不算、前缀为什么只约束写 —— 都在 `docs/clients/pi.md` 的
+//! 「怎么认出正在用的密钥」，**改这个文件之前先读它**。
 
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
