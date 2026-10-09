@@ -7,7 +7,7 @@
 - 一个特性一个目录：`.scratch/<feature-slug>/`
 - 规格是 `.scratch/<feature-slug>/spec.md`
 - ticket 一票一文件：`.scratch/<feature-slug>/issues/<NN>-<slug>.md`，从 `01` 起编号，**绝不**用一个合并的 ticket 文件
-- ticket 文件顶部用一行 `Status:` 记录状态（角色字符串见 `triage-labels.md`；本仓尚未安装 `triage` 技能，该文件暂不存在）
+- ticket 文件顶部用一行 `Status:` 记录状态。取值：规范五值 `needs-triage` / `needs-info` / `ready-for-agent` / `ready-for-human` / `wontfix`（见 `triage-labels.md`；本仓尚未安装 `triage` 技能，该文件暂不存在），另加**本仓本地约定**的第六个取值 **`done`** = 本票已落地且验证通过（细节写在票文件末尾的 `## Done`：commit sha + 跑过的验证命令与结果 + 任何偏离 spec 之处）。
 - 评论与对话历史追加在文件底部的 `## Comments` 标题之下
 
 ## 与 `docs/TODO.md` 的边界
