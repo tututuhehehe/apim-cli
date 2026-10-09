@@ -205,9 +205,20 @@ apim provider ls --json                # CLI 冒烟（跑已发布版；本地�
 
 ## Agent skills
 
-### Issue tracker
+### Doc map — 每类信息只有一个家，其它位置只放指针
 
-票据与规格作为本地 markdown 放在 `.scratch/<feature-slug>/` 下；长期缺口台账仍是 `docs/TODO.md`。见 `docs/agents/issue-tracker.md`。
+| 信息 | 唯一位置 |
+|---|---|
+| 进行中的特性（spec + ticket） | `.scratch/<feature-slug>/`（规格见 `docs/agents/issue-tracker.md`） |
+| 已知缺口 / 为什么现在不做 / 第一步 | `docs/TODO.md`（条目编号 `TODO-N`） |
+| 已完成的历史 | `CHANGELOG.md` |
+| 面向用户的使用手册（CLI / 按键 / recipe / 额度脚本） | `README.md`；中文版 `README.zh-CN.md` 同源翻译 |
+| 客户端契约细节（Codex / Pi 的 TOML、JSON 形状） | `docs/clients/*.md`（尚未建：AGENTS 约定 11/14/15 的细节该迁过去，只留指针） |
+| 发版手册 / 额度脚本提示词 | `docs/RELEASING.md`、`docs/quota-script-prompt.md` |
+| 本机私有笔记（只在本机有效、不宜进仓库） | `DEV-NOTES.local.md`（gitignored） |
+| 会话交接 | 不落库：`/skill:handoff` 写到 `$TMPDIR` |
+
+开工一个 `TODO-N` 时：`/skill:to-spec` 把它固化成 `.scratch/<slug>/spec.md` → `/skill:to-tickets` 拆成带 `Blocked by:` 的 ticket（一票一文件）→ `/skill:implement` 一次一张。收尾时结论进 `CHANGELOG.md`，遗留项回 `docs/TODO.md`。
 
 ### Domain docs
 

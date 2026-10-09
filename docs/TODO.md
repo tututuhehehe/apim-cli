@@ -1,9 +1,17 @@
 # TODO — 已知缺口与后续要做的事
 
-给维护者看的待办清单（不是用户文档）。每条都要写清**现状 / 为什么现在不做 / 真要做得动哪些地方**，
-免得下次有人重新调研一遍。
+**角色**：本仓「长期台账」的唯一位置（见 `AGENTS.md` 的 Doc map）。记录**已知缺口 / 为什么现在不做 / 真要做得动哪些地方**，免得下次有人重新调研一遍；面向维护者，不是用户文档。
 
-## 1. OpenAI OAuth 凭据按厂商存（让复制的 OpenAI 也能登录）
+**编号**：条目用 `TODO-N`。开工照这个顺序走：
+
+1. `/skill:to-spec` — 把这一条固化成 `.scratch/<feature-slug>/spec.md`（本仓 ticket 规格见 `docs/agents/issue-tracker.md`）
+2. `/skill:to-tickets` — 拆成带 `Blocked by:` 的 ticket，一票一文件
+3. `/skill:implement` — 一次一张，在预先约定的 seam 上驱动 tdd
+4. 收尾 — 结论进 `CHANGELOG.md`，本文件里这一条**删掉**；没做完的遗留项留在本文件（能拆小就拆小）
+
+**边界**：进行中的工作**不写在这里**（写 `.scratch/`）；`CHANGELOG.md` 记过的历史不在这里重复。
+
+## TODO-1 · OpenAI OAuth 凭据按厂商存（让复制的 OpenAI 也能登录）
 
 **现状**：`~/.config/apim/openai-oauth.json` 是**全局一份**凭据。只有 id 正好是 `openai` 的厂商
 能用它：
@@ -36,7 +44,7 @@ OpenAI、能配密钥、却永远登录不上，也没有 AUTH 行 —— README
   厂商各自有 OAuth 凭据，`x` 该写谁的？合理的口径是「写当前厂商那一份，覆盖前照旧备份」，
   但要在 UI 上说清「Codex 官方登录位只有一个，导入 B 会顶掉 A」。
 
-## 2. 官方路导入不回写同步 codex 刷新的 token
+## TODO-2 · 官方路导入不回写同步 codex 刷新的 token
 
 **现状**：`x` 把 apim 的 OAuth 凭据写进 `~/.codex/auth.json` 之后，codex 自己会刷新 access token
 （`last_refresh` / access token 的 `exp` 到期前 5 分钟）并把新 token 只写回 `auth.json`。apim 那份
@@ -51,7 +59,7 @@ compare-and-swap（cc-switch 那套：比对 auth.json 里还是不是我们写�
 refresh token 比 apim 那份新，就回写 apim 的凭据（写前校验 ownership，别把用户自己 `codex login`
 的另一个账号抄进 apim）。
 
-## 3. 评审留下的报告级小账（都只在这份手改/边缘配置里出现，暂不做）
+## TODO-3 · 评审留下的报告级小账（都只在这份手改/边缘配置里出现，暂不做）
 
 来自两轮子代理评审（见 `target/apim-review/`）的 P2，父会话决定**只记账**，不在这轮改：
 
