@@ -322,6 +322,42 @@ fn auth_has_api_key(auth: &Value) -> bool {
         .is_some_and(|text| !text.trim().is_empty())
 }
 
+/// 只读快照：Codex 现场那份 ChatGPT 登录的三个 token。
+///
+/// 单独一个类型是刻意的：`auth.json` 的形状只有本模块认，apim 自己那份凭据由
+/// `openai_auth` 管，两边靠这个结构交接（与 `ADR-0002` 的分工同旨）。
+#[derive(Debug, Clone, PartialEq, Eq)]
+#[allow(dead_code)] // 接线在票 04；在那之前只有测试在用
+pub struct CodexLogin {
+    pub id_token: String,
+    pub access_token: String,
+    pub refresh_token: String,
+}
+
+/// 读 Codex 现场的 ChatGPT 登录（**只读**，绝不写 `auth.json`）。
+///
+/// 与 `codex_route` 用的 `auth_has_chatgpt_tokens` **有意不同**：那个是**宽松**的
+/// 「看起来像官方路」（任意一个 token 在就算，用来判断路由）；这份快照是要拿去
+/// 采纳的，所以三个 token 必须齐、`auth_mode` 必须是 `chatgpt` —— 缺一个就返回
+/// `None`，交给调用方按「这次不同步」处理。
+#[allow(dead_code)] // 接线在票 04；在那之前只有测试在用
+pub fn read_local_login(home: &Path) -> Option<CodexLogin> {
+    let auth = read_auth(home)?;
+    if auth.get("auth_mode").and_then(Value::as_str) != Some("chatgpt") {
+        return None;
+    }
+    let tokens = auth.get("tokens")?;
+    let field = |name: &str| -> Option<String> {
+        let text = tokens.get(name).and_then(Value::as_str)?;
+        (!text.trim().is_empty()).then(|| text.to_owned())
+    };
+    Some(CodexLogin {
+        id_token: field("id_token")?,
+        access_token: field("access_token")?,
+        refresh_token: field("refresh_token")?,
+    })
+}
+
 fn now() -> u64 {
     SystemTime::now()
         .duration_since(UNIX_EPOCH)
@@ -632,5 +668,56 @@ screen_reader_detection_done = true
         let err = import_in(&home, &credential(), Some(Path::new("/bin/true"))).unwrap_err();
         assert!(err.contains("keyring"), "{err}");
         assert!(!home.join(AUTH_FILE).exists());
+    }
+
+    /// 只读快照的入参：必须是 `auth_mode: chatgpt` 且三个 token 都齐。
+    /// 与宽松的 `auth_has_chatgpt_tokens` 有意不同（那个任意一个 token 在就算路由）。
+    #[test]
+    fn local_login_snapshot_needs_chatgpt_mode_and_all_three_tokens() {
+        let home = super::super::tests::helpers::temp_dir("official-local-login");
+        let auth = home.join(AUTH_FILE);
+        let write = |json: &str| fs::write(&auth, json).unwrap();
+
+        // 文件不在
+        assert_eq!(read_local_login(&home), None);
+
+        // API Key 登录（没有 tokens）
+        write(r#"{"OPENAI_API_KEY":"sk-test"}"#);
+        assert_eq!(read_local_login(&home), None);
+
+        // auth_mode 不是 chatgpt：即使三个 token 都在也不算
+        write(
+            r#"{"auth_mode":"apikey","tokens":{"id_token":"i","access_token":"a","refresh_token":"r"}}"#,
+        );
+        assert_eq!(read_local_login(&home), None);
+
+        // 三个 token 缺一个 / 有一个是空白（trim 后为空）→ 不算
+        write(r#"{"auth_mode":"chatgpt","tokens":{"id_token":"i","access_token":"a"}}"#);
+        assert_eq!(read_local_login(&home), None);
+        write(
+            r#"{"auth_mode":"chatgpt","tokens":{"id_token":"i","access_token":"a","refresh_token":"   "}}"#,
+        );
+        assert_eq!(read_local_login(&home), None);
+
+        // 空文件 / 坏 JSON
+        write("");
+        assert_eq!(read_local_login(&home), None);
+        write("{oops");
+        assert_eq!(read_local_login(&home), None);
+
+        // 齐了 → 三个 token 原样取出（`account_id` 是 codex 自己的元数据，不在这里搬）
+        let full = r#"{"auth_mode":"chatgpt","tokens":{"id_token":"i","access_token":"a","refresh_token":"r","account_id":"acct"},"last_refresh":"2026-10-09T00:00:00Z"}"#;
+        write(full);
+        assert_eq!(
+            read_local_login(&home),
+            Some(CodexLogin {
+                id_token: "i".into(),
+                access_token: "a".into(),
+                refresh_token: "r".into(),
+            })
+        );
+        // 只读：一个字节都没动
+        assert_eq!(fs::read_to_string(&auth).unwrap(), full);
+        let _ = fs::remove_dir_all(home);
     }
 }

@@ -202,6 +202,9 @@ struct IdTokenIdentity {
 struct AccessClaims {
     #[serde(default)]
     sub: Option<String>,
+    /// access token 的到期时间（秒）。回写要用它判断「Codex 现场那份是不是更新」。
+    #[serde(default)]
+    exp: Option<u64>,
     #[serde(rename = "https://api.openai.com/auth")]
     auth: Option<AuthClaim>,
 }
@@ -594,6 +597,7 @@ impl Identity {
     fn from_access_token(access_token: &str, log: &mut AttemptLog) -> Self {
         let claims: AccessClaims = decode_unverified(access_token).unwrap_or(AccessClaims {
             sub: None,
+            exp: None,
             auth: None,
         });
         let account_id = claims
@@ -712,6 +716,87 @@ async fn refresh(dir: &Path, c: Credential, http: &Client) -> Result<Credential>
     let c = refresh_from_response(dir, c, r, &mut log)?;
     log.save(dir);
     Ok(c)
+}
+
+/// 从 Codex 现场读回的 token 快照（由 `clients/codex` 解析 `auth.json` 得到）。
+///
+/// 单独立一个类型是刻意的：凭据模块**不认** codex 的 JSON 形状（那是客户端适配层的事），
+/// 两边只经这个结构交接（分工见 `ADR-0002`）。
+#[derive(Debug, Clone, PartialEq, Eq)]
+#[allow(dead_code)] // 接线在票 04；在那之前只有测试在用
+pub struct ExternTokens {
+    pub id_token: String,
+    pub access_token: String,
+    pub refresh_token: String,
+}
+
+/// 回写判定（`TODO-2`）。**判不了就拒绝**（fail closed）：最坏的情况是「这次没同步」，
+/// 绝不能是「把别人的凭据抄进 apim」。
+#[derive(Debug)]
+#[allow(dead_code)] // 接线在票 04；在那之前只有测试在用
+pub enum AdoptDecision {
+    /// 不是 apim 写进去的那份 / 凭据不全 / 读不出有效期：一个字节都不写
+    Reject(&'static str),
+    /// 是自己那份，但没有更新的东西：不写盘（幂等，不会来回抖）
+    Skip(&'static str),
+    /// 采纳：这是回写之后的凭据
+    Adopt(Box<Credential>),
+}
+
+/// 采纳判定（**纯函数**，不做任何 IO）。
+///
+/// - **ownership 是硬门**：`theirs.refresh_token` 必须与 `ours` 逐字符相同。用户自己
+///   `codex login` 的另一个账号刷新过的 token 绝不能抄进 apim。
+/// - **只在确实更新时才采纳**：`theirs_exp`（Codex 现场那份 access token 的有效期）必须
+///   晚于 `ours.expires_at`，否则不写盘。
+/// - **只采纳 token 与有效期**：`client_id` / `host_id` / `subject` / `email` / `scopes` /
+///   `codex_family` 是 apim 自己的注册身份，一律保留；`account_id` 按既有刷新口径从新
+///   access token 推导，推导不出就沿用旧值。
+#[allow(dead_code)] // 接线在票 04；在那之前只有测试在用
+pub fn adopt_plan(
+    ours: &Credential,
+    theirs: &ExternTokens,
+    theirs_exp: Option<u64>,
+) -> AdoptDecision {
+    if theirs.access_token.trim().is_empty()
+        || theirs.refresh_token.trim().is_empty()
+        || theirs.id_token.trim().is_empty()
+    {
+        return AdoptDecision::Reject("Codex 现场那份凭据不完整");
+    }
+    if theirs.refresh_token != ours.refresh_token {
+        return AdoptDecision::Reject("refresh token 不吻合：那不是 apim 写进去的那份凭据");
+    }
+    let Some(exp) = theirs_exp else {
+        return AdoptDecision::Reject("Codex 现场那份 access token 读不出有效期");
+    };
+    if exp <= ours.expires_at {
+        return AdoptDecision::Skip("Codex 现场那份 token 不比 apim 的新");
+    }
+    let mut next = ours.clone();
+    next.access_token = theirs.access_token.clone();
+    next.refresh_token = theirs.refresh_token.clone();
+    next.id_token = theirs.id_token.clone();
+    next.expires_at = exp;
+    if let Ok(access) = decode_unverified::<AccessClaims>(&next.access_token)
+        && let Some(account) = access.auth.and_then(|a| a.chatgpt_account_id)
+    {
+        next.account_id = account;
+    }
+    AdoptDecision::Adopt(Box::new(next))
+}
+
+/// `adopt_plan` 的正式入口：有效期由 Codex 现场那份 access token 自己给出。
+/// 拆成两个函数是为了让「有效期读不出 → 拒绝」这一行能在判定表里单独钉住。
+#[allow(dead_code)] // 接线在票 04；在那之前只有测试在用
+pub fn plan_adoption(ours: &Credential, theirs: &ExternTokens) -> AdoptDecision {
+    adopt_plan(ours, theirs, access_token_exp(&theirs.access_token))
+}
+
+/// access token 里的 `exp`（不是 JWT / 没有该 claim → `None`，调用方据此拒绝）。
+#[allow(dead_code)] // 接线在票 04；在那之前只有测试在用
+pub fn access_token_exp(access: &str) -> Option<u64> {
+    decode_unverified::<AccessClaims>(access).ok()?.exp
 }
 
 /// POST 一次 token 端点请求，并按顺序试两个已知端点（见 `TOKEN_URLS`）。
@@ -1404,5 +1489,139 @@ mod tests {
         );
         assert_eq!(load(&p).unwrap().unwrap().refresh_token, "rt-new");
         let _ = fs::remove_dir_all(p);
+    }
+
+    /// 合成一个不带签名的 JWT（本仓既有写法：只关心 payload）。
+    fn jwt_with(claims: serde_json::Value) -> String {
+        format!(
+            "h.{}.s",
+            URL_SAFE_NO_PAD.encode(serde_json::to_vec(&claims).unwrap())
+        )
+    }
+
+    /// 现场快照的构造（ownership 用的 refresh token 与 access token 单独给）。
+    fn extern_tokens(refresh_token: &str, access_token: &str) -> ExternTokens {
+        ExternTokens {
+            id_token: "id".into(),
+            access_token: access_token.into(),
+            refresh_token: refresh_token.into(),
+        }
+    }
+
+    /// 回写判定表（`TODO-2`）：ownership 是硬门、只在确实更新时才采纳、判不了一律拒绝。
+    #[test]
+    fn adoption_requires_ownership_and_a_newer_token() {
+        let ours = credential();
+        let newer = ours.expires_at + 3_600;
+        let access = jwt_with(serde_json::json!({
+            "https://api.openai.com/auth": {"chatgpt_account_id": "acct-new"}
+        }));
+
+        // ① 另一个账号（用户自己 codex login 的那份）：refresh token 不吻合 → 拒绝
+        let theirs = ExternTokens {
+            refresh_token: "someone-elses".into(),
+            ..extern_tokens("refresh", &access)
+        };
+        let rejected = adopt_plan(&ours, &theirs, Some(newer));
+        assert!(
+            matches!(&rejected, AdoptDecision::Reject(reason) if reason.contains("refresh token")),
+            "{rejected:?}"
+        );
+
+        // ② 凭据不全 → 拒绝（三个 token 都得在）
+        for theirs in [
+            ExternTokens {
+                id_token: String::new(),
+                ..extern_tokens("refresh", "a.b.c")
+            },
+            ExternTokens {
+                access_token: String::new(),
+                ..extern_tokens("refresh", "a.b.c")
+            },
+            ExternTokens {
+                refresh_token: String::new(),
+                ..extern_tokens("refresh", "a.b.c")
+            },
+        ] {
+            assert!(
+                matches!(
+                    adopt_plan(&ours, &theirs, Some(newer)),
+                    AdoptDecision::Reject(_)
+                ),
+                "{theirs:?}"
+            );
+        }
+
+        // ③ 读不出有效期 → 拒绝（绝不替它编一个）
+        let theirs = extern_tokens("refresh", &access);
+        assert!(
+            matches!(adopt_plan(&ours, &theirs, None), AdoptDecision::Reject(reason) if reason.contains("有效期"))
+        );
+
+        // ④ 不比 apim 的新（相同或更早）→ 跳过，不写盘
+        for exp in [ours.expires_at, ours.expires_at - 1] {
+            assert!(
+                matches!(
+                    adopt_plan(&ours, &theirs, Some(exp)),
+                    AdoptDecision::Skip(_)
+                ),
+                "exp={exp}"
+            );
+        }
+
+        // ⑤ 同账号 + 确实更新 → 采纳；只动 token 与有效期
+        let AdoptDecision::Adopt(next) = adopt_plan(&ours, &theirs, Some(newer)) else {
+            panic!("同账号且更新时应当采纳");
+        };
+        assert_eq!(next.access_token, access);
+        assert_eq!(next.expires_at, newer);
+        assert_eq!(
+            next.account_id, "acct-new",
+            "account id 从新 access token 推导"
+        );
+        assert_eq!(next.refresh_token, "refresh");
+        assert_eq!(next.id_token, "id");
+        // 身份字段一律保留 apim 自己那份（它们是 apim 的注册身份，auth.json 里也没有）
+        assert_eq!(next.client_id, ours.client_id);
+        assert_eq!(next.host_id, ours.host_id);
+        assert_eq!(next.subject, ours.subject);
+        assert_eq!(next.email, ours.email);
+        assert_eq!(next.scopes, ours.scopes);
+        assert_eq!(next.codex_family, ours.codex_family);
+
+        // ⑥ 是合法 JWT 但没有 account id claim → 采纳，沿用旧 account id
+        let no_account = jwt_with(serde_json::json!({"exp": newer, "sub": "u"}));
+        let theirs = extern_tokens("refresh", &no_account);
+        let AdoptDecision::Adopt(next) = adopt_plan(&ours, &theirs, Some(newer)) else {
+            panic!("token 本身有效就该采纳，account id 推导不出只影响那一个字段");
+        };
+        assert_eq!(next.account_id, ours.account_id);
+        assert_eq!(next.access_token, no_account);
+    }
+
+    /// 正式入口：有效期由现场那份 access token 自己给出；读不出就拒绝。
+    #[test]
+    fn adoption_entry_point_reads_the_expiry_from_the_token_itself() {
+        let ours = credential();
+        let exp = ours.expires_at + 60;
+        let access = jwt_with(serde_json::json!({ "exp": exp }));
+        assert_eq!(access_token_exp(&access), Some(exp));
+        assert_eq!(access_token_exp("not-a-jwt"), None);
+        assert_eq!(
+            access_token_exp(&jwt_with(serde_json::json!({"sub": "s"}))),
+            None,
+            "没有 exp claim"
+        );
+
+        let theirs = extern_tokens("refresh", &access);
+        assert!(
+            matches!(plan_adoption(&ours, &theirs), AdoptDecision::Adopt(_)),
+            "有效期比 apim 新就该采纳"
+        );
+        let theirs = extern_tokens("refresh", "not-a-jwt");
+        assert!(
+            matches!(plan_adoption(&ours, &theirs), AdoptDecision::Reject(_)),
+            "读不出有效期就拒绝"
+        );
     }
 }
