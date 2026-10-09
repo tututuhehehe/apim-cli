@@ -20,5 +20,6 @@
 | [ADR-0006](0006-oauth-deliberate-tradeoffs.md) | OAuth 的四个有意取舍（不是缺陷，别再改回去） | Accepted |
 | [ADR-0007](0007-tolerated-small-duplications.md) | 容忍三处小重复（附动手触发条件） | Accepted |
 | [ADR-0008](0008-oauth-stays-builtin-openai-only.md) | OAuth 只服务内置 `openai`，不做「凭据按厂商存」 | Accepted |
+| [ADR-0009](0009-one-way-adoption-from-codex.md) | 单向采纳：只读 Codex 现场，永不写 `auth.json` | Accepted |
 
-> 来源：ADR-0001~0005、0007 由本机 `DEV-NOTES.local.md` §2 迁入（2026-10-09）；ADR-0006 由 §3.12 迁入；ADR-0008 由 `TODO-1` 的取向决议产生（2026-10-09）。
+> 来源：ADR-0001~0005、0007 由本机 `DEV-NOTES.local.md` §2 迁入（2026-10-09）；ADR-0006 由 §3.12 迁入；ADR-0008 由 `TODO-1` 的取向决议产生；ADR-0009 由 `.scratch/oauth-credential-sync/`（`TODO-2`）的实现决议产生。
