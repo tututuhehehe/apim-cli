@@ -134,6 +134,55 @@ fn save(dir: &Path, cred: &Credential) -> Result<()> {
     crate::config::write_private(&path(dir), &text)
 }
 
+/// 派生写者开始写盘前读到的那份凭据的**身份**（`None` = 当时还没凭据）。
+///
+/// 只存身份（`client_id` + `refresh_token`）而不是整份凭据：刷新本来就会改
+/// `access_token` / `expires_at`，比整份会让自己的第二次写盘被自己跳过；而这两个字段
+/// 能唯一标识「一次授权」，正好用来回答「磁盘上那份还是不是我们读的那份」。
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct WriteBaseline {
+    identity: Option<(String, String)>,
+}
+
+/// 派生写者的基线：`load` 到的那份凭据（或没有）。
+pub(crate) fn baseline_of(loaded: Option<&Credential>) -> WriteBaseline {
+    WriteBaseline {
+        identity: loaded.map(|c| (c.client_id.clone(), c.refresh_token.clone())),
+    }
+}
+
+/// 一次受限写盘的结果。
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum WriteOutcome {
+    Written,
+    /// 磁盘上那份已经**不是我们读的那份**了（登录落盘 / 注销）→ 本次结果作废，不写
+    Superseded,
+}
+
+/// 受限写（compare-and-swap）：只有磁盘上那份**还是我们读的那份**才写。
+///
+/// 登录是**权威写**（`save`，无条件 —— 它定义「现在这份」）；一切**从已加载快照派生**
+/// 出来的写（刷新、以及官方路的回写）必须走这里，否则登录任务与在途探针会互相覆盖
+/// （`TODO-12`）：用户看到「已连接」，磁盘上却是旧凭据。
+///
+/// 重读磁盘在写锁**内**做（比较必须原子），锁不跨 await；写仍走 `config::write_private`
+/// （tmp + rename + **建文件时就 0600**）。读不出来（文件被删 / 坏 JSON）一律当作
+/// 「不是我读的那份」：CAS 的前提是**能证明**身份，证不出来就不写。
+pub(crate) fn save_guarded(
+    dir: &Path,
+    cred: &Credential,
+    baseline: &WriteBaseline,
+) -> Result<WriteOutcome> {
+    fs::create_dir_all(dir)?;
+    let text = serde_json::to_string_pretty(cred)?;
+    let _guard = write_lock();
+    if baseline_of(load(dir).ok().flatten().as_ref()) != *baseline {
+        return Ok(WriteOutcome::Superseded);
+    }
+    crate::config::write_private(&path(dir), &text)?;
+    Ok(WriteOutcome::Written)
+}
+
 /// 凭据/诊断日志的**进程内**写锁。
 ///
 /// `config::write_private` 的 tmp 名只带进程号（跨进程唯一），所以同一进程里的两个写者
@@ -670,24 +719,34 @@ fn derive_account_from_access(access: &str, log: &mut AttemptLog) -> Option<Stri
 fn persist_refreshed(
     dir: &Path,
     c: &mut Credential,
+    baseline: &mut WriteBaseline,
     log: &mut AttemptLog,
     derive: impl Fn(&str, &mut AttemptLog) -> Option<String>,
-) -> Result<()> {
-    save(dir, c)?;
+) -> Result<WriteOutcome> {
+    if save_guarded(dir, c, baseline)? == WriteOutcome::Superseded {
+        return Ok(WriteOutcome::Superseded);
+    }
+    // 写成功了：基线推进成「刚写进去的那份」——否则第二次写盘会把自己跳过（account id 补不上）
+    *baseline = baseline_of(Some(c));
     if let Some(account) = derive(&c.access_token, log) {
         c.account_id = account;
-        save(dir, c)?;
+        if save_guarded(dir, c, baseline)? == WriteOutcome::Written {
+            *baseline = baseline_of(Some(c));
+        }
     }
-    Ok(())
+    Ok(WriteOutcome::Written)
 }
 
 /// POST **之后**的合并与落盘（注入点是响应而不是传输：测试不需要真实的 token 端点）。
+///
+/// `Ok(None)` = 磁盘上那份被换掉了（登录落盘 / 注销）：本次结果作废，调用方重读后重试。
 fn refresh_from_response(
     dir: &Path,
     mut c: Credential,
     r: TokenResponse,
+    baseline: &mut WriteBaseline,
     log: &mut AttemptLog,
-) -> Result<Credential> {
+) -> Result<Option<Credential>> {
     c.access_token = r.access_token;
     c.expires_at = now() + r.expires_in;
     let rotated = r.refresh_token.filter(|s| !s.is_empty());
@@ -701,21 +760,26 @@ fn refresh_from_response(
     if !r.scope.is_empty() {
         c.scopes = scopes(&r.scope)
     }
-    persist_refreshed(dir, &mut c, log, derive_account_from_access)?;
-    Ok(c)
+    match persist_refreshed(dir, &mut c, baseline, log, derive_account_from_access)? {
+        WriteOutcome::Written => Ok(Some(c)),
+        WriteOutcome::Superseded => Ok(None),
+    }
 }
 
-async fn refresh(dir: &Path, c: Credential, http: &Client) -> Result<Credential> {
+/// `Ok(None)` = 登录（或注销）在本次刷新期间改动了磁盘：本次结果作废，不写盘。
+async fn refresh(dir: &Path, c: Credential, http: &Client) -> Result<Option<Credential>> {
     if c.expires_at > now() + 60 {
-        return Ok(c);
+        return Ok(Some(c));
     }
     let mut log = AttemptLog::new();
+    // 基线要在**任何修改之前**取：下面 `refresh_from_response` 会轮换 refresh_token
+    let mut baseline = baseline_of(Some(&c));
     let r = token_grant(http, &refresh_form(&c), "刷新 token", &mut log)
         .await
         .inspect_err(|_| log.save(dir))?;
-    let c = refresh_from_response(dir, c, r, &mut log)?;
+    let out = refresh_from_response(dir, c, r, &mut baseline, &mut log)?;
     log.save(dir);
-    Ok(c)
+    Ok(out)
 }
 
 /// 从 Codex 现场读回的 token 快照（由 `clients/codex` 解析 `auth.json` 得到）。
@@ -968,10 +1032,28 @@ pub async fn fetch_usage(dir: &Path) -> Result<Option<Usage>> {
     fetch_usage_locked(dir).await
 }
 
+/// 一次用量查询在「凭据被换掉」时最多试几次。
+///
+/// 第二次就够了：重读拿到的是登录刚写进去的那份，`refresh` 会因未到期直接返回它。
+const USAGE_ATTEMPTS: usize = 2;
+
 async fn fetch_usage_locked(dir: &Path) -> Result<Option<Usage>> {
-    let Some(c) = load(dir)? else { return Ok(None) };
-    let http = client()?;
-    let c = refresh(dir, c, &http).await?;
+    for _ in 0..USAGE_ATTEMPTS {
+        let Some(c) = load(dir)? else { return Ok(None) };
+        let http = client()?;
+        // `None` = 本次刷新期间磁盘被登录（或注销）改动了：结果作废，重读一次再来
+        let Some(c) = refresh(dir, c, &http).await? else {
+            continue;
+        };
+        return query_usage(&http, &c).await;
+    }
+    // 连续两次都被人换掉（登录窗口内很常见）：这一轮没有读数，也**不报错** ——
+    // 下一个节奏点自然会读到新凭据，而弹一个错只会让刚登录的用户看到红色。
+    Ok(None)
+}
+
+/// 拿到一份可用凭据之后真正打用量接口（刷新与重试都在外面，这里只管读）。
+async fn query_usage(http: &Client, c: &Credential) -> Result<Option<Usage>> {
     if !c.codex_family && !c.scopes.iter().any(|s| s == REQUIRED_SCOPE) {
         bail!("OAuth 凭据未获 Codex 用量权限，请重新登录")
     }
@@ -1276,7 +1358,10 @@ mod tests {
         let mut c = credential();
         c.expires_at = now() + 3_600;
         let http = client().unwrap();
-        let out = refresh(&p, c.clone(), &http).await.unwrap();
+        let out = refresh(&p, c.clone(), &http)
+            .await
+            .unwrap()
+            .expect("没到期就直接把凭据还回来（不是 None）");
         assert_eq!(out.access_token, c.access_token);
         assert_eq!(out.refresh_token, c.refresh_token);
         assert!(
@@ -1380,7 +1465,9 @@ mod tests {
         let between = std::cell::RefCell::new(None);
         let probe = p.clone();
         let mut log = AttemptLog::new();
-        persist_refreshed(&p, &mut c, &mut log, |_, _| {
+        // 目录里本来没有凭据：基线就是「没有」
+        let mut baseline = baseline_of(None);
+        persist_refreshed(&p, &mut c, &mut baseline, &mut log, |_, _| {
             *between.borrow_mut() = load(&probe).unwrap();
             Some("acct-new".into())
         })
@@ -1414,7 +1501,8 @@ mod tests {
         c.account_id = "acct-old".into();
 
         let mut log = AttemptLog::new();
-        persist_refreshed(&p, &mut c, &mut log, |_, log| {
+        let mut baseline = baseline_of(None);
+        persist_refreshed(&p, &mut c, &mut baseline, &mut log, |_, log| {
             log.step("推导不出 account id".to_string());
             None
         })
@@ -1441,6 +1529,7 @@ mod tests {
         c.account_id = "acct-old".into();
 
         let mut log = AttemptLog::new();
+        let mut baseline = baseline_of(None);
         let out = refresh_from_response(
             &p,
             c,
@@ -1451,9 +1540,11 @@ mod tests {
                 id_token: None,
                 scope: String::new(),
             },
+            &mut baseline,
             &mut log,
         )
-        .unwrap();
+        .unwrap()
+        .expect("基线相同就该写盘");
         assert_eq!(out.access_token, "new");
         assert_eq!(out.refresh_token, "rt-old", "没轮换就沿用旧的");
         assert_eq!(out.id_token, "id-old");
@@ -1467,6 +1558,7 @@ mod tests {
         assert_eq!(load(&p).unwrap().unwrap().access_token, "new");
 
         // 轮换 + 新 id_token + 新 scope：全部采纳
+        // （同一个基线变量：第一次写盘成功后它已经推进到「刚写进去的那份」，见 persist_refreshed）
         let mut log = AttemptLog::new();
         let out = refresh_from_response(
             &p,
@@ -1478,9 +1570,11 @@ mod tests {
                 id_token: Some("id-new".into()),
                 scope: "scope-a scope-b".into(),
             },
+            &mut baseline,
             &mut log,
         )
-        .unwrap();
+        .unwrap()
+        .expect("基线已推进，第二次写盘不应被自己跳过");
         assert_eq!(out.refresh_token, "rt-new");
         assert_eq!(out.id_token, "id-new");
         assert_eq!(
@@ -1623,5 +1717,128 @@ mod tests {
             matches!(plan_adoption(&ours, &theirs), AdoptDecision::Reject(_)),
             "读不出有效期就拒绝"
         );
+    }
+
+    /// 写入闸（`TODO-12`）：登录先落盘之后，拿着旧基线的派生写者不能再把它覆盖回去。
+    /// 这就是用户可见的那个故障 —— 「底栅说已连接，磁盘上却是旧凭据」。
+    #[test]
+    fn a_stale_derived_writer_cannot_overwrite_a_fresh_login() {
+        let p = dir("write-gate-login");
+        let stale_loaded = credential(); // 探针 load 到的那份（旧）
+        let mut rotated = stale_loaded.clone();
+        rotated.refresh_token = "rotated".into();
+        rotated.access_token = "stale.access".into();
+        let baseline = baseline_of(Some(&stale_loaded));
+
+        // 登录（权威写，无条件）落盘了一份新的
+        let mut fresh = credential();
+        fresh.refresh_token = "fresh-from-login".into();
+        fresh.access_token = "fresh.access".into();
+        save(&p, &fresh).unwrap();
+
+        // 在途刷新随后才写 → 被跳过，磁盘保留登录那份
+        assert_eq!(
+            save_guarded(&p, &rotated, &baseline).unwrap(),
+            WriteOutcome::Superseded
+        );
+        let on_disk = load(&p).unwrap().unwrap();
+        assert_eq!(on_disk.refresh_token, "fresh-from-login");
+        assert_eq!(on_disk.access_token, "fresh.access");
+        let _ = fs::remove_dir_all(p);
+    }
+
+    /// 注销（`remove`）之后，在途刷新不得把凭据写回来：基线是「有」、磁盘是「没有」。
+    #[test]
+    fn a_stale_writer_cannot_resurrect_a_removed_credential() {
+        let p = dir("write-gate-logout");
+        let loaded = credential();
+        let baseline = baseline_of(Some(&loaded));
+        save(&p, &loaded).unwrap();
+        remove(&p).unwrap();
+
+        assert_eq!(
+            save_guarded(&p, &loaded, &baseline).unwrap(),
+            WriteOutcome::Superseded
+        );
+        assert!(load(&p).unwrap().is_none(), "注销之后不该被在途刷新复活");
+        let _ = fs::remove_dir_all(p);
+    }
+
+    /// 基线判定的四种情形（身份 = `client_id` + `refresh_token`）。
+    #[test]
+    fn the_write_gate_only_writes_for_a_matching_identity() {
+        let p = dir("write-gate-table");
+        let original = credential();
+
+        // ① 磁盘没有 + 基线没有 → 写（首次写入）
+        assert_eq!(
+            save_guarded(&p, &original, &baseline_of(None)).unwrap(),
+            WriteOutcome::Written
+        );
+        // ② 磁盘有 + 基线相同 → 写；access_token / expires_at 变了也算同一份
+        //    （身份只认两个字段，否则刷新的第二次写盘会把自己跳过）
+        let mut refreshed = original.clone();
+        refreshed.access_token = "newer".into();
+        refreshed.expires_at = original.expires_at + 60;
+        assert_eq!(
+            save_guarded(&p, &refreshed, &baseline_of(Some(&original))).unwrap(),
+            WriteOutcome::Written
+        );
+        // ③ refresh token 变了（换了授权）→ 跳过
+        let mut relogged = original.clone();
+        relogged.refresh_token = "another-grant".into();
+        assert_eq!(
+            save_guarded(&p, &original, &baseline_of(Some(&relogged))).unwrap(),
+            WriteOutcome::Superseded
+        );
+        // ④ client_id 变了 → 跳过
+        let mut other_client = original.clone();
+        other_client.client_id = "oaiapp-other".into();
+        assert_eq!(
+            save_guarded(&p, &original, &baseline_of(Some(&other_client))).unwrap(),
+            WriteOutcome::Superseded
+        );
+        // ⑤ 磁盘有 + 基线没有（登录在我们 load 之后落了盘）→ 跳过
+        assert_eq!(
+            save_guarded(&p, &original, &baseline_of(None)).unwrap(),
+            WriteOutcome::Superseded
+        );
+        let _ = fs::remove_dir_all(p);
+    }
+
+    /// 当前文件读不出来（坏 JSON）一律不写：CAS 的前提是能**证明**身份。
+    #[test]
+    fn the_write_gate_refuses_when_the_current_file_cannot_be_read() {
+        let p = dir("write-gate-corrupt");
+        let ours = credential();
+        save(&p, &ours).unwrap();
+        fs::write(path(&p), "{oops").unwrap();
+        assert_eq!(
+            save_guarded(&p, &ours, &baseline_of(Some(&ours))).unwrap(),
+            WriteOutcome::Superseded
+        );
+        assert_eq!(
+            fs::read_to_string(path(&p)).unwrap(),
+            "{oops",
+            "坏文件也不该被盖掉"
+        );
+        let _ = fs::remove_dir_all(p);
+    }
+
+    /// 受限写同样走私有写：**建文件时就 0600**（红线）。
+    #[cfg(unix)]
+    #[test]
+    fn the_write_gate_keeps_the_credential_private() {
+        use std::os::unix::fs::PermissionsExt;
+        let p = dir("write-gate-mode");
+        assert_eq!(
+            save_guarded(&p, &credential(), &baseline_of(None)).unwrap(),
+            WriteOutcome::Written
+        );
+        assert_eq!(
+            fs::metadata(path(&p)).unwrap().permissions().mode() & 0o777,
+            0o600
+        );
+        let _ = fs::remove_dir_all(p);
     }
 }
