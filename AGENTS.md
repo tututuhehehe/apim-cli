@@ -202,3 +202,13 @@ apim provider ls --json                # CLI 冒烟（跑已发布版；本地�
 ```
 
 > 开发期不要 `cargo install --path .`（见约定 10）。
+
+## Agent skills
+
+### Issue tracker
+
+票据与规格作为本地 markdown 放在 `.scratch/<feature-slug>/` 下；长期缺口台账仍是 `docs/TODO.md`。见 `docs/agents/issue-tracker.md`。
+
+### Domain docs
+
+单上下文：仓库根 `GLOSSARY.md` + `docs/adr/`（目前都还没建，按需惰性创建）。见 `docs/agents/domain.md`。
