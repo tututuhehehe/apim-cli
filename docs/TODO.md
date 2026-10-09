@@ -48,23 +48,6 @@ OpenAI、能配密钥、却永远登录不上，也没有 AUTH 行 —— README
   厂商各自有 OAuth 凭据，`x` 该写谁的？合理的口径是「写当前厂商那一份，覆盖前照旧备份」，
   但要在 UI 上说清「Codex 官方登录位只有一个，导入 B 会顶掉 A」。
 
-## TODO-2 · 官方路导入不回写同步 codex 刷新的 token
-
-> **已开工**（2026-10-09）：ticket 在 `.scratch/oauth-credential-sync/`（票 03 采纳判定 / 04 接线）。收尾时删掉本条。
-
-**现状**：`x` 把 apim 的 OAuth 凭据写进 `~/.codex/auth.json` 之后，codex 自己会刷新 access token
-（`last_refresh` / access token 的 `exp` 到期前 5 分钟）并把新 token 只写回 `auth.json`。apim 那份
-`~/.config/apim/openai-oauth.json` 就此落后。
-
-**为什么现在不做**：服务端通常不轮换 refresh token（轮换时 apim 那份才真的失效），代价只是
-「codex 刷新过之后 apim 的额度查询要用旧 access token 自己再刷一次」；真要同步得做
-compare-and-swap（cc-switch 那套：比对 auth.json 里还是不是我们写进去的 refresh token 再回写），
-是个独立功能。
-
-**要做的**：在 `refresh_active_keys` 的节奏上顺带回读 `auth.json`，若它带着 ChatGPT 凭据且
-refresh token 比 apim 那份新，就回写 apim 的凭据（写前校验 ownership，别把用户自己 `codex login`
-的另一个账号抄进 apim）。
-
 ## TODO-3 · 评审留下的报告级小账（都只在这份手改/边缘配置里出现，暂不做）
 
 来自两轮子代理评审（见 `target/apim-review/`）的 P2，父会话决定**只记账**，不在这轮改：
@@ -146,24 +129,6 @@ refresh token 比 apim 那份新，就回写 apim 的凭据（写前校验 owner
 
 **第一步**：ubuntu runner 上 `rustup target add x86_64-pc-windows-msvc && cargo check --target x86_64-pc-windows-msvc`（`check` 不需要链接，能覆盖 `cfg(windows)` 的编译；`--all-targets` 还能捎带编 Windows 下的测试代码）。
 
-## TODO-12 · OAuth 凭据的 last-writer-wins 竞争（登录任务 vs 在途探针）（原 §3.9）
-
-> **已开工**（2026-10-09）：ticket 在 `.scratch/oauth-credential-sync/`（票 02 写入闸）。收尾时删掉本条。
-
-**现状**：`save` 只串行化了「写」本身（`WRITE_LOCK` 只包住落盘），但 `fetch_usage` 是「load → 可能 POST 刷新 → save」的读改写：探针在登录落盘前 load、在登录落盘后 save，会把刚登进去的凭据覆盖回旧那份，而 toast 已经说「已连接」。
-
-**触发条件**：自动刷新（5 分钟一档）正好落在登录窗口（≤10 分钟）内，且凭据已过期（才真的会 POST）。
-
-**第一步**：`save` 里做 compare-and-swap（在 `WRITE_LOCK` 内重读，`client_id` + `refresh_token` 变了就跳过），或在 `oauth_login_running` 时不派发 OAuth 探针。评审结论：属报告项，不阻塞当时合并。
-
-## TODO-13 · `refresh` 的档位门与落盘顺序没有测试守住（原 §3.10）
-
-> **已开工**（2026-10-09）：作为 `.scratch/oauth-credential-sync/` 的票 01 prefactor 并入本轮（写入闸需要 refresh 路径有测试守卫）。收尾时删掉本条。
-
-**现状**：`next_refresh_token` 与 `IdTokenIdentity` 这两个抽出来的 helper 有测试，但「refresh 只对非 codex 档位带 `resource`」和「新 token 先落盘再推导 account id」只有读代码验证——改回去不会有测试变红。
-
-**第一步**：抽一个纯函数 `refresh_form(cred) -> Vec<(&str,&str)>` 再表驱动测它；落盘顺序可以抽「先 save 后 derive」的编排函数，用假 http 闭包注入（真守死要引 HTTP mock server）。
-
 ## TODO-14 · 超线文件拆分（原 §3.11 + §2.6）
 
 **现状**：`src/openai_auth.rs` 已 1212 行，超过「单文件 ≤ ~300 行」约定（`AGENTS.md` 目录树已同步，但没拆）。既有超线（非某轮引入）：`app/mod.rs` 1751、`app/modal.rs` 869、`ui/inspector.rs` 717、`recipe/mod.rs` 543、`tui.rs` 468、`probe/mod.rs` 378、`app/providers_store.rs` 334；另有 `ui/import.rs` 307 行临界（见 `docs/adr/0007`）。
@@ -178,11 +143,26 @@ refresh token 比 apim 那份新，就回写 apim 的凭据（写前校验 owner
 
 **截至 v0.1.7**：brew formula 的 sha256 已与 Release 资产、本地下载三方核对一致。
 
+## TODO-16 · 「写入闸跳过 → 重读重试一次」的编排没有自动化测试
+
+**现状**：`.scratch/oauth-credential-sync/` 的票 02 引入的写入闸在「磁盘上那份已经不是我们读的那份」时会
+跳过写盘，`fetch_usage` 据此重读并整体重试一次（上界写死为 2 次尝试）。**「跳过 → 重试」这条编排路径
+没有测试覆盖**，只靠代码审查 + 那个上界；票 02 与票 04 的 `## Done` 都记了这个缺口。
+
+**为什么现在不做**：要测它就得让刷新的 POST 与用量的 GET 可替换，而本仓至今没有 HTTP mock server
+（这条代价原先就记在台账里，已随本轮结清）。红线（登录不被覆盖、注销不复活、0600、无新全局
+状态）都有测试，缺的只是「重试那一跳」；代价是这一跳改错**不会变红**。
+
+**第一步**：把「一次尝试」的编排抽成一个吃注入闭包的薄函数（先例：`cli/uninstall` 的
+`run_with(args, exe, dir)` 注入点、`app/import` 的 runner 注入点），表驱动断言「跳过 → 再来一次」与
+「连续两次跳过 → 本轮无读数、不报错」。真想要端到端再引一个只在测试里起的最小 HTTP server —— 那是
+另一条更大的账，别搭在这条里。
+
 ---
 
 ## 已归位（不在本文件）
 
-- **「故意不做 + 理由」与已定取舍** → `docs/adr/`（ADR-0001~0007，含 OAuth 的四个有意取舍与三处容忍的重复）
+- **「故意不做 + 理由」与已定取舍** → `docs/adr/`（索引见 `docs/adr/README.md`；含 OAuth 的有意取舍与三处容忍的重复）
 - **发布流程教训**（管道退出码、brew 漏更、npm 平台子包超时） → `docs/RELEASING.md`“踩过的坑与教训”
 - **进行中的特性** → `.scratch/<feature-slug>/`（见 `docs/agents/issue-tracker.md`）
 - **已完成的历史** → `CHANGELOG.md`
