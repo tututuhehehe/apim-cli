@@ -12,6 +12,12 @@
 
 ## 目录结构（按功能单元拆分，单文件 ≤ ~300 行）
 
+> 树的**覆盖口径**（`tests/docs.rs` 的守卫按它查，三层）：
+> 1. 树里写下的每个路径都必须**真实存在**；
+> 2. `src/` 下每个**非测试**源文件都要被点名（测试代码按目录归拢：`tests/` 目录或 `tests.rs`）；
+> 3. 仓库根下每个**非隐藏目录**（除 `target/`）都要被点名。
+> 树承载「职责一句话」，不是 `ls` 的复制品 —— 目录内部的文件不必逐一亮相，亮相了就必须存在。
+
 ```
 src/
 ├── main.rs            入口 + 参数分发（无参数=TUI；--snapshot* 渲染快照；其余走 CLI）
@@ -30,7 +36,7 @@ src/
 │   │   ├── catalog.rs 模型目录：手写官方迷你条目（~1KB/模型）+ `codex debug models` 端到端校验
 │   │   ├── active.rs  回读 ~/.codex/config.toml 现场：现在在用哪把密钥（★ 角标）
 │   │   └── tests/     沙盒测试（按源码文件分）+ 真机 opt-in（`--ignored codex_real_end_to_end`）
-│   └── pi/            Pi 适配
+│   └── pi/            Pi 适配（mod.rs 只是门面：子模块声明 + 再导出 + agent_dir/pi_provider_key）
 │       ├── import.rs  ~/.pi/agent 两份 JSON 的写入编排 + 回滚（provider 键一律 `apim-` 前缀）
 │       ├── config.rs  models.json 读写（保留未知字段 + 备份 + 原子 600）；auth.json 只读
 │       ├── verify.rs  跑 `pi --list-models` 让 pi 自己确认勾选的模型都在
@@ -43,7 +49,7 @@ src/
 │   ├── keys.rs        key ls/add/set/rm（token 只走 stdin，不进 argv）
 │   ├── query.rs       status（并发探活+额度，--json）/ copy / use
 │   ├── uninstall/     apim uninstall：mod.rs 流程 / cleanup.rs 删程序（含软链）与 --purge 配置目录 / report.rs 人机两套输出
-│   ├── update/        apim update：channel.rs 认渠道 / install_sh.rs 下载+校验+执行 / http.rs 取 tag
+│   ├── update/        apim update：mod.rs 流程 / channel.rs 认渠道 / install_sh.rs 下载+校验+执行 / http.rs 取 tag
 │   └── tests.rs       CLI 沙盒测试（临时目录全流程）
 ├── form/              通用表单引擎（密钥表单、厂商表单共用）
 │   ├── mod.rs         Field（文本/选择/勾选框/只读）、Form、按键分发、表单构造器（PF_* 字段下标）
@@ -82,6 +88,7 @@ src/
 └── probe/             并发探活（health + balance 并发，tokio::join!）
     ├── mod.rs         Health/ProbeResult、client、http 一路（探活 + 模型列表拉取的鉴权请求）
     └── script.rs      脚本执行器（env 注入/超时 kill/stderr 截断 200/stdout 50 行上限）+ expand_tilde
+tests/                文档守卫（仓库级不变量：目录树 ↔ `src/`），跑 `cargo test` 即执行
 docs/
 ├── quota-script-prompt.md  额度脚本代写提示词（整体复制给 AI Agent 用）
 ├── TODO.md             维护者待办（已知缺口 + 真要做得动哪些地方）
