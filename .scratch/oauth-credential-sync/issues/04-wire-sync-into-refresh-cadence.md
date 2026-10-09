@@ -12,4 +12,5 @@ Blocked by: 02, 03
 - [ ] 幂等：连续跑两次节奏点，第二次不写盘（同一份 token 不会被反复写）
 - [ ] README **双语**同步改口：`README.md` 与 `README.zh-CN.md` 里「codex 刷新后新 token 只在 `auth.json` 里 / apim 不回写同步」的说法，改成「apim 会在能证明是自己写进去的那份时采纳新 token；服务端轮换 refresh token 时仍可能需要按 `o` 重新授权」（两版一起改，约定 7）
 - [ ] 不碰 `codex_route` / 额度面板 / AUTH 行的显示与交互（`ADR-0008`）
+- [ ] **删掉票 03 引入的 7 处 `#[allow(dead_code)]`**（5 处在凭据模块、2 处在 codex 适配层）—— 接线之后那批入口真的有人用了，这 7 行就该消失
 - [ ] `cargo fmt && cargo clippy -q --all-targets -- -W clippy::all` 零警告 + `cargo test` 全绿
