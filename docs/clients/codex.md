@@ -21,6 +21,8 @@ Codex **官方路**时，Codex 侧的契约与实测约束。
 - **`config.toml` 允许同时定义多个 `[model_providers.*]`，但同一时刻只有顶层 `model_provider` 指向的
   那个生效** → apim **只切换激活项**：旧 provider 块、用户手写的注释、`[projects]`、`[tui]`、`notify`
   一律保留，**不做整体重写**。
+- **想自己多套并存**（不经过 apim 切来切去）：用官方的 `codex --profile <name>` +
+  `~/.codex/<name>.config.toml`（apim 不碰这条机制）。
 - 激活的那个 provider 子表（`[model_providers.<key>]`）是 apim **整块替换**的：同一块里 `env_key` /
   `auth` 与 `experimental_bearer_token` 不能共存，替换掉旧块就没有它们。
 - **模型不写在 `config.toml` 里**：写在 `model_catalog_json` 指向的独立 JSON
@@ -130,6 +132,8 @@ account_id}` + `last_refresh`。
   `ps | grep codex app-server` 这类无关进程 / 用户会话也杀掉。**只扫描一次、只杀扫描到的 pid**（重扫会
   杀掉刚起、已加载新配置的 daemon）。
 - **官方路**成功后照旧重启 daemon。
+- **想确认该不该重启 / 重启有没有生效**：`ps -o pid,lstart,command -p $(pgrep -f "app-server" | tr '\n' ',')`
+  看那几个 daemon 的启动时间 —— 早于导入时间就说明它还缓存着旧目录。
 
 ## 怎么认出正在用的密钥（`★` 与 `codex_route`）
 

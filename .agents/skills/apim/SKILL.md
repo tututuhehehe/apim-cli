@@ -171,25 +171,11 @@ apim status <id> --json
 - [ ] mock 三条路径测过、`sh -n` 语法通过、`chmod +x`
 - [ ] 注册后 `apim status <id> --json` 用用户的 key 真实验证过
 
-## 一键导入到 Codex / Pi（TUI `x` 键，暂无 CLI）
+## 一键导入到 Codex / Pi
 
-密钥表里选中一把密钥按 `x`：把「这把密钥 + 它的厂商 + 勾选的模型」写进某个客户端配置。步骤：选客户端（Codex 或 Pi）→ 勾选模型（列表与 `m` 键一致；`空格` 勾选、`a` 全选、`/` 搜索、`⏎` 下一步）→（**只有 Codex**）选默认模型（只勾一个时自动跳过；Pi 没有这一步）。导入后会让客户端自己读一遍新配置（`codex debug models` / `pi --list-models`）确认成功，密钥行上会打 ★ 角标（`★C`、多个客户端叠成 `★C,P`）标出**当前真正在用**的那几把 —— 它是回读客户端配置现场算出来的，你手改了它们的配置（换 token / 切走默认 provider），下次重算（切厂商 / `r` / 自动刷新）★ 就消失。
-
-**Pi 那边只写一处**：`~/.pi/agent/models.json` 的 `providers.apim-<厂商id>`（`baseUrl` + `api: openai-completions` + `apiKey` + 勾选的 models）；**`settings.json` 一个字都不动**（默认 provider / 默认模型 / `enabledModels` 都是用户自己的设定，Pi 也没有「选默认模型」这一步）；provider 键带 `apim-` 前缀避免蹭到 pi 内置 provider 的 baseUrl（**只管写**）；模型条目只写 id/name/reasoning/input，其余用 pi 的保守默认；不需要重启，打开 `/model` 即可；只走 API key（订阅是 `/login` 的 OAuth，apim 不碰）。★ 判定只认 key：扫 pi 配置里的**每一份**凭据（`auth.json`（`/login` 存的，只读）+ `models.json` 里每个 `apiKey`）与 apim 密钥比 token，所以 provider 叫什么名字都行、`defaultProvider` 是哪个也不影响。
-
-**模型不在 `config.toml` 里**（Codex 的机制，GLM / DeepSeek 官方 Codex 文档也是这个写法）：顶层只写 `model_provider` / `model` / `model_reasoning_effort` / `model_catalog_json="apim-models.json"`，模型元数据（每模型都带 medium/high/xhigh/max 四档思考等级，默认档固定 high；面板不让人挑）在 `~/.codex/apim-models.json`。apim 侧**不存**导入记录（★ 是回读 codex 配置现场算的）。
-
-**导入完 apim 会自动重启 codex 的 app-server 守护进程**（`APIM_NO_RESTART_CODEX=1` 可关）：codex 只在 daemon 启动时读一次模型目录，不重启时 `codex exec` 已能用新模型、但 `/model` 里还是旧表。判断方法：`ps -o pid,lstart,command -p $(pgrep -f "app-server" | tr '\n' ',')` 看 daemon 启动时间是否早于导入时间。
-
-几个容易踩的：
-
-- Codex **可以同时定义多个** `[model_providers.*]`，但同一时刻只有 `model_provider` 指向的那个生效 → apim 只切激活项，旧 provider 块保留（想要多套并存就用官方的 `codex --profile <name>` + `~/.codex/<name>.config.toml`）。
-- **`wire_api = "chat"` 已被 codex 删除**（0.134+ 硬报错）。中转站必须提供 `/v1/responses`；加客户端 = `src/clients/mod.rs` 加 `Agent` 变体 + 新建 `src/clients/<id>/` 子模块（写哪里 / 怎么写 / 怎么校验 / 怎么重载 / 怎么认出正在用的密钥）+ 补一条分派；面板（`app/import`、`ui/import`）不用改，文案全取自 `Agent::{label,badge,config_hint,reload_hint,default_model_step}`。**不要**给客户端写 YAML 配方（约定 2 的数据化范围是厂商协议；客户端之间不是同一套协议）。「选默认模型」这一步已经按客户端可关：`Agent::default_model_step()` 返回 `None` 就跳过（pi 就是这样），`ImportRequest.default_model` / `ImportReport.model` 都是 `Option`。
-
-导入面板的模型列表与 `m` 键**完全一致**（同一个解析函数，只取模型名）；**不做端点能力筛选** —— `supported_endpoint_types` 是 new-api 后台的端点映射、会漏报（实测 ikun 把 `gpt-6-sol` 标成只有 `openai`，实际能用），拿它筛选会藏掉能用的模型。
-- 模型条目是照 codex 官方字段手写的**迷你条目**（GLM/DeepSeek 官方文档 + cc-switch 实测模板，~1.5KB/模型，带 `supports_reasoning_summaries` 与 `supports_parallel_tool_calls` 以兼容老版 codex）；导入完用 `codex debug models` 反向校验。
-- 厂商 id 撞保留名（`openai`/`ollama`/`lmstudio`/`amazon-bedrock*`）时写成 `apim-openai`。
-- 验证：`cargo run -- --snapshot-import` / `--snapshot-import-models` 看渲染；`cargo test -- codex_real_end_to_end --ignored --nocapture` 跑真机端到端（需本机装 codex）。
+入口是密钥表里按 `x`（**只有 TUI**；CLI 入口还没做，见 `docs/TODO.md` 的 `TODO-9`）。契约与真机实测坑在
+`docs/clients/codex.md` / `docs/clients/pi.md`（写哪几个键、怎么校验、怎么重载、`★` 怎么认、为什么要重启
+codex daemon）；用户向的步骤与按键在 `README.md` 的 *One-click import into Codex / Pi*。本 skill 只讲额度脚本。
 
 ## 红线
 

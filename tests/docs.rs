@@ -25,6 +25,9 @@ const RULE_SKILL_NO_SURFACE: &str = "SKILL 不定义命令面（只允许引用 
 const RULE_BANNED_COMMAND: &str = "那条安装禁令只许待在它的家里";
 const RULE_DOC_MAP: &str = "每个长期文档都要能从 Doc map 走到";
 const RULE_CLIENT_MODULE_DOC: &str = "客户端模块头只留「负责什么 + 契约在哪」";
+const RULE_SKILL_SCOPE: &str = "SKILL 只讲额度脚本（命令面与客户端契约都在别处）";
+/// SKILL 的行数上限（ratchet：只允许变小或保持）。本票把导入节压成指针后的实测值。
+const SKILL_LINES_MAX: usize = 183;
 /// 客户端适配模块头的行数上限（ratchet：只允许变小或保持）。实施时最大的是 `clients/mod.rs` 7 行。
 const CLIENT_MODULE_DOC_MAX_LINES: usize = 10;
 /// 那条禁令的字面串（`R4` 只认它，写法与 `AGENTS.md` 约定 10 一致）。
@@ -832,6 +835,38 @@ fn the_client_modules_point_at_their_contract() {
                 "补一行：细节见 `docs/clients/<id>.md` —— 改这个文件之前先读它",
             ));
         }
+    }
+    assert!(problems.is_empty(), "{}", report(problems));
+}
+
+/// 10 · SKILL 只讲它独有的知识（额度脚本）。
+///
+/// 两条断言：① 必须留着指向客户端契约的家（`docs/clients/`）的指针 —— 读 skill 的 agent 要被送过去；
+/// ② 行数 ratchet（只允许变小或保持）—— 防「客户端那一节又长回来」。与第 6 条（`apim` 命令面）分工：
+/// 那条管命令，这条管体量与指针。
+#[test]
+fn the_skill_only_keeps_what_no_one_else_documents() {
+    let root = repo_root();
+    let skill = root.join(".agents/skills/apim/SKILL.md");
+    let text = fs::read_to_string(&skill).expect("读 SKILL.md");
+    let mut problems = Vec::new();
+    if !text.contains("docs/clients/") {
+        problems.push(problem(
+            ".agents/skills/apim/SKILL.md",
+            RULE_SKILL_SCOPE,
+            "没有指向客户端契约的家（`docs/clients/`）的指针",
+            "补一句：契约与真机坑见 `docs/clients/codex.md` / `pi.md`",
+        ));
+    }
+    let lines = text.lines().count();
+    if lines > SKILL_LINES_MAX {
+        let over = lines - SKILL_LINES_MAX;
+        problems.push(problem(
+            ".agents/skills/apim/SKILL.md",
+            RULE_SKILL_SCOPE,
+            &format!("行数 {lines} 超过上限 {SKILL_LINES_MAX}（多了 {over} 行）"),
+            "把重复的内容压成指针（客户端契约 → `docs/clients/*.md`；命令面 → README）；**不要**直接调大上限",
+        ));
     }
     assert!(problems.is_empty(), "{}", report(problems));
 }
