@@ -158,6 +158,58 @@ OpenAI、能配密钥、却永远登录不上，也没有 AUTH 行 —— README
 「连续两次跳过 → 本轮无读数、不报错」。真想要端到端再引一个只在测试里起的最小 HTTP server —— 那是
 另一条更大的账，别搭在这条里。
 
+## TODO-17 · 评审结论落在 `target/` 里（`cargo clean` 就没）
+
+**现状**：`TODO-3` 开头的「来自两轮子代理评审（见 `target/apim-review/`）」指向构建产物目录 —— `target/`
+在 `.gitignore` 里，一条 `cargo clean` 或换台机器就没了。committed 文档把可追溯性挂在 `target/` 上，
+等于没有证据。
+
+**为什么现在不做**：它不影响任何行为，只是证据链；当初的评审结论已经逐条落进 `TODO-3` 的正文，能追的
+部分已经追回来了。
+
+**第一步**：把那句改成「结论已内联在下面各条」；往后新评审的结论直接落到 `docs/`（或写进对应台账条目），
+不再引用 `target/`。
+
+## TODO-18 · 客户端子模块的模块头注释仍与 `docs/clients/*.md` 重复（`B06` 的剩余部分）
+
+**现状**：`ADR-0010` 落地时把 `clients/codex/{mod,official}.rs` 与 `clients/pi/mod.rs` 的模块头压成了
+「负责什么 + 契约在哪 + 子模块分工」，其余 9 个仍把契约细节抄在 `//!` 里（括号里是当时的 `//!` 行数）：
+`clients/mod.rs`(16)、`clients/codex/catalog.rs`(18)、`clients/codex/import.rs`(13)、
+`clients/codex/restart.rs`(7)、`clients/codex/active.rs`(6)、`clients/pi/active.rs`(17)、
+`clients/pi/import.rs`(10)、`clients/pi/config.rs`(9)、`clients/pi/verify.rs`(4)。
+
+**为什么现在不做**：模块头注释不是常驻上下文（打开那个文件才读），收益只有「单一来源」一条；且它们此刻
+与文档一致，没有漂移。
+
+**第一步**：逐个对照 `docs/clients/{codex,pi}.md`，把已在文档里的细节删成一行指针（保留「这个模块负责
+什么」）；删之前确认每条细节在文档里都有。
+
+## TODO-19 · SKILL 的「一键导入」整节与 `docs/clients/*.md` 重复
+
+**现状**：`.agents/skills/apim/SKILL.md` 的「一键导入到 Codex / Pi」整节（约 21 行）讲的是客户端契约，
+而那一类信息的家是 `docs/clients/{codex,pi}.md`（`ADR-0010` 起的规矩）。有两处**只有这一节有**：
+查 codex daemon 启动时间的那条 `ps -o pid,lstart,command -p $(pgrep -f "app-server" …)` 诊断命令，以及
+`codex --profile <name>` 多套并存的提示。
+
+**为什么现在不做**：那两处得先有个家（否则删节即丢信息）；`docs-single-source` 票 06 的清单只管命令表。
+
+**第一步**：先把那两条并进 `docs/clients/codex.md`，再把整节压成一句指向 `docs/clients/{codex,pi}.md`
+的指针。
+
+## TODO-20 · 约定 12（`apim update` 三条渠道）该收成指针
+
+**现状**：`AGENTS.md` 约定 12 是全文最大的一行（约 1000 字符）：渠道识别规则 + 三条硬约束（URL 钉 tag、
+按 `install.sh.sha256` 校验摘要、`APIM_INSTALL_DIR` 先 canonicalize、npm 子包版本交叉核对、加渠道要同步
+改哪几处）。其中「为什么不能靠 `on: release: [published]`」已经指向 `docs/RELEASING.md`，机制细节却仍只
+在 AGENTS.md 里。
+
+**为什么现在不做**：它的家应该是 `docs/RELEASING.md`（渠道表与发布教训都在那儿）或新开
+`docs/update-channels.md` —— 两种落法要选一个，而 `docs-single-source` 票 07 没把它列进清单（当时不敢替
+RELEASING 扩角色）。
+
+**第一步**：决定家（倾向 `docs/RELEASING.md` 加一节「更新渠道的契约」），把机制搬过去，约定 12 压成
+「三条渠道 + 指针」；顺手让那一节与 `src/cli/update/channel.rs` 的 `Channel` 对齐（加渠道时同步改）。
+
 ---
 
 ## 已归位（不在本文件）

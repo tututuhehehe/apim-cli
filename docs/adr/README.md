@@ -21,5 +21,7 @@
 | [ADR-0007](0007-tolerated-small-duplications.md) | 容忍三处小重复（附动手触发条件） | Accepted |
 | [ADR-0008](0008-oauth-stays-builtin-openai-only.md) | OAuth 只服务内置 `openai`，不做「凭据按厂商存」 | Accepted |
 | [ADR-0009](0009-one-way-adoption-from-codex.md) | 单向采纳：只读 Codex 现场，永不写 `auth.json` | Accepted |
+| [ADR-0010](0010-doc-facts-have-one-home.md) | 文档事实单一来源：Doc map 是唯一索引，守卫钉住 | Accepted |
 
 > 来源：ADR-0001~0005、0007 由本机 `DEV-NOTES.local.md` §2 迁入（2026-10-09）；ADR-0006 由 §3.12 迁入；ADR-0008 由 `TODO-1` 的取向决议产生；ADR-0009 由 `.scratch/oauth-credential-sync/`（`TODO-2`）的实现决议产生。
+> 追加：ADR-0010 由 `.scratch/docs-single-source/`（文档层 retro）落地。
