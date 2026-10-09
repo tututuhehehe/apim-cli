@@ -148,6 +148,25 @@ brew test tututuhehehe/tap/apim
 - **本地回退**：`git revert <提交>`（整体）或 `git checkout <提交> -- <路径>`（局部）
 - **npm 撤版**：发布 72 小时内可 `npm unpublish <pkg>@<ver>`；超时只能发新版本覆盖（`npm deprecate` 标记旧版）
 
+## 8. 踩过的坑与教训（别再踩）
+
+### 8.1 管道的退出码是最后一段命令的
+
+- `cmd | tail` 的退出码是 `tail` 的；`curl | shasum` 的退出码是 `shasum` 的 —— `set -eu` 抓不到前者失败。
+- 实例：`scripts/update-tap.sh` 发版时网络抽风，4 个 sha256 全被写成**空输入的哈希**并推送（已改「先下到临时文件 → 校验非空 → 再算摘要」，四个摘要全拿到才开始重写 formula）。
+- **判 CI 结论一律** `gh run view <id> --json status,conclusion`；用 `gh run watch --exit-status | tail` 会把 failure 看成成功（实际误报过一次）。
+
+### 8.2 Homebrew tap 最容易漏
+
+- 0.1.4 / 0.1.5 / 0.1.6 三次发版都漏了 §6，tap 从 0.1.3 直接跳到 0.1.7（brew 用户一直停在 0.1.3）。
+- **规矩**：§5（npm）验证通过后**立刻**做 §6，不要留到最后。
+- 本机实测 brew 渠道前，先把 npm 那份卸掉 —— 两条渠道都落 `/opt/homebrew/bin/apim`，会撞（与 `AGENTS.md` 约定 10 同类）。
+
+### 8.3 npm 平台子包可见性要等
+
+- `scripts/publish-npm.mjs` 原先只等 180s；v0.1.7 时 darwin-x64 超时 → 脚本按设计在发主包**之前**退出 → 5 个子包已发、主包仍 0.1.6（需人工重跑 `gh workflow run publish-npm.yml -f version=X.Y.Z`）。
+- 已把超时放宽到 **600s**；「主包最后发」的安全顺序不变。
+
 ## 各渠道速查
 
 | 渠道 | 命令 | 是否需手动维护 |
