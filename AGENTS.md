@@ -124,7 +124,7 @@ recipes/              内置 recipe ×4（deepseek/openai/moonshot/openrouter，
 10. **开发跑本地代码一律 `cargo run -- <args>`，别 `cargo install --path .`**：本机 `apim` 是 npm 装的正试版（`/opt/homebrew/bin/apim`），PATH 里 `~/.cargo/bin` 排在它之后 —— `cargo install` 出的二进制不会被 `apim` 命中，只会变成过期副本让人误判「改了没生效」。
 
 11. **一键导入到 Codex（`x` 键）**：契约细节（`config.toml` 怎么写、模型目录条目、官方路 `auth.json`、`★` 回读、`AUTH` 行、内置 `openai` 不可复制）与真机实测坑见 `docs/clients/codex.md` —— 改这条路之前先读它。红线：含密钥的落盘（`config.toml` 与它的 `.apim.bak`）一律 **600，且建文件时即 600**。
-12. **`apim update` 只认三条渠道**（install.sh / npm / Homebrew，见 `docs/RELEASING.md` 的速查表）：`src/cli/update.rs` 按可执行文件路径认渠道（npm 看 `node_modules/apim-cli`、brew 看 `Cellar/apim`，其余当 install.sh 装的裸二进制），裸二进制那条复用官方 install.sh，但**不是 `curl | sh`**：URL 钉到本次要更新到的 tag、下载到临时文件、先做形状校验（是 shell 脚本 / 是本仓库安装器 / 含 sha256 校验）、再按 Release 发布的 `install.sh.sha256` 校验摘要（**拿不到摘要就拒绝执行**），最后用 `sh <file>` 跑；`APIM_INSTALL_DIR` 钉在当前二进制的**真实位置**（先 canonicalize，否则符号链接会被替换掉）保证原地更新。**`target/` 下的开发构建与 `~/.cargo/bin` 里的 cargo 副本一律不更新**（前者会被 Release 覆盖掉开发二进制，后者是 `cargo install` 留下的、被 PATH 遮挡的多余副本）。**npm 渠道更新前要同时核对主包与**当前平台子包**的版本**（`npm view <pkg> version`）：npm 的发布是异步的、主包会先可见，而 npm 对 optional 依赖失败是静默跳过 —— 只看主包就会装出一个跑不起来的 shim（v0.1.4 实测）。落后于 GitHub tag 时报出两个版本号并拒绝安装（`--force` 可越过）。加渠道要同时改 `Channel` 与它的识别规则、测试和 RELEASING 的表；`apim uninstall` 复用同一套 `detect_channel`，新渠道的卸载动作会被 `uninstall_program` 的穷尽 `match` 拦下（编译器逼你补），但提示语与单测仍要手工过一遍。
+12. **`apim update` 只认三条渠道**（install.sh / npm / Homebrew）：渠道识别规则、三条硬约束（钉 tag + 摘要校验、npm 主包与平台子包版本交叉核对、`target/` 与 `~/.cargo/bin` 一律不更新）与「加一条渠道要同步改什么」见 `docs/RELEASING.md` 的「更新渠道的契约」一节 —— 动 `src/cli/update/` 或 `src/cli/uninstall/` 之前先读它。
 
 13. **加一个客户端（Claude Code / pi …）就是三处改动**，别在面板里写客户端专属分支：
     - `src/clients/mod.rs`：加 `Agent` 变体（所有 `match` 会被编译器强制补全）+ 一条分派（`label/badge/config_hint/reload_hint/default_model_step/active_key_ids/import/needs_reload/reload`）；`ImportRequest` / `ImportReport` 是共用的（面板只读这两个形状，不认客户端细节）；
@@ -174,7 +174,7 @@ apim provider ls --json                # CLI 冒烟（跑已发布版；本地�
 | 厂商类型（模型 / 非模型）的语义与不适用面 | `docs/provider-kinds.md` |
 | 项目技能（面向 agent 的用法包） | `.agents/skills/*/SKILL.md` |
 | 领域文档 / 工单规格（agent 开工前先读什么） | `docs/agents/*.md` |
-| 发版手册 / 额度脚本提示词 | `docs/RELEASING.md`、`docs/quota-script-prompt.md` |
+| 发版手册（含更新渠道的契约）/ 额度脚本提示词 | `docs/RELEASING.md`、`docs/quota-script-prompt.md` |
 | 本机私有笔记（只在本机有效、不宜进仓库） | `DEV-NOTES.local.md`（gitignored） |
 | 会话交接 | 不落库：`/skill:handoff` 写到 `$TMPDIR` |
 

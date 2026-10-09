@@ -26,6 +26,16 @@ const RULE_BANNED_COMMAND: &str = "那条安装禁令只许待在它的家里";
 const RULE_DOC_MAP: &str = "每个长期文档都要能从 Doc map 走到";
 const RULE_CLIENT_MODULE_DOC: &str = "客户端模块头只留「负责什么 + 契约在哪」";
 const RULE_SKILL_SCOPE: &str = "SKILL 只讲额度脚本（命令面与客户端契约都在别处）";
+const RULE_UPDATE_CONTRACT: &str = "更新渠道的机制住在 docs/RELEASING.md";
+/// 只该在「更新渠道的契约」一节里出现的标识符 —— `AGENTS.md` 里出现 = 细节长回去了。
+const UPDATE_CONTRACT_TOKENS: [&str; 6] = [
+    "detect_channel",
+    "install.sh.sha256",
+    "APIM_INSTALL_DIR",
+    "npm view",
+    "Cellar/apim",
+    "node_modules/apim-cli",
+];
 /// SKILL 的行数上限（ratchet：只允许变小或保持）。本票把导入节压成指针后的实测值。
 const SKILL_LINES_MAX: usize = 183;
 /// 客户端适配模块头的行数上限（ratchet：只允许变小或保持）。实施时最大的是 `clients/mod.rs` 7 行。
@@ -319,7 +329,7 @@ const AGENTS_LINES_MAX: usize = 181;
 ///
 /// 行数单独守不住：把一段长文拆成十行反而更容易「看起来没变多」，而**真正花掉的是字符 / token**。
 /// 所以两个一起钉。
-const AGENTS_CHARS_MAX: usize = 12508;
+const AGENTS_CHARS_MAX: usize = 11848;
 
 /// 4 · AGENTS.md 的体量只允许变小或保持（ratchet）。
 ///
@@ -867,6 +877,39 @@ fn the_skill_only_keeps_what_no_one_else_documents() {
             &format!("行数 {lines} 超过上限 {SKILL_LINES_MAX}（多了 {over} 行）"),
             "把重复的内容压成指针（客户端契约 → `docs/clients/*.md`；命令面 → README）；**不要**直接调大上限",
         ));
+    }
+    assert!(problems.is_empty(), "{}", report(problems));
+}
+
+/// 11 · 更新渠道的机制住在 `docs/RELEASING.md`。
+///
+/// 两个方向都查：① `AGENTS.md` 里**不许**出现那批只属于机制节的标识符（长回去就红）；
+/// ② `docs/RELEASING.md` 必须真的含其中两个 —— 证明是**搬**过去了，不只是删掉了。
+#[test]
+fn the_update_channel_contract_lives_in_its_doc() {
+    let root = repo_root();
+    let agents = fs::read_to_string(root.join("AGENTS.md")).expect("读 AGENTS.md");
+    let releasing = fs::read_to_string(root.join("docs/RELEASING.md")).expect("读 RELEASING.md");
+    let mut problems = Vec::new();
+    for token in UPDATE_CONTRACT_TOKENS {
+        if agents.contains(token) {
+            problems.push(problem(
+                "AGENTS.md",
+                RULE_UPDATE_CONTRACT,
+                &format!("出现了只在机制节里的 `{token}`"),
+                "把机制搬进 `docs/RELEASING.md` 的「更新渠道的契约」一节；AGENTS.md 只留一行 + 指针",
+            ));
+        }
+    }
+    for token in ["detect_channel", "install.sh.sha256"] {
+        if !releasing.contains(token) {
+            problems.push(problem(
+                "docs/RELEASING.md",
+                RULE_UPDATE_CONTRACT,
+                &format!("「更新渠道的契约」一节里没有 `{token}`（机制没搬过来？）"),
+                "把渠道识别 / 摘要校验那几条补回那一节",
+            ));
+        }
     }
     assert!(problems.is_empty(), "{}", report(problems));
 }

@@ -180,4 +180,33 @@ brew test tututuhehehe/tap/apim
 
 > `cargo install apim` / `cargo binstall apim` 需要 crate 发布到 crates.io（`Cargo.toml` 的 `publish = false` 要先删）。binstall 元数据已配好，发布后即可用。
 
-> `apim update` 只认**三条**自动更新渠道：install.sh（裸二进制：下载**该 tag 的**官方脚本 → 形状校验 + 按 `install.sh.sha256` 校验摘要 → 再执行，钉住原安装目录）、npm（`npm install -g apim-cli@latest`）、Homebrew（`brew upgrade apim`）。**`target/` 下的开发构建与 `~/.cargo/bin` 里的 cargo 副本会被拒绝更新**（返回 None + 给指引），前者免得把开发二进制覆盖成 Release 版，后者是 `cargo install` 留下的多余副本 —— 所以上表里 `cargo install` / `cargo binstall` 那两行**不在** `apim update` 覆盖范围内。新增渠道时同步改 `src/cli/update/channel.rs` 的 `Channel` 与识别规则、单测与本节。`apim uninstall` 复用同一套识别（`update::channel::detect_channel`）：新渠道的卸载动作会被 `src/cli/uninstall/mod.rs` 里 `uninstall_program` 的穷尽 `match` 拦下，编译器会逼你补 —— 但识别规则、命令行与会话提示仍要手工确认。
+> `apim update` 只从**装它的那条渠道**更新自己（三条：install.sh 裸二进制 / npm / Homebrew）；
+> 各条渠道的识别规则、三条硬约束、以及「加一条渠道要同步改什么」见下一节 **更新渠道的契约**。
+
+## 更新渠道的契约（`apim update` / `apim uninstall`）
+
+渠道识别看可执行文件的路径（`src/cli/update/channel.rs` 的 `Channel`）：
+
+| 渠道 | 识别规则 |
+|---|---|
+| npm | 路径里有 `node_modules/apim-cli` |
+| Homebrew | 路径里有 `Cellar/apim` |
+| install.sh（裸二进制） | 以上都不是 |
+
+三条硬约束：
+
+1. **install.sh 渠道不是 `curl | sh`**：URL 钉到本次要更新到的 **tag** → 下载到临时文件 → 形状校验（是
+   shell 脚本 / 是本仓库的安装器 / 含 sha256 校验）→ 按 Release 发布的 `install.sh.sha256` 校验摘要
+   （**拿不到摘要就拒绝执行**）→ 才 `sh <file>`。`APIM_INSTALL_DIR` 钉在当前二进制的**真实位置**
+   （先 `canonicalize`，否则会原地替换掉一个符号链接而不是它指向的文件）。
+2. **`target/` 下的开发构建与 `~/.cargo/bin` 里的 cargo 副本一律不更新**（前者免得 Release 版覆盖掉开发
+   二进制，后者是 `cargo install` 留下的、被 PATH 遮挡的多余副本）—— 所以上面速查表里 `cargo install` /
+   `cargo binstall` 那两行**不在** `apim update` 覆盖范围内。
+3. **npm 渠道更新前要同时核对主包与当前平台子包的版本**（`npm view <pkg> version`）：npm 的发布是异步的、
+   主包会先可见，而 npm 对 optional 依赖失败是静默跳过 —— 只看主包就会装出一个跑不起来的 shim（v0.1.4
+   实测）。落后于 GitHub tag 时报出两个版本号并拒绝安装（`--force` 可越过）。
+
+**要加一条渠道**，四处一起改：`src/cli/update/channel.rs` 的 `Channel`、它的识别规则、单测、上面这张表。
+`apim uninstall` 复用同一套识别（`update::channel::detect_channel`）：新渠道的卸载动作会被
+`src/cli/uninstall/mod.rs` 里 `uninstall_program` 的穷尽 `match` 拦下（编译器会逼你补），但**识别规则、
+命令行与会话提示仍要手工确认**。
