@@ -78,7 +78,13 @@ OpenAI、能配密钥、却永远登录不上，也没有 AUTH 行 —— README
 
 ## TODO-4 · 【待验】install.sh 渠道的完整 happy path（原 §3.1）
 
-**现状**：最后一段（摘要校验通过 → 执行 install.sh）还没真机跑过：最新的 `v0.1.1` 早于 CI 改动、没有 `install.sh.sha256` 资产（实测 404 → 正确地 fail closed）。
+**现状（2026-10-10，v0.1.9 发版时**部分**验证）**：已验到的 —— ① 裸二进制（放 `/tmp/apim-bare/apim`）被正确识别成 `install.sh（裸二进制）` 渠道并打印出路径；② 能解析出 `最新：v0.1.9`（v0.1.9 是第一个带 `install.sh.sha256` 资产的 Release，该资产已确认存在）；③ 下载失败时 **fail-closed**：二进制一字未动，报错明确（「查不到最新版本号，无法确定要校验哪个版本的 install.sh」），5 次重试都是这个结果。
+
+**还没验到的**：`摘要校验通过 → 执行 install.sh → 原地替换` 那一段 —— 卡在本机到 `github.com` / `raw.githubusercontent.com` 的网络（同一窗口 `api.github.com` 与 `gh` 一切正常；**不是代码问题**）。
+
+**第一步**（网络恢复后重跑）：`gh release download v0.1.8 -p 'apim-v0.1.8-aarch64-apple-darwin.tar.gz'` → 解包成裸二进制放 `/tmp/apim-bare/apim` → `/tmp/apim-bare/apim update --force` → 期望打印 `sha256 校验通过` 且版本变 0.1.9。**别放 `~/.local/bin`**：它在 PATH 里排在 `/opt/homebrew/bin` 之前，会遮住 npm 那份 `apim`（本次就是因此改用 `/tmp`，等价且不侵入）。
+
+**现状（原）**：最后一段（摘要校验通过 → 执行 install.sh）还没真机跑过：最新的 `v0.1.1` 早于 CI 改动、没有 `install.sh.sha256` 资产（实测 404 → 正确地 fail closed）。
 
 **第一步**：等第一个带该资产的 Release 发出来后，把一个「裸二进制」放在 `~/.local/bin/apim`，跑 `apim update --force`，确认输出 `sha256 校验通过` 且二进制被原地替换、版本更新。
 
@@ -128,20 +134,6 @@ OpenAI、能配密钥、却永远登录不上，也没有 AUTH 行 —— README
 **现状**：`src/openai_auth.rs` 已 1212 行，超过「单文件 ≤ ~300 行」约定（`AGENTS.md` 目录树已同步，但没拆）。既有超线（非某轮引入）：`app/mod.rs` 1751、`app/modal.rs` 869、`ui/inspector.rs` 717、`recipe/mod.rs` 543、`tui.rs` 468、`probe/mod.rs` 378、`app/providers_store.rs` 334；另有 `ui/import.rs` 307 行临界（见 `docs/adr/0007`）。
 
 **第一步**：按现有缝拆 `openai_auth/{mod,profile,login,token,usage,log}.rs`（遵守 `AGENTS.md` 约定 4：`crate::openai_auth::*` 路径不变）；其余大文件另开条目。
-
-## TODO-15 · brew 渠道长期落后 + 发布清单要把 brew 前置（原 §3.14）
-
-**状态（2026-10-09）**：清单顺序那半**已做** —— `docs/RELEASING.md` 顶部新增「发版顺序（别跳步）」，并给 §6 加了「紧跟 §5（npm）做完」的顺序要求。
-
-**只剩发版时的动作**：`scripts/update-tap.sh X.Y.Z` + `brew test`。注意本机实测前先把 npm 那份卸掉（两条渠道都落 `/opt/homebrew/bin/apim`，会撞）；截至 v0.1.7 formula 的 sha256 已三方核对一致。
-
-（以下保留原调研，只作留档）
-
-**现状**：tap 历史 `apim 0.1.3` → 直接跳到 `0.1.7`，也就是 0.1.4~0.1.6 三次发版**漏了 brew 这步**（与 TODO-10 同源），brew 用户一直停在 0.1.3。
-
-**第一步**：把「发版清单」里 brew 那步前置到 npm 验证之后立刻做（`scripts/update-tap.sh X.Y.Z`，且脚本现在下载失败会硬失败）；本机实测 brew 渠道要先把 npm 那份卸掉再 `brew install tututuhehehe/tap/apim`（两条渠道都往 `/opt/homebrew/bin/apim` 落，会撞）。发布教训已记进 `docs/RELEASING.md`。
-
-**截至 v0.1.7**：brew formula 的 sha256 已与 Release 资产、本地下载三方核对一致。
 
 ## TODO-16 · 「写入闸跳过 → 重读重试一次」的编排没有自动化测试
 
