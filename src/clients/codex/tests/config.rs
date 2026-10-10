@@ -5,7 +5,11 @@ use std::path::Path;
 
 use crate::clients::codex::config_file;
 
-use super::helpers::{assert_no_tmp, provider_write, temp_dir};
+// 前三个测试是跨平台的（只写 config.toml + 断言内容），后面两个才要 unix（0o600 / 符号链接）
+// → `assert_no_tmp` 单独带门，模块本身不带。
+#[cfg(unix)]
+use super::helpers::assert_no_tmp;
+use super::helpers::{provider_write, temp_dir};
 
 #[test]
 fn config_write_preserves_comments_and_other_providers() {

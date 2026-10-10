@@ -2,6 +2,8 @@
 
 use std::fs;
 
+// 前两个测试只解析表格（纯函数，跨平台），后面四个才要假 pi 脚本 → import 整行带门。
+#[cfg(unix)]
 use super::helpers::{fake_pi, fake_pi_failing, temp_dir, write_model_table};
 use crate::clients::pi::verify;
 

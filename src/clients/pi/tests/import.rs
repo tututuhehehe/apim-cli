@@ -4,7 +4,11 @@ use std::fs;
 
 use serde_json::Value;
 
-use super::helpers::{fake_pi, fake_pi_failing, request_for, temp_dir, write_model_table};
+// 未带门的那个测试（`missing_pi_binary_fails_before_writing`）只用跨平台的 `temp_dir` / `request_for`，
+// 其余都驱动假 pi 脚本（unix）→ import 拆两行，模块本身不带门。
+#[cfg(unix)]
+use super::helpers::{fake_pi, fake_pi_failing, write_model_table};
+use super::helpers::{request_for, temp_dir};
 use crate::clients::pi::import::import_in;
 use crate::clients::pi::{config, pi_provider_key};
 

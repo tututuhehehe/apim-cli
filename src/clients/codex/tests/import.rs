@@ -7,9 +7,11 @@ use serde_json::Value;
 use crate::clients::codex::catalog::CATALOG_FILE;
 use crate::clients::codex::import::{import_in, normalize_base_url, provider_key};
 
-use super::helpers::{
-    assert_no_tmp, fake_codex, fake_codex_with_empty_catalog, request_for, temp_dir,
-};
+// 未带门的三个测试只用跨平台的 `temp_dir` / `request_for`（纯函数与「没装 codex」的报错），
+// 其余测试驱动假 codex 脚本（unix）→ import 拆两行，别整模块带门。
+#[cfg(unix)]
+use super::helpers::{assert_no_tmp, fake_codex, fake_codex_with_empty_catalog};
+use super::helpers::{request_for, temp_dir};
 
 /// 写进去的东西必须能被「回读现场」认出来：writer 与 reader 不能各说各话
 /// （导入侧字段名 / base_url 归一化一旦漂移，★ 会静默失效而测试全绿）。

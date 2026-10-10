@@ -11,4 +11,7 @@ mod config;
 pub(super) mod helpers;
 mod import;
 mod real_codex;
+// 这个模块的测试全部驱动 unix-only 的东西（`is_codex_server` / `looks_like_wrapped_codex_server`
+// 本身就是 `#[cfg(unix)]`，靠 `ps` 认进程）→ 整模块带门，别让它的 import 在 Windows 上悬空。
+#[cfg(unix)]
 mod restart;
