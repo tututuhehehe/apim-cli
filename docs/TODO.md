@@ -137,6 +137,12 @@ OpenAI、能配密钥、却永远登录不上，也没有 AUTH 行 —— README
 
 ## TODO-15 · brew 渠道长期落后 + 发布清单要把 brew 前置（原 §3.14）
 
+**状态（2026-10-09）**：清单顺序那半**已做** —— `docs/RELEASING.md` 顶部新增「发版顺序（别跳步）」，并给 §6 加了「紧跟 §5（npm）做完」的顺序要求。
+
+**只剩发版时的动作**：`scripts/update-tap.sh X.Y.Z` + `brew test`。注意本机实测前先把 npm 那份卸掉（两条渠道都落 `/opt/homebrew/bin/apim`，会撞）；截至 v0.1.7 formula 的 sha256 已三方核对一致。
+
+（以下保留原调研，只作留档）
+
 **现状**：tap 历史 `apim 0.1.3` → 直接跳到 `0.1.7`，也就是 0.1.4~0.1.6 三次发版**漏了 brew 这步**（与 TODO-10 同源），brew 用户一直停在 0.1.3。
 
 **第一步**：把「发版清单」里 brew 那步前置到 npm 验证之后立刻做（`scripts/update-tap.sh X.Y.Z`，且脚本现在下载失败会硬失败）；本机实测 brew 渠道要先把 npm 那份卸掉再 `brew install tututuhehehe/tap/apim`（两条渠道都往 `/opt/homebrew/bin/apim` 落，会撞）。发布教训已记进 `docs/RELEASING.md`。

@@ -2,6 +2,18 @@
 
 维护者手册：怎么发一个版本，以及各分发渠道分别怎么更新。
 
+## 发版顺序（别跳步）
+
+**每一步验证通过再做下一步**：
+
+1. **§1 发版前检查**（fmt / clippy / test / MSRV `--locked` / JS 语法）
+2. **§2 改版本 + 记 CHANGELOG** → 提交
+3. **§3 打 tag** → 5 平台构建 → Release 转正 → npm 自动跟随发布
+4. **§4 验证 Release**（下载 + 校验 + 跑版本号）
+5. **§5 发布到 npm**（核对主包与当前平台子包版本）
+6. **§6 更新 Homebrew tap —— 紧跟 §5 做完，不要留到最后**（0.1.4~0.1.6 三次发版就是这么漏的，brew 用户停在 0.1.3；见 §8.2）
+7. **§7 回滚**（仅在出问题时）
+
 ## 版本号：单一事实来源
 
 唯一来源是 `Cargo.toml` 的 `version`。发版时改它 + 补 `CHANGELOG.md`，git tag 用 `v` 前缀（`v0.1.0`），npm 包版本不带 `v`。
@@ -120,6 +132,8 @@ node scripts/publish-npm.mjs X.Y.Z --out /tmp/apim-npm   # 只打包到 /tmp/api
 ```
 
 ## 6. 更新 Homebrew tap
+
+> **顺序要求**：这一步要在 §5（npm）验证通过后**立刻**做，不要留到最后 —— 历史上 0.1.4 / 0.1.5 / 0.1.6 都漏了它（见 §8.2）。
 
 tap 仓库：<https://github.com/tututuhehehe/homebrew-tap>（本地 clone 在 `../homebrew-tap`）。
 一条命令完成（重算 4 平台 sha256 → 重写 formula → commit + push）：
