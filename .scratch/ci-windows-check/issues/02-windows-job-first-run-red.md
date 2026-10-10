@@ -60,6 +60,8 @@ CI run `38037195245`，job「Windows 编译检查」：`cargo check --locked --a
 
 ## Done
 
+- **后续（2026-10-10，发版前归位）**：双向审计脚本已从 `.scratch/ci-windows-check/audit-cfg.py` 移到 **`scripts/audit-cfg.py`**（长期工具不该随轮次归档）；用法写进了 `ci.yml` 的 Windows job 注释 —— `python3 scripts/audit-cfg.py .`。
+
 - commit: `91a951d`（`91a951da6385`，5 个文件 + 审计脚本；票面回填在其后一次提交）
 - **本机验证（CI 之外的，能做的都做了）**：
   - `cargo fmt --all -- --check` → 无 diff
