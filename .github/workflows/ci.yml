@@ -60,3 +60,23 @@ jobs:
       # 而不是依赖解析碰运气。要升依赖并要求更新的 Rust，就同时把 rust-version 往上抬。
       - name: cargo check（MSRV）
         run: cargo check --locked --all-targets
+
+  windows:
+    name: Windows 编译检查（cfg(windows) 分支别等到发版才编）
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      # 目标就是 runner 自己的 host 目标（x86_64-pc-windows-msvc），不需要 rustup target add。
+      # **不在 ubuntu 上交叉 check**：cargo check 只跳过链接、不跳过 build script，而 ring 的
+      # build script 要为目标编译 C（要 Windows SDK / cl.exe）—— 实测 macOS 与 ubuntu 都会红。
+      - name: 安装 Rust 工具链
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: 缓存 cargo
+        uses: Swatinem/rust-cache@v2
+
+      # --locked：与 release.yml 的 Windows 构建同口径（锁文件与平台无关，跨平台依赖本来就在锁里）。
+      # --all-targets：连测试代码一起编 —— Windows 上编不过的两处测试模块就是这么露出来的。
+      - name: cargo check（Windows host target）
+        run: cargo check --locked --all-targets

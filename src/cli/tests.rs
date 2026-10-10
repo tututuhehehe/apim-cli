@@ -3,6 +3,7 @@
 use super::*;
 use anyhow::Result;
 use std::fs;
+#[cfg(unix)]
 use std::os::unix::fs::PermissionsExt;
 
 fn temp_ctx(name: &str) -> Ctx {
@@ -27,7 +28,10 @@ fn fake_script(ctx: &Ctx, name: &str, body: &str) -> String {
     fs::create_dir_all(&dir).unwrap();
     let path = dir.join(name);
     fs::write(&path, body).unwrap();
-    fs::set_permissions(&path, fs::Permissions::from_mode(0o755)).unwrap();
+    #[cfg(unix)]
+    {
+        fs::set_permissions(&path, fs::Permissions::from_mode(0o755)).unwrap();
+    }
     path.display().to_string()
 }
 

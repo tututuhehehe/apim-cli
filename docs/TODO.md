@@ -123,12 +123,6 @@ OpenAI、能配密钥、却永远登录不上，也没有 AUTH 行 —— README
 
 **第一步**：`npm install -g apim-cli` 后跑 `apim uninstall --yes`，确认 `node_modules/apim-cli*` 与 `.bin` shim 都没了；brew 同理。Windows 上「`apim.exe` 被本进程占住 → npm EBUSY」的提示也只是按文件占用常识写的（本机无 Windows），一并验。
 
-## TODO-11 · CI 加 Windows `cargo check`（原 §3.8）
-
-**现状**：`ci.yml` 只在 ubuntu 跑 fmt/clippy/test，`cfg(windows)` 分支只有 `release.yml` 打 tag 时才被编译 → 编译错要到发版才暴露（背景见 `docs/adr/0004`）。
-
-**第一步**：ubuntu runner 上 `rustup target add x86_64-pc-windows-msvc && cargo check --target x86_64-pc-windows-msvc`（`check` 不需要链接，能覆盖 `cfg(windows)` 的编译；`--all-targets` 还能捎带编 Windows 下的测试代码）。
-
 ## TODO-14 · 超线文件拆分（原 §3.11 + §2.6）
 
 **现状**：`src/openai_auth.rs` 已 1212 行，超过「单文件 ≤ ~300 行」约定（`AGENTS.md` 目录树已同步，但没拆）。既有超线（非某轮引入）：`app/mod.rs` 1751、`app/modal.rs` 869、`ui/inspector.rs` 717、`recipe/mod.rs` 543、`tui.rs` 468、`probe/mod.rs` 378、`app/providers_store.rs` 334；另有 `ui/import.rs` 307 行临界（见 `docs/adr/0007`）。

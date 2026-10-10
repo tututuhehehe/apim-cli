@@ -1,5 +1,6 @@
 use std::collections::HashMap;
 use std::fs;
+#[cfg(unix)]
 use std::os::unix::fs::PermissionsExt;
 use std::path::{Path, PathBuf};
 
@@ -43,7 +44,10 @@ fn real_script(scripts_dir: &Path, name: &str, body: &str) -> PathBuf {
     fs::create_dir_all(scripts_dir).unwrap();
     let path = scripts_dir.join(name);
     fs::write(&path, body).unwrap();
-    fs::set_permissions(&path, fs::Permissions::from_mode(0o755)).unwrap();
+    #[cfg(unix)]
+    {
+        fs::set_permissions(&path, fs::Permissions::from_mode(0o755)).unwrap();
+    }
     path
 }
 
@@ -107,8 +111,12 @@ fn duplicate_copies_recipe_and_script_as_independent_file() {
     let copied = script_copy.as_ref().expect("脚本应被复制");
     assert_eq!(*copied, scripts_dir.join("my-relay-copy-quota.sh"));
     assert_eq!(fs::read_to_string(copied).unwrap(), "#!/bin/sh\necho q\n");
-    let mode = fs::metadata(copied).unwrap().permissions().mode();
-    assert!(mode & 0o111 != 0, "可执行位要保留: {mode:o}");
+    #[cfg(unix)]
+    {
+        // Windows 上没有「可执行位」这回事，这条断言只在 unix 成立
+        let mode = fs::metadata(copied).unwrap().permissions().mode();
+        assert!(mode & 0o111 != 0, "可执行位要保留: {mode:o}");
+    }
     let balance = recipe.balance.as_ref().unwrap();
     let stored_cmd = balance.command.as_deref().unwrap();
     assert_eq!(
