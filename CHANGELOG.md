@@ -3,7 +3,7 @@
 本项目遵循 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.1.0/) 与
 [语义化版本](https://semver.org/lang/zh-CN/)。
 
-## [Unreleased]
+## [0.1.9] - 2026-10-09
 
 ### 修复
 
@@ -17,6 +17,10 @@
   token 写回 `~/.codex/auth.json`，apim 现在会在自己的刷新节奏里读回来，于是额度查询一直能用、不必再按
   `o` 重新授权。只有能证明那份是 apim 自己写进去的（refresh token 吻合）才采纳 —— 你自己 `codex login`
   的另一个账号绝不会被抄进来。
+
+### 安全
+
+- 升级 `rustls` 0.23.43 → 0.23.45（修 Dependabot 报的 medium 告警；`rustls` 是 `reqwest` 的间接依赖，只动 `Cargo.lock`）。
 
 ## [0.1.8] - 2026-10-09
 
@@ -260,7 +264,8 @@
 - `apim --version` 版本输出（供安装脚本与更新检测使用）
 - MIT 开源协议
 
-[Unreleased]: https://github.com/tututuhehehe/apim-cli/compare/v0.1.8...HEAD
+[Unreleased]: https://github.com/tututuhehehe/apim-cli/compare/v0.1.9...HEAD
+[0.1.9]: https://github.com/tututuhehehe/apim-cli/releases/tag/v0.1.9
 [0.1.8]: https://github.com/tututuhehehe/apim-cli/releases/tag/v0.1.8
 [0.1.7]: https://github.com/tututuhehehe/apim-cli/releases/tag/v0.1.7
 [0.1.6]: https://github.com/tututuhehehe/apim-cli/releases/tag/v0.1.6
