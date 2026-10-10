@@ -188,6 +188,12 @@ OpenAI、能配密钥、却永远登录不上，也没有 AUTH 行 —— README
 
 （以下保留当时的第一手调研原文，只作留档）
 
+> **独立复核补充（2026-10-09，另一个 agent 只读复核 `8593e08`）** —— 三条值得留给下一个人的事实：
+>
+> 1. **rustls 0.23.45 抬了两个依赖下限**：`rustls-webpki` 0.103.5 → **0.103.14**、`aws-lc-rs` 1.14 → **1.18**（optional）。本次 `--locked` 能只改两行就过，是因为锁里 webpki 已经是 **0.103.15** ≥ 0.103.14、而 `aws-lc-rs` **根本不在我们树里**（provider 是 ring：`reqwest` 的 `rustls-tls` → `__rustls-ring`）。**别以为 rustls 的小版本升级永远只需要动两行** —— 下限不满足时得连 webpki 一起动。
+> 2. `cli::update::http::tests::latest_tag_live` 实质是**网络**测试而不是 TLS 测试：`github.com` 不可达时它会**干等 30s 后超时**（同窗口 `curl` 连 TCP 都建不起来，而 `api.github.com` 正常）。它 `#[ignore]`、不进 CI 是对的；**谁把它接进 CI，谁就会得到一个慢速 flaky**。
+> 3. 为 `lru` 开的那一轮要注意：最新 `ratatui` 是 **0.30.2**，其 `rust-version` = **1.88.0**，**正好等于本仓声明的 MSRV（零余量）**。
+
 **现状（原）**：远端默认分支报 **2 条依赖漏洞**（1 moderate + 1 low，GitHub Dependabot alerts）；另有一条
 dependabot 分支 `dependabot/cargo/rustls-0.23.45` 挂在远端（`rustls` 是 `reqwest` 的间接依赖，`Cargo.toml`
 里没有直接声明）。本地 `main` 与远端同步、工作区干净。
