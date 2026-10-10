@@ -18,6 +18,13 @@ Blocked by: 无（可立即开工）
 
 它们**只在 `release.yml` 打 tag 时**才被编译 → 编译错要发到 5 平台构建里才现身。
 
+**分清楚两类（第一版票面写糊了，这里改正）**：
+
+- **产品代码**的 `#[cfg(windows)]` 分支（上表前三个）确实只在 `release.yml` 里编（`cargo build --release`）→ 它们坏了就是真·发版阻塞项，这是 `TODO-11` 的原意。
+- **测试代码**（`cli/uninstall/tests.rs:285`，以及本票修的那两个测试文件）**在 `release.yml` 里根本不会被编译** —— `cargo build --release` **不带 `--all-targets`**，不编测试。所以「Windows 上测试代码编不过」**从来不是发版阻塞项**，只是「这条 job 的 `--all-targets` 一上来就红」。
+
+因此这条 job 的收益也要如实描述：它能证明**Windows 上能编**，**不能证明 Windows 上的行为**（测试里的假脚本 / `0o755` / `ps` 本来就是 unix 语义，那些测试在 Windows 上也不会跑 —— job 只跑 `cargo check`，不跑 `cargo test`）。
+
 ## 做法（两条）
 
 ### ① job 落在 `windows-latest`，不是 ubuntu
@@ -83,3 +90,5 @@ cargo check --target x86_64-pc-windows-msvc --all-targets
   - `ci.yml` 结构核对：3 个 job（`check` / `msrv` / `windows`），新 job 与 `msrv` 同风格；`--locked` 与 `release.yml` 的 Windows 构建同口径
 - **偏离 spec（原方案）：一处，是必不得已。** 原定「ubuntu runner + `rustup target add` + `cargo check --target x86_64-pc-windows-msvc`」**物理上跑不通**（上面那条 ring 错误）。改用 `windows-latest` + native host target：不需要交叉工具链、不需要 `target add`，且 honor 了 `--locked`（与 release.yml 一致）。我只在 ubuntu 上找得到替代：`x86_64-pc-windows-gnu` + mingw 交叉（本机没有 mingw，要 `brew install mingw-w64`；而且那是另一个目标，不是发布用的 msvc）—— 如果你更想要「本机跑过」而非「跟发布目标一致」，告诉我，我换成那条。
 - **本票的检查边界（有意）**：Windows job 只跑 `cargo check`，**不跑 `cargo test`** —— 它管的是「Windows 上能编译吗」，不是「Windows 上测试跑得过吗」（测试里有 `sh` 脚本 / 可执行位这类 unix 语义）。这与 `TODO-11` 的原话（「编译错要发版才暴露」）一致。
+- **首跑红，已在票 02 修掉（同一目录）**：`## Done` 上面那段「否则这条 job 一上来就红」当时只说了修 `src/{cli,recipe}` 两处，**没发现还有 5 个测试模块引用了 unix 门内的 helper**（我只查了「unix-only 符号有没有带门」这一个方向）→ CI run `38037195245` 红。教训：**cfg 审计要双向查**，方法已写进票 02（`audit-cfg.py` 也放在本目录）。
+- 本票的 `现状` 里那句「编译错要发到 5 平台构建里才现身」已改正为「产品代码是发版阻塞项；测试代码 release.yml 根本不编」—— 见上面「分清楚两类」。
